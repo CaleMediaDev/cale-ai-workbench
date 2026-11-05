@@ -115,6 +115,25 @@ def test_installed_version_accepts_indented_mapping_with_document_markers(
     assert chrome_connector.installed_version() == "0.2.6"
 
 
+@pytest.mark.parametrize("directive", [
+    "%YAML 1.1\n",
+    "%YAML 1.2\n",
+    "%YAML 1.2 # manifest format\n",
+])
+def test_installed_version_accepts_directive_before_indented_mapping(
+    tmp_path, monkeypatch, directive
+):
+    plugin = tmp_path / "plugin"
+    plugin.mkdir()
+    (plugin / "plugin.yaml").write_text(
+        directive + "---\n  name: hermes-connector\n  version: 0.2.6\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(chrome_connector, "PLUGIN", plugin)
+
+    assert chrome_connector.installed_version() == "0.2.6"
+
+
 def test_installed_version_accepts_utf8_bom(tmp_path, monkeypatch):
     plugin = tmp_path / "plugin"
     plugin.mkdir()
@@ -172,6 +191,23 @@ def test_installed_version_does_not_strip_attached_hash(tmp_path, monkeypatch):
     assert chrome_connector.installed_version() == ""
 
 
+@pytest.mark.parametrize("contents", [
+    "version:0.2.6\n",
+    'version:"0.2.6"\n',
+    "version:'0.2.6'\n",
+])
+def test_installed_version_rejects_scalar_without_mapping_separator(
+    tmp_path, monkeypatch, contents
+):
+    plugin = tmp_path / "plugin"
+    plugin.mkdir()
+    (plugin / "plugin.yaml").write_text(contents, encoding="utf-8")
+    monkeypatch.setattr(chrome_connector, "PLUGIN", plugin)
+
+    # Without whitespace after the colon, this is a scalar, not a mapping.
+    assert chrome_connector.installed_version() == ""
+
+
 def test_wrong_companion_version_cannot_pair(tmp_path, monkeypatch):
     plugin = tmp_path / "plugin"
     plugin.mkdir()
@@ -179,3 +215,68 @@ def test_wrong_companion_version_cannot_pair(tmp_path, monkeypatch):
     monkeypatch.setattr(chrome_connector, "PLUGIN", plugin)
     with pytest.raises(RuntimeError, match="0.2.6"):
         chrome_connector.pairing_code()
+
+
+
+@pytest.mark.parametrize('directives',[
+    '%TAG !e! tag:example.com,2026:',
+    '%TAG !! tag:yaml.org,2002: # standard tags',
+    '%TAG ! tag:example.com,2026:',
+    '%TAG !named_handle! tag:example.com,2026:',
+    '%YAML 1.1\n%TAG !e! tag:example.com,2026:',
+    '%TAG !e! tag:example.com,2026:%E2%82%AC',
+    '%TAG !e! !local/',
+])
+def test_installed_version_accepts_valid_tag_directive_prologue(tmp_path,monkeypatch,directives):
+    monkeypatch.setattr(chrome_connector,'PLUGIN',tmp_path)
+    (tmp_path/'plugin.yaml').write_text(directives+'\n---\n  name: hermes-connector\n  version: 0.2.6\n',encoding='utf-8')
+    assert chrome_connector.installed_version()=='0.2.6'
+
+
+@pytest.mark.parametrize('prologue',[
+    '%TAG !e! #', '%TAG !e! %GG', '%TAG !e! %', '%TAG !e! %A',
+    '%TAG !e! %FF', '%TAG !e! %C3x%A9', '%TAG !e! tag:example.com,2026:<bad>',
+    '%TAG !e! tag:example.com,2026:\n%TAG !e! tag:other.example,2026:',
+    '---\n%TAG !e! tag:example.com,2026:',
+    '%YAML 1.1\n%YAML 1.1\n%TAG !e! tag:example.com,2026:',
+])
+def test_invalid_tag_directive_never_looks_like_matching_companion(tmp_path,monkeypatch,prologue):
+    monkeypatch.setattr(chrome_connector,'PLUGIN',tmp_path)
+    (tmp_path/'plugin.yaml').write_text(prologue+'\n---\n  name: hermes-connector\n  version: 0.2.6\n',encoding='utf-8')
+    monkeypatch.setattr(chrome_connector.subprocess,'run',lambda *a,**kw:pytest.fail('No broker for invalid directive'))
+    assert chrome_connector.installed_version()==''
+    with pytest.raises(RuntimeError):chrome_connector.pairing_code()
+
+
+@pytest.mark.parametrize('body',[
+    '%TAG !e! tag:example.com,2026:\n  name: hermes-connector\n  version: 0.2.6\n',
+    '%TAG !e! tag:example.com,2026:\n---\n  metadata:\n    version: 0.2.6\n',
+    '%TAG !e! tag:example.com,2026:\n---\n  name: hermes-connector\n  version: 9.9.9\n',
+    '  %TAG !e! tag:example.com,2026:\n---\n  name: hermes-connector\n  version: 0.2.6\n',
+])
+def test_tag_directive_does_not_bypass_document_root_or_companion_version(tmp_path,monkeypatch,body):
+    monkeypatch.setattr(chrome_connector,'PLUGIN',tmp_path)
+    (tmp_path/'plugin.yaml').write_text(body,encoding='utf-8')
+    monkeypatch.setattr(chrome_connector.subprocess,'run',lambda *a,**kw:pytest.fail('No broker for unsupported or wrong version'))
+    assert chrome_connector.installed_version()!=chrome_connector.EXPECTED_VERSION
+    with pytest.raises(RuntimeError):chrome_connector.pairing_code()
+
+
+
+def test_tag_like_block_scalar_text_is_not_a_directive(tmp_path,monkeypatch):
+    monkeypatch.setattr(chrome_connector,'PLUGIN',tmp_path)
+    (tmp_path/'plugin.yaml').write_text('%TAG !e! tag:example.com,2026:\n---\n  name: hermes-connector\n  notes: |\n    %TAG is ordinary documentation here\n  version: 0.2.6\n',encoding='utf-8')
+    assert chrome_connector.installed_version()=='0.2.6'
+
+
+
+@pytest.mark.parametrize('directive',[
+    '%TAG\t!e! tag:example.com,2026:', '%TAG !e!\ttag:example.com,2026:',
+    '%TAG !e! tag:example.com,2026:\t# comment',
+])
+def test_tag_probe_declines_separators_outside_its_conservative_subset(tmp_path,monkeypatch,directive):
+    # Hermes' C and pure YAML scanners differ on tabs; do not advertise a
+    # matching installation based on the more permissive scanner alone.
+    monkeypatch.setattr(chrome_connector,'PLUGIN',tmp_path)
+    (tmp_path/'plugin.yaml').write_text(directive+'\n---\n  version: 0.2.6\n',encoding='utf-8')
+    assert chrome_connector.installed_version()==''

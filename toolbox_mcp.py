@@ -33,7 +33,27 @@ ERRORS = {}
 DISCOVERY_MAX_PAGES = 32
 DISCOVERY_MAX_TOOLS = 2000
 DISCOVERY_SECONDS = 15
+PREVIEW_SECONDS = 5
 LOCAL_CATALOG = {
+    "local.game_library_search": {
+        "description": "Search all182 bundled game references offline. Source links identify editable imports; demo-only games can be rebuilt as original projects. Import is not proof of working gameplay.",
+        "inputSchema": {"type": "object", "properties": {
+            "query": {"type": "string"}, "genre": {"type": "string"},
+            "offset": {"type": "integer", "minimum": 0},
+            "limit": {"type": "integer", "minimum": 1, "maximum": 12}},
+            "additionalProperties": False},
+    },
+    "local.import_game_example": {
+        "description": "Copy pinned published game source into a NEW relative directory in a registered task. Preserve license notices; inspect/edit and test actual gameplay. No code execution or package installation; demo-only entries cannot be imported. Cached source works offline.",
+        "inputSchema": {"type": "object", "properties": {
+            "project_folder": {"type": "string"}, "game_id": {"type": "string"},
+            "path": {"type": "string"}},
+            "required": ["project_folder", "game_id", "path"], "additionalProperties": False},
+    },
+    "local.install_game_libraries": {
+        "description": "Install pinned offline Phaser game engine and Yuka NPC seek/patrol JS plus MIT licenses/API notes in a registered task. No npm, accounts, CDN dependency or game execution; preserves existing files.",
+        "inputSchema": {"type":"object", "properties":{"project_folder":{"type":"string"}, "libraries":{"type":"array", "minItems":1, "maxItems":2, "uniqueItems":True, "items":{"enum":["phaser","yuka"]}}}, "required":["project_folder"], "additionalProperties":False},
+    },
     "local.start_3d_job": {
         "description": "Generate a real local 3D model with TripoSR from an image, or draw a local reference from a prompt first. Auto-installs isolated dependencies and verified weights; no account. Needs one NVIDIA GPU with 6 GB VRAM. Export GLB, OBJ or STL. Poll local.model_3d_job_status; do not start duplicate jobs while it downloads. Vertex colors, no UV/PBR textures or rigging.",
         "inputSchema": {"type": "object", "properties": {
@@ -213,6 +233,33 @@ LOCAL_CATALOG = {
         }, "required": ["model_path", "csv_path", "output_path"]},
     },
 }
+
+LOCAL_CATALOG.update({
+    "local.register_expression_helper": {
+        "description": "Create and test a reusable project-local pure JSON/arithmetic expression. Define parameters with types number, integer, string, boolean, numbers, strings, array, object or json; supply concrete input/expected cases. Supports arithmetic, JSON, indexing, conditionals and abs/round/sum/min/max/len/get. No imports, attributes, eval, shell or network. Registers only if every supplied example passes; does not complete a task.",
+        "inputSchema": {"type": "object", "properties": {
+            "project_folder": {"type": "string"}, "name": {"type": "string", "maxLength": 64},
+            "parameters": {"type": "object", "minProperties": 1, "maxProperties": 16,
+                "additionalProperties": {"type": "string", "enum": ["number", "integer", "string", "boolean", "numbers", "strings", "array", "object", "json"]}},
+            "expression": {"type": "string", "maxLength": 2000},
+            "cases": {"type": "array", "minItems": 1, "maxItems": 24, "items": {"type": "object", "properties": {
+                "inputs": {"type": "object"}, "expected": {}}, "required": ["inputs", "expected"], "additionalProperties": False}},
+        }, "required": ["project_folder", "name", "parameters", "expression", "cases"], "additionalProperties": False},
+    },
+    "local.find_expression_helpers": {
+        "description": "Find already tested project-local expression helpers and their parameter types. Retrieval does not run them; stale-request records remain labeled historical. Use run_expression_helper with the exact ID to reuse a current helper without LLM inference.",
+        "inputSchema": {"type": "object", "properties": {"project_folder": {"type": "string"},
+            "query": {"type": "string", "maxLength": 100}, "limit": {"type": "integer", "minimum": 1, "maximum": 20}},
+            "required": ["project_folder"], "additionalProperties": False},
+    },
+    "local.run_expression_helper": {
+        "description": "Run an exact tested expression helper directly with typed JSON inputs and zero LLM calls. Revalidates project/request, definition, cases and interpreter hashes; stale or tampered helpers must be reverified. Restricted expressions have no filesystem, network or shell access. This result is not task/acceptance completion.",
+        "inputSchema": {"type": "object", "properties": {"project_folder": {"type": "string"},
+            "helper_id": {"type": "string", "pattern": "^[a-f0-9]{64}$"}, "inputs": {"type": "object"}},
+            "required": ["project_folder", "helper_id", "inputs"], "additionalProperties": False},
+    },
+})
+
 
 
 async def project_roots(_context):
@@ -423,6 +470,9 @@ async def toolbox_call(tool: str, arguments_json: str = "{}", project_folder: st
         raise ValueError("arguments_json must be a JSON object")
     if tool in LOCAL_CATALOG:
         local_tools = {
+            "local.game_library_search": game_library_search,
+            "local.import_game_example": import_game_example,
+            "local.install_game_libraries": install_game_libraries,
             "local.start_3d_job": start_3d_job,
             "local.build_3d_scene": build_3d_scene,
             "local.model_3d_job_status": model_3d_job_status,
@@ -447,6 +497,9 @@ async def toolbox_call(tool: str, arguments_json: str = "{}", project_folder: st
             "local.video_job_status": video_job_status,
             "local.train_table_model": train_table_model,
             "local.predict_table_model": predict_table_model,
+            "local.register_expression_helper": register_expression_helper,
+            "local.find_expression_helpers": find_expression_helpers,
+            "local.run_expression_helper": run_expression_helper,
         }
         handler = local_tools[tool]
         value = handler(**arguments)
@@ -454,7 +507,11 @@ async def toolbox_call(tool: str, arguments_json: str = "{}", project_folder: st
     group, name = tool.split(".", 1)
     result = await SESSIONS[group].call_tool(name, arguments=arguments)
     if group == "devtools" and name != "take_screenshot" and not result.is_error:
-        await mirror_chrome_page(project_folder)
+        try:
+            async with asyncio.timeout(PREVIEW_SECONDS):
+                await mirror_chrome_page(project_folder)
+        except TimeoutError:
+            pass  # Optional preview must not hold up a successful browser action.
     value = result.model_dump(by_alias=True, exclude_none=True)
     raw = json.dumps(value, ensure_ascii=False)
     if len(raw) > 24000:
@@ -516,6 +573,25 @@ async def run_project_checks(project_folder: str, timeout_seconds: int = 1200) -
         "evidence": evidence,
         "verification_log": str(log) if log.is_file() and log.stat().st_mtime >= started - 1 else None,
     }
+
+
+@server.tool()
+def register_expression_helper(project_folder: str, name: str, parameters: dict,
+                               expression: str, cases: list) -> dict:
+    """Test and save a bounded expression, never arbitrary Python/JavaScript code."""
+    return project_memory.register_expression_helper(registered_project(project_folder), name, parameters, expression, cases)
+
+
+@server.tool()
+def find_expression_helpers(project_folder: str, query: str = "", limit: int = 8) -> dict:
+    """Discover project-local tested expression IDs; do not execute on retrieval."""
+    return project_memory.find_expression_helpers(registered_project(project_folder), query, limit)
+
+
+@server.tool()
+def run_expression_helper(project_folder: str, helper_id: str, inputs: dict) -> dict:
+    """Invoke a current hash-bound expression with no model or arbitrary code."""
+    return project_memory.run_expression_helper(registered_project(project_folder), helper_id, inputs)
 
 
 @server.tool()
@@ -1096,11 +1172,40 @@ async def voice_file(text: str, output_path: str) -> dict:
 
 
 @server.tool()
+def find_training_datasets(purpose: str = "") -> dict:
+    """Find reviewed public GitHub datasets for a specialist; lookup downloads nothing."""
+    import small_training
+    return {"datasets": small_training.training_dataset_catalog(purpose)}
+
+
+@server.tool()
+async def acquire_training_dataset(project_folder: str, dataset_id: str) -> dict:
+    """Download a pinned public training dataset into this task, retaining source/license hashes; cached data works offline. Does not train or activate a model."""
+    import small_training
+    root = registered_project(project_folder)
+    entry = small_training.GITHUB_DATASETS.get(dataset_id)
+    if entry is None:
+        raise ValueError("Choose a dataset from find_training_datasets")
+    destination = (root / ".local-ai/training-datasets" / (dataset_id + "-" + entry["commit"][:12])).resolve()
+    if not destination.is_relative_to(root):
+        raise ValueError("Training data must stay inside the task folder")
+    result = await asyncio.to_thread(small_training.download_training_dataset, dataset_id, destination)
+    if dataset_id == "clinc150":
+        normalized = (destination / "normalized").resolve()
+        if not normalized.is_relative_to(root):
+            raise ValueError("Normalized data must stay inside the task folder")
+        result["normalized"] = await asyncio.to_thread(
+            small_training.normalize_training_dataset, dataset_id, destination, normalized)
+    return result
+
+
+@server.tool()
 async def train_text_classifier(
     dataset_path: str,
     output_folder: str,
     text_column: str = "text",
     label_column: str = "label",
+    labels: list[str] | None = None,
 ) -> dict:
     """Train a small local CSV text classifier; save an inspectable JSON model and held-out evaluation."""
     return await media_run(
@@ -1110,15 +1215,15 @@ async def train_text_classifier(
         output_folder=output_folder,
         text_column=text_column,
         label_column=label_column,
+        labels=labels,
     )
 
 
 @server.tool()
 async def classify_text(model_folder: str, text: str) -> dict:
     """Predict a label with a locally trained text classifier and show class probabilities."""
-    return await media_run(
-        "predict_classifier", 90, model_folder=model_folder, text=text
-    )
+    import small_training
+    return await asyncio.to_thread(small_training.predict_classifier,model_folder,text)
 
 
 @server.tool()
@@ -1192,6 +1297,214 @@ def sqlite_read(path: str, query: str, max_rows: int = 100) -> dict:
         }
     finally:
         conn.close()
+
+
+
+# Reviewed upstream runtime distributions. Each immutable commit, byte length
+# and digest is an allowlist: neither model arguments nor project files can
+# change the downloaded code. MIT notices travel with every project copy.
+GAME_LIBRARIES = {'phaser': {'repo': 'phaserjs/phaser',
+            'commit': '41be1e462bc600064e498cba370bfa8c5c055a22',
+            'files': [{'source_path': 'dist/phaser.min.js',
+                       'url': 'https://raw.githubusercontent.com/phaserjs/phaser/41be1e462bc600064e498cba370bfa8c5c055a22/dist/phaser.min.js',
+                       'sha256': '66348b1b5141e49b7d5ebbe688cddcb502eab1cb00f21c538686a5b2c5abe4de',
+                       'bytes': 1375976},
+                      {'source_path': 'LICENSE.md',
+                       'url': 'https://raw.githubusercontent.com/phaserjs/phaser/41be1e462bc600064e498cba370bfa8c5c055a22/LICENSE.md',
+                       'sha256': 'c3a9ba7e38d4ef33dccf5fdd1046655c63df06714f84776118fe406f43db5cf2',
+                       'bytes': 1100},
+                      {'source_path': 'README.md',
+                       'url': 'https://raw.githubusercontent.com/phaserjs/phaser/41be1e462bc600064e498cba370bfa8c5c055a22/README.md',
+                       'sha256': '14735751fff0e0a93fc6fd40e5b1393ff8d5b951ce176d8f430eb754aa386379',
+                       'bytes': 15891}],
+            'version': '4.2.1'},
+ 'yuka': {'repo': 'Mugen87/yuka',
+          'commit': 'e6250dc7f5899fa9a752d817cfa4b0d37e7fd983',
+          'files': [{'source_path': 'build/yuka.min.js',
+                     'url': 'https://raw.githubusercontent.com/Mugen87/yuka/e6250dc7f5899fa9a752d817cfa4b0d37e7fd983/build/yuka.min.js',
+                     'sha256': '525fb85e2f9dee055b453b302098c1ccaaf0bbf7f9b072f1f11b5cc25e24209b',
+                     'bytes': 123214},
+                    {'source_path': 'LICENSE',
+                     'url': 'https://raw.githubusercontent.com/Mugen87/yuka/e6250dc7f5899fa9a752d817cfa4b0d37e7fd983/LICENSE',
+                     'sha256': '5053117e2e3ef2326460d86f6073271c9d7ef56ebda09e2983538003293d593e',
+                     'bytes': 1072},
+                    {'source_path': 'README.md',
+                     'url': 'https://raw.githubusercontent.com/Mugen87/yuka/e6250dc7f5899fa9a752d817cfa4b0d37e7fd983/README.md',
+                     'sha256': 'd35685d4fbc1bf867b5b9ce367288ad32f8d6e4c22bab3e7cdc1667d9b16297b',
+                     'bytes': 2368}],
+          'version': '0.7.8'}}
+
+GAME_LIBRARY_GUIDES = {
+    "phaser": """# Phaser 4.2.1 — local browser games
+Load `<script src="vendor/cale-game/phaser/phaser.min.js"></script>` from your root HTML.
+Use `new Phaser.Game({type:Phaser.CANVAS,width:640,height:360,audio:{noAudio:true},
+scene:{create(){this.add.rectangle(100,100,40,40,0x16cbd6);},update(time,delta){}}});`.
+`delta` is milliseconds. Use scene keyboard input and Arcade Physics only when
+configured; this installer does not provide a finished game, textures or sounds.
+Use the local file, not an npm/CDN import. Preserve LICENSE.md when sharing.
+""",
+    "yuka": """# Yuka 0.7.8 — deterministic steering, not an LLM
+Load `<script src="vendor/cale-game/yuka/yuka.min.js"></script>` before your game script.
+Create `const manager=new YUKA.EntityManager(), npc=new YUKA.Vehicle(); npc.maxSpeed=3;`
+then `npc.steering.add(new YUKA.SeekBehavior(new YUKA.Vector3(10,0,0))); manager.add(npc);`.
+Call `manager.update(deltaSeconds)` and copy npc.position.x/z to your rendered sprite.
+For patrol, build `const path=new YUKA.Path(); path.loop=true;`, add Vector3 waypoints,
+and use `npc.steering.add(new YUKA.FollowPathBehavior(path,0.5))` instead of SeekBehavior.
+Yuka has no renderer, collision physics, art, voice, network or trained model.
+Preserve LICENSE when sharing. Runtime and API README are pinned beside this guide.
+""",
+}
+
+
+def _game_library_directory(root: Path, *parts: str) -> Path:
+    """Refuse symlink/junction redirection before creating a vendor/cache path."""
+    current = root.resolve(strict=True)
+    for part in parts:
+        current = current / part
+        if current.is_symlink() or getattr(current, "is_junction", lambda: False)():
+            raise ValueError("Game library paths cannot be symlinks or junctions")
+        if current.exists() and not current.is_dir():
+            raise ValueError("A game library directory is occupied by a file")
+        if not current.resolve().is_relative_to(root.resolve()):
+            raise ValueError("Game library path escaped its registered root")
+    return current
+
+
+def _game_library_read(path: Path, limit=2_000_000) -> bytes:
+    if path.is_symlink() or getattr(path, "is_junction", lambda: False)():
+        raise ValueError("Game library files cannot be links")
+    with path.open("rb") as stream:
+        value = stream.read(limit + 1)
+    if len(value) > limit:
+        raise ValueError("Game library file exceeds its bounded size")
+    return value
+
+
+def _game_library_download(url: str, expected_bytes: int) -> bytes:
+    """Fetch only a fixed upstream file; redirects and oversized bodies fail."""
+    import urllib.request
+    import pc_offline
+    if pc_offline.offline():
+        raise ValueError("Offline: this pinned game library is not in the verified cache yet")
+    class NoRedirect(urllib.request.HTTPRedirectHandler):
+        def redirect_request(self, req, fp, code, msg, headers, newurl):
+            raise ValueError("Pinned game library downloads cannot redirect")
+    request = urllib.request.Request(url, headers={"User-Agent": "CaleAI-GameLibraries/1", "Accept-Encoding": "identity"})
+    with urllib.request.build_opener(NoRedirect).open(request, timeout=20) as response:
+        return response.read(expected_bytes + 1)
+
+
+def _game_library_write_new(path: Path, value: bytes) -> bool:
+    """Exclusive publication never truncates an existing user/concurrent file.
+
+    Identical files are reusable. Conflicting files are preserved, with a
+    useful error. A later I/O failure can leave owned partial installation;
+    retry reuses intact files; conflicting partial files still fail closed,
+    rather than rolling back over somebody's edits.
+    """
+    try:
+        with path.open("xb") as stream:
+            stream.write(value)
+        return True
+    except FileExistsError:
+        if _game_library_read(path) != value:
+            raise ValueError("Existing game library file differs; preserved: " + str(path))
+        return False
+
+
+def _install_game_libraries(project_folder: str, libraries: list[str]) -> dict:
+    import hashlib
+    folder = registered_project(project_folder)
+    if (not isinstance(libraries, list) or not 1 <= len(libraries) <= 2
+            or any(not isinstance(name, str) or name not in GAME_LIBRARIES for name in libraries)
+            or len(set(libraries)) != len(libraries)):
+        raise ValueError("Choose phaser, yuka, or both, without duplicates")
+    for name in libraries:
+        _game_library_directory(folder, "vendor", "cale-game", name)
+    payloads = []
+    for name in libraries:
+        entry = GAME_LIBRARIES[name]
+        cache = _game_library_directory(ROOT, "Toolbox", "game-libraries", name, entry["commit"])
+        for item in entry["files"]:
+            basename = Path(item["source_path"]).name
+            cached = cache / basename
+            if cached.exists() or cached.is_symlink():
+                content = _game_library_read(cached)
+            else:
+                content = _game_library_download(item["url"], item["bytes"])
+            if len(content) != item["bytes"] or hashlib.sha256(content).hexdigest() != item["sha256"]:
+                raise ValueError("Pinned game library hash/size verification failed: " + name + "/" + basename)
+            # Cache publication has the same no-overwrite rule as project files.
+            _game_library_directory(ROOT, "Toolbox", "game-libraries", name, entry["commit"])
+            cache.mkdir(parents=True, exist_ok=True)
+            _game_library_write_new(cached, content)
+            payloads.append((name, basename, content))
+        payloads.append((name, "API.md", GAME_LIBRARY_GUIDES[name].encode("utf-8")))
+        provenance = {"name":name, "version":entry["version"], "license":"MIT", "repository":entry["repo"],
+                      "commit":entry["commit"], "files":entry["files"]}
+        payloads.append((name, "source.json", (json.dumps(provenance,indent=2)+"\n").encode("utf-8")))
+    if registered_project(project_folder) != folder:
+        raise ValueError("The registered task folder changed while preparing game libraries")
+    # Preflight every conflict before installing any new project file. An
+    # exclusive open still checks concurrent creators at actual publication.
+    for name, basename, content in payloads:
+        target = _game_library_directory(folder, "vendor", "cale-game", name) / basename
+        if target.exists() or target.is_symlink():
+            if _game_library_read(target) != content:
+                raise ValueError("Existing game library file differs; preserved: " + str(target))
+    written, reused, files = 0, 0, []
+    for name, basename, content in payloads:
+        if registered_project(project_folder) != folder:
+            raise ValueError("The registered task folder changed during game library installation")
+        directory = _game_library_directory(folder, "vendor", "cale-game", name)
+        directory.mkdir(parents=True, exist_ok=True)
+        directory = _game_library_directory(folder, "vendor", "cale-game", name)
+        target = directory / basename
+        created = _game_library_write_new(target, content)
+        written += int(created); reused += int(not created)
+        files.append({"path":target.relative_to(folder).as_posix(), "sha256":hashlib.sha256(content).hexdigest(), "bytes":len(content)})
+    return {"installed":True, "libraries":[{"name":name,"version":GAME_LIBRARIES[name]["version"],
+        "commit":GAME_LIBRARIES[name]["commit"],"license":"MIT",
+        "script":"vendor/cale-game/"+name+"/"+name+".min.js",
+        "api_guide":"vendor/cale-game/"+name+"/API.md"} for name in libraries],
+        "written":written,"reused":reused,"files":files,"executed":False,
+        "note":"Local runtime libraries installed; game code and behavior still need building and real verification."}
+
+
+@server.tool()
+async def install_game_libraries(project_folder: str, libraries: list[str] = ["phaser", "yuka"]) -> dict:
+    """Install pinned MIT Phaser rendering/gameplay and Yuka NPC steering JS locally.
+
+    Only registered task folders are allowed. Verified cache works offline;
+    missing files download exact reviewed commit hashes. Existing files are
+    preserved. Returns local script/API-guide paths; does not run game code.
+    """
+    return await asyncio.to_thread(_install_game_libraries, project_folder, libraries)
+
+
+@server.tool()
+async def game_library_search(query: str = "", genre: str = "", offset: int = 0, limit: int = 8) -> dict:
+    """Search the offline catalog without adding its schema to every model turn."""
+    import native_agent
+
+    value = await asyncio.to_thread(native_agent.execute_tool, ROOT,
+        "game_library_search", dict(query=query, genre=genre, offset=offset, limit=limit))
+    if value.startswith("Tool error:"):
+        raise ValueError(value)
+    return json.loads(value)
+
+
+@server.tool()
+async def import_game_example(project_folder: str, game_id: str, path: str) -> dict:
+    """Import source through the task-scoped host wrapper, with a compact receipt."""
+    import native_agent
+
+    folder = registered_project(project_folder)
+    value = await asyncio.to_thread(native_agent.execute_tool, folder,
+        "import_game_example", {"game_id": game_id, "path": path})
+    if value.startswith("Tool error:"):
+        raise ValueError(value)
+    return json.loads(value)
 
 
 if __name__ == "__main__":

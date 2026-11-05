@@ -13,7 +13,7 @@ import tempfile
 import time
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import patch, Mock
 
 import pytest
 
@@ -3775,9 +3775,11 @@ def test_checker_memory_requires_explicit_pass_and_preserves_failed_file_identit
         assert "private report" not in summary
 
 
-def test_repeated_unchanged_read_batches_get_guidance_after_complete_tool_replies():
+def test_repeated_unchanged_read_batches_get_guidance_after_complete_tool_replies(monkeypatch):
     with tempfile.TemporaryDirectory() as temporary:
         item = project(Path(temporary) / "page")
+        # Repeated failures enter durable recovery, which requires a live task owner.
+        monkeypatch.setattr(long_tasks, "projects", lambda: [item])
         folder = Path(item["folder"])
         (folder / "game.js").write_text("// code\n" * 460, encoding="utf-8")
         seen = []
@@ -3829,9 +3831,11 @@ def test_read_cycle_ignores_new_content_and_resets_after_source_edit_or_user_cha
     assert "recent_read_hashes" not in state
 
 
-def test_repeated_identical_tool_failure_prompts_a_different_approach():
+def test_repeated_identical_tool_failure_prompts_a_different_approach(monkeypatch):
     with tempfile.TemporaryDirectory() as temporary:
         item = project(Path(temporary) / "page")
+        # Repeated failures enter durable recovery, which requires a live task owner.
+        monkeypatch.setattr(long_tasks, "projects", lambda: [item])
         folder = Path(item["folder"])
         (folder / ".local-ai/verify.ps1").write_text("exit 0")
         native_agent.save_state(item, {"status": "continue", "verify_passed": True})
@@ -3854,9 +3858,11 @@ def test_repeated_identical_tool_failure_prompts_a_different_approach():
         assert "read_file missing.txt: Failed" in task_context.snapshot(folder)
 
 
-def test_repeated_failed_browser_verdict_reaches_worker_repair_guidance():
+def test_repeated_failed_browser_verdict_reaches_worker_repair_guidance(monkeypatch):
     with tempfile.TemporaryDirectory() as temporary:
         item = project(Path(temporary) / "page")
+        # Repeated failures enter durable recovery, which requires a live task owner.
+        monkeypatch.setattr(long_tasks, "projects", lambda: [item])
         folder = Path(item["folder"])
         (folder / ".local-ai/verify.ps1").write_text("exit 0")
         native_agent.save_state(item, {"status": "continue", "verify_passed": True})
@@ -3897,9 +3903,11 @@ def test_failed_check_survives_restart_and_old_verifier_pass_until_same_file_pas
         assert not recovered["failed_checks"]
 
 
-def test_third_identical_failed_tool_call_is_not_executed_again():
+def test_third_identical_failed_tool_call_is_not_executed_again(monkeypatch):
     with tempfile.TemporaryDirectory() as temporary:
         item = project(Path(temporary) / "page")
+        # Repeated failures enter durable recovery, which requires a live task owner.
+        monkeypatch.setattr(long_tasks, "projects", lambda: [item])
         folder = Path(item["folder"])
         (folder / ".local-ai/verify.ps1").write_text("exit 0")
         native_agent.save_state(item, {"status": "continue", "verify_passed": True})
@@ -4608,6 +4616,34 @@ def test_repair_and_step_focus_share_the_same_unrestricted_escape_turn(tmp_path)
         else:
             validate(arguments, schema)
             assert available is native_agent.TOOLS
+
+
+@pytest.mark.parametrize('repair_count', range(5))
+@pytest.mark.parametrize('step_count', range(5))
+def test_persisted_misaligned_focus_cycles_reach_true_baseline_within_five_turns(tmp_path,repair_count,step_count):
+    item=project(tmp_path/'misaligned-focus')
+    folder=Path(item['folder'])
+    (folder/'index.html').write_text('<p id="total">wrong</p>')
+    task_context.plan_steps(folder,[{'phase':'Repair','title':'Fix total',
+        'check_tool':'check_webapp','check_arguments':{'path':'index.html','cases':[{'expect':{'total':'10'}}]}}])
+    task_context.record_action(folder,'check_webapp','{"passed":false}',{'path':'index.html'})
+    original_queue=task_context.step_status(folder)
+    original_request=task_context.request_identity(folder)
+    native_agent.save_state(item,{'status':'continue','messages':[],
+        'repair_focus_turns':repair_count,'step_focus_turns':step_count,
+        'step_repair_focus':{'count':2},'automatic_check_count':5})
+    offers=[]
+    for _ in range(10):
+        # A restart must preserve the cycle rather than relying on RAM alignment.
+        state=native_agent.read_state(item)
+        available=native_agent.step_tools(item,state,native_agent.repair_tools(item,state))
+        available=native_agent.acceptance_repair_tools(item,state,available)
+        offers.append(available is native_agent.TOOLS)
+        assert state['step_repair_focus']=={'count':2} and state['automatic_check_count']==5
+        native_agent.save_state(item,state)
+    assert all(any(offers[start:start+5]) for start in range(6)),offers
+    assert task_context.step_status(folder)==original_queue
+    assert task_context.request_identity(folder)==original_request
 
 
 def test_large_active_html_excerpt_reaches_live_handlers_and_failed_ids_without_document_values(tmp_path):
@@ -6727,3 +6763,1761 @@ def test_focused_assertion_scope_format_renews_only_two_generic_attempts(tmp_pat
     assert native_agent.focused_step_repair_request(item, state, offered, notice, 65536)
     assert native_agent.focused_step_repair_request(item, state, offered, notice, 65536) is None
     assert task_context.step_status(folder) == before
+
+
+def capability_recovery_invoice_fixture(folder):
+    """Developer-seeded broken local module for deterministic and real-router smoke.
+
+    No helper implementation, model answers, verifier mocks or later expected
+    outputs are injected. Original user tax/format requirements own both units.
+    """
+    item=project(folder)
+    item['brief']='Finish the existing invoice module: apply tax to each subtotal and round half up to cents; preserve invoice_total and format_invoice in billing.py and pass both original saved acceptance phases.'
+    item['ai_route']='local_only'
+    import hashlib
+    item['id']=hashlib.sha256(str(folder.resolve()).encode()).hexdigest()[:12]
+    folder=Path(item['folder'])
+    (folder/'billing.py').write_text('from invoice_math import apply_tax\ndef invoice_total(subtotal,tax_rate):\n    return apply_tax(subtotal,tax_rate)\ndef format_invoice(subtotal,tax_rate):\n    return "Total: %.2f" % invoice_total(subtotal,tax_rate)\n')
+    (folder/'.local-ai/USER-REQUESTS.md').write_text(item['brief'])
+    original=[{'phase':'Calculate','title':'Invoice totals','check_tool':'check_python_function','check_arguments':
+        {'path':'billing.py','function':'invoice_total','cases':[{'args':[100,.06],'expected':106},
+            {'args':[0,.06],'expected':0},{'args':[19.99,.085],'expected':21.69}]}},
+        {'phase':'Format','title':'Invoice text','check_tool':'check_python_function','check_arguments':
+        {'path':'billing.py','function':'format_invoice','cases':[{'args':[100,.06],'expected':'Total: 106.00'}]}}]
+    task_context.plan_steps(folder,original)
+    return item
+
+
+def test_durable_capability_recovery_builds_real_local_module_then_resumes_original_checks(tmp_path):
+    import sys
+    import long_tasks
+    item=capability_recovery_invoice_fixture(tmp_path/'invoice')
+    folder=Path(item['folder'])
+    def response(calls):
+        return {'choices':[{'message':{'role':'assistant','tool_calls':[{'id':str(i),
+            'function':{'name':name,'arguments':json.dumps(args)}} for i,(name,args) in enumerate(calls)]}}]}
+    runtime=tmp_path/'runtime'
+    with patch.object(native_agent,'MAX_TURNS_PER_SLICE',1),patch.object(long_tasks,'projects',return_value=[item]),patch.object(long_tasks,'STATE',runtime),patch.object(native_agent,'capability_local_search',wraps=getattr(native_agent,'capability_local_search',lambda query:[]),create=True) as search:
+        native_agent.run_slice(item,complete=lambda payload:response([('task_steps',{'action':'complete'})]))
+        assert task_context.step_status(folder)['done']==0
+        assert search.call_count==1  # Baseline truly ran/fails the typed check but never searches.
+        active=task_context.step_status(folder)['active']
+        episode=task_context.recovery_episode(folder,native_agent.capability_goal_hash(item),active)
+        assert episode and isinstance(json.loads(episode['catalog']),list) and episode['turns']==0 and episode['status']!='recovered'
+        assert search.call_count==1 and task_context.step_status(folder)['done']==0
+        # New run_slice reloads persisted native state + SQL episode. It does not
+        # ask the user or repeat local discovery; the model supplies a real module.
+        code='from decimal import Decimal, ROUND_HALF_UP\ndef apply_tax(subtotal,tax_rate):\n    return float((Decimal(str(subtotal))*(Decimal("1")+Decimal(str(tax_rate)))).quantize(Decimal(".01"),rounding=ROUND_HALF_UP))\n'
+        command='"'+sys.executable+'" -B -c "from invoice_math import apply_tax; assert apply_tax(100,0.06)==106; assert apply_tax(19.99,0.085)==21.69"'
+        def build(payload):
+            assert payload.get('_native_workload')=='capability_recovery'
+            assert 'discover_local_tools' in {tool['function']['name'] for tool in payload['tools']}
+            return response([('write_file',{'path':'invoice_math.py','content':code}),('run_command',{'command':command})])
+        native_agent.run_slice(item,complete=build)
+        episode=task_context.recovery_episode(folder,native_agent.capability_goal_hash(item),active)
+        assert (folder/'invoice_math.py').is_file() and episode['status']!='recovered'
+        assert any(method['method']=='check_script' and method['outcome']=='Completed' for method in episode['methods'])
+        assert task_context.step_status(folder)['done']==0 and search.call_count==1
+        # The host now reruns the ORIGINAL exact unit, then the ORIGINAL next unit.
+        # A final narrative isn't what advances either acceptance check.
+        native_agent.run_slice(item,complete=lambda payload:{'choices':[{'message':{'role':'assistant','content':'The saved checks passed.'}}]})
+        assert task_context.step_status(folder)['done']==2
+        with project_memory.connection(folder) as conn:
+            final=dict(conn.execute('SELECT * FROM capability_recoveries WHERE id=?',(episode['id'],)).fetchone())
+        assert final['status']=='recovered' and json.loads(final['proof'])['check_hash']==episode['original_check']
+        assert search.call_count==1
+
+
+def test_capability_claim_needs_real_unfinished_work_and_is_not_a_quoted_refusal(tmp_path):
+    item=capability_recovery_invoice_fixture(tmp_path/'invoice')
+    assert native_agent.capability_claim_with_unmet_goal(item,'I cannot access files or tools in this environment.')
+    assert not native_agent.capability_claim_with_unmet_goal(item,'"I cannot access files," said the character in the story.')
+    assert not native_agent.capability_claim_with_unmet_goal(item,'The narrator says I cannot access files here.')
+    assert native_agent.capability_claim_with_unmet_goal(item,
+        'I can provide a blueprint here, but I cannot render files or create tasks in this chat.')
+    assert not native_agent.capability_claim_with_unmet_goal(item,'I cannot execute this because policy prohibits it.')
+    ordinary=project(tmp_path/'story');ordinary['brief']='Write a short story in your reply.'
+    assert not native_agent.capability_claim_with_unmet_goal(ordinary,'I cannot access files here.')
+
+
+def test_no_tool_inability_claim_enters_durable_action_lane_without_new_user_prompt(tmp_path):
+    import long_tasks
+    item=capability_recovery_invoice_fixture(tmp_path/'invoice');folder=Path(item['folder'])
+    with patch.object(native_agent,'MAX_TURNS_PER_SLICE',1),patch.object(long_tasks,'projects',return_value=[item]),patch.object(long_tasks,'STATE',tmp_path/'runtime'),patch.object(native_agent,'capability_local_search',return_value=[]) as search:
+        native_agent.run_slice(item,complete=lambda payload:{'choices':[{'message':{'role':'assistant','content':'I cannot access files or execute tools in this environment.'}}]})
+        active=task_context.step_status(folder)['active'];episode=task_context.recovery_episode(folder,native_agent.capability_goal_hash(item),active)
+        assert episode['trigger']=='capability_claim' and episode['status']!='recovered' and search.call_count==1
+        def use_tool(payload):
+            assert payload['_native_workload']=='capability_recovery' and payload['tool_choice']=='required'
+            return {'choices':[{'message':{'role':'assistant','tool_calls':[{'id':'read','function':{'name':'read_file','arguments':'{"path":"billing.py"}'}}]}}]}
+        native_agent.run_slice(item,complete=use_tool)
+        assert task_context.step_status(folder)['done']==0 and search.call_count==1
+
+
+def test_recovery_check_revisions_do_not_reset_budget_or_prove_original_acceptance(tmp_path):
+    item=capability_recovery_invoice_fixture(tmp_path/'invoice');folder=Path(item['folder'])
+    active=task_context.step_status(folder)['active'];goal=native_agent.capability_goal_hash(item)
+    episode=task_context.recovery_episode(folder,goal,active,trigger='missing_capability',component='invoice_math')
+    task_context.recovery_catalog(folder,episode['id'],[])
+    for _ in range(6):assert task_context.reserve_recovery_turn(folder,episode['id'],goal,episode['current_check'])
+    changed=json.loads(json.dumps(active));changed['check_arguments']['cases']=changed['check_arguments']['cases'][:1]
+    revision=task_context.recovery_episode(folder,goal,changed)
+    assert revision['id']==episode['id'] and revision['turns']==6 and revision['original_check']!=revision['current_check']
+    assert not task_context.reserve_recovery_turn(folder,revision['id'],goal,revision['current_check'])
+    task_context.recovery_attempt(folder,episode['id'],'acceptance','task_steps',{},'{"passed":true}','Completed',proof={
+        'goal_hash':goal,'request_hash':task_context.request_identity(folder),'check_hash':revision['current_check'],
+        'passed':True,'source_before':'a'*64,'source_after':'a'*64})
+    assert task_context.recovery_episode(folder,goal,changed)['status']!='recovered'
+
+
+def test_recovery_uses_full_brief_rules_goal_and_supersedes_old_unit_without_success(tmp_path):
+    item=capability_recovery_invoice_fixture(tmp_path/'invoice');folder=Path(item['folder'])
+    active=task_context.step_status(folder)['active'];old_goal=native_agent.capability_goal_hash(item)
+    episode=task_context.recovery_episode(folder,old_goal,active,trigger='read_stall')
+    changed={**item,'brief':item['brief']+' Also add a discount.'}
+    assert native_agent.capability_goal_hash(changed)!=old_goal
+    assert task_context.recovery_episode(folder,native_agent.capability_goal_hash(changed),active) is None
+    with project_memory.connection(folder) as conn:
+        assert conn.execute('SELECT status FROM capability_recoveries WHERE id=?',(episode['id'],)).fetchone()[0]=='superseded'
+    (folder/'AGENTS.md').write_text('Preserve rounding and private data.')
+    assert native_agent.capability_goal_hash(item)!=old_goal
+
+
+def test_recovery_rejects_stale_goal_response_and_never_counts_helper_success_as_recovered(tmp_path):
+    import long_tasks
+    item=capability_recovery_invoice_fixture(tmp_path/'invoice');folder=Path(item['folder'])
+    active=task_context.step_status(folder)['active'];goal=native_agent.capability_goal_hash(item)
+    episode=task_context.recovery_episode(folder,goal,active,trigger='read_stall');task_context.recovery_catalog(folder,episode['id'],[])
+    task_context.recovery_attempt(folder,episode['id'],'existing_tool','call_local_tool',{},'{"registered":true,"passed":true}','Completed')
+    assert task_context.recovery_episode(folder,goal,active)['status']!='recovered'
+    def stale(payload):
+        assert payload.get('_native_capability_recovery')
+        (folder/'AGENTS.md').write_text('A new authoritative instruction arrived.')
+        return {'choices':[{'message':{'role':'assistant','tool_calls':[{'id':'bad','function':{'name':'write_file','arguments':'{"path":"stale.txt","content":"must not write"}'}}]}}]}
+    with patch.object(native_agent,'MAX_TURNS_PER_SLICE',1),patch.object(long_tasks,'projects',return_value=[item]):
+        native_agent.run_slice(item,complete=stale)
+    assert not (folder/'stale.txt').exists()
+
+
+def test_recovery_source_changes_and_done_rows_without_observed_proof_are_not_recovery(tmp_path):
+    item=capability_recovery_invoice_fixture(tmp_path/'invoice');folder=Path(item['folder'])
+    active=task_context.step_status(folder)['active'];goal=native_agent.capability_goal_hash(item)
+    episode=task_context.recovery_episode(folder,goal,active,trigger='read_stall');task_context.recovery_catalog(folder,episode['id'],[])
+    before=native_agent.capability_recovery_before(item,'task_steps',{'action':'complete'},active)
+    (folder/'changed.py').write_text('SOURCE_CHANGED=True')
+    verdict=json.dumps({'passed':True,'checked_step_id':active['id'],'check_sha256':task_context.step_check_identity(active)})
+    native_agent.capability_recovery_observe(item,{},'task_steps',{'action':'complete'},verdict,'Completed',before)
+    assert task_context.recovery_episode(folder,goal,active)['status']!='recovered'
+    with project_memory.connection(folder) as conn:
+        conn.execute("UPDATE task_steps SET status='done' WHERE id=?",(active['id'],))
+    assert task_context.recovery_episode(folder,goal,active)['status']!='recovered'
+
+
+def test_recovery_private_binding_is_not_forwarded_to_router(tmp_path):
+    from types import SimpleNamespace
+    import long_tasks
+    item=capability_recovery_invoice_fixture(tmp_path/'invoice');folder=Path(item['folder'])
+    active=task_context.step_status(folder)['active'];goal=native_agent.capability_goal_hash(item)
+    episode=task_context.recovery_episode(folder,goal,active,trigger='read_stall');task_context.recovery_catalog(folder,episode['id'],[])
+    seen=[]
+    def complete(payload,task_id,**options):
+        assert not any(key.startswith('_native') for key in payload)
+        assert task_id==item['id'];seen.append(payload)
+        return {'choices':[{'message':{'role':'assistant','tool_calls':[{'id':'read','function':{'name':'read_file','arguments':'{"path":"billing.py"}'}}]}}]}
+    router=SimpleNamespace(complete=complete,last_local_model=None,last_local_weights='')
+    with patch('cloud_ai.Router',return_value=router),patch.object(native_agent,'MAX_TURNS_PER_SLICE',1),patch.object(long_tasks,'projects',return_value=[item]):
+        native_agent.run_slice(item)
+    assert len(seen)==1
+
+
+def test_recovery_local_catalog_search_never_starts_backend_or_network(tmp_path):
+    with (patch.object(native_agent,'ROOT',tmp_path),patch('subprocess.run',side_effect=AssertionError('No backend process')),
+          patch('urllib.request.urlopen',side_effect=AssertionError('No network'))):
+        rows=native_agent.capability_local_search('build 3d scene')
+    assert any(item['name']=='local.build_3d_scene' for item in rows)
+
+
+def test_recovery_does_not_treat_quoted_case_failure_as_missing_capability(tmp_path):
+    item=capability_recovery_invoice_fixture(tmp_path/'invoice');folder=Path(item['folder'])
+    before=native_agent.capability_recovery_before(item,'task_steps',{'action':'complete'})
+    result=json.dumps({'passed':False,'check_summary':{'errors':[], 'cases':[
+        {'failures':["Expected story says No module named secret_module, actual story differs"]}]}})
+    with patch.object(native_agent,'capability_local_search',side_effect=AssertionError('No missing-capability search')):
+        native_agent.capability_recovery_observe(item,{},'task_steps',{'action':'complete'},result,'Failed',before)
+    assert task_context.recovery_episode(folder,native_agent.capability_goal_hash(item),before['active']) is None
+
+
+def test_recovery_budget_notice_preserves_unfinished_goal_and_does_not_request_human(tmp_path):
+    item=capability_recovery_invoice_fixture(tmp_path/'invoice');folder=Path(item['folder'])
+    active=task_context.step_status(folder)['active'];goal=native_agent.capability_goal_hash(item)
+    episode=task_context.recovery_episode(folder,goal,active,trigger='read_stall');task_context.recovery_catalog(folder,episode['id'],[])
+    for _ in range(6):assert task_context.reserve_recovery_turn(folder,episode['id'],goal,episode['current_check'])
+    messages=[];state={}
+    with patch('long_tasks.projects',return_value=[item]):
+        assert native_agent.capability_recovery_request(item,state,messages,native_agent.TOOLS) is None
+    assert 'original goal is still unfinished' in messages[-1]['content'] and 'another eligible approach' in messages[-1]['content']
+    assert task_context.step_status(folder)['done']==0 and 'status' not in state
+
+
+def test_recovery_pause_during_inference_blocks_returned_source_edit(tmp_path):
+    import long_tasks
+    item=capability_recovery_invoice_fixture(tmp_path/'invoice');folder=Path(item['folder'])
+    active=task_context.step_status(folder)['active'];goal=native_agent.capability_goal_hash(item)
+    episode=task_context.recovery_episode(folder,goal,active,trigger='read_stall');task_context.recovery_catalog(folder,episode['id'],[])
+    def paused(payload):
+        assert payload.get('_native_capability_recovery')
+        state=native_agent.read_state(item);state['status']='paused';native_agent.save_state(item,state)
+        return {'choices':[{'message':{'role':'assistant','tool_calls':[{'id':'edit','function':{'name':'write_file','arguments':'{"path":"paused.txt","content":"do not write"}'}}]}}]}
+    with patch.object(native_agent,'MAX_TURNS_PER_SLICE',1),patch.object(long_tasks,'projects',return_value=[item]):
+        result=native_agent.run_slice(item,complete=paused)
+    assert result['status']=='paused' and not (folder/'paused.txt').exists()
+
+
+def test_recovery_stage_keeps_original_check_schema_small_and_immutable(tmp_path):
+    item=capability_recovery_invoice_fixture(tmp_path/'invoice');folder=Path(item['folder'])
+    active=task_context.step_status(folder)['active'];goal=native_agent.capability_goal_hash(item)
+    episode=task_context.recovery_episode(folder,goal,active,trigger='read_stall');task_context.recovery_catalog(folder,episode['id'],[])
+    with patch('long_tasks.projects',return_value=[item]):
+        payload=native_agent.capability_recovery_request(item,{},[],native_agent.TOOLS)
+    tool=next(t for t in payload['tools'] if t['function']['name']=='task_steps')
+    assert tool['function']['parameters']['properties']['action']['enum']==['complete','status']
+    assert tool['function']['parameters']['properties']['step_id']['const']==active['id']
+    assert len(json.dumps(tool))<1000
+    assert 'revise_check' not in json.dumps(tool)
+    assert next(t for t in native_agent.TOOLS if t['function']['name']=='task_steps')['function']['parameters']!=tool['function']['parameters']
+
+
+def test_recovery_rechecks_live_registered_owner_after_model_response(tmp_path):
+    import long_tasks
+    item=capability_recovery_invoice_fixture(tmp_path/'invoice');folder=Path(item['folder'])
+    active=task_context.step_status(folder)['active'];goal=native_agent.capability_goal_hash(item)
+    episode=task_context.recovery_episode(folder,goal,active,trigger='read_stall');task_context.recovery_catalog(folder,episode['id'],[])
+    owners=[item]
+    def deleted(payload):
+        assert payload.get('_native_capability_recovery');owners.clear()
+        return {'choices':[{'message':{'role':'assistant','tool_calls':[{'id':'edit','function':{'name':'write_file','arguments':'{"path":"after-delete.txt","content":"must not write"}'}}]}}]}
+    with patch.object(native_agent,'MAX_TURNS_PER_SLICE',1),patch.object(long_tasks,'projects',side_effect=lambda:list(owners)):
+        native_agent.run_slice(item,complete=deleted)
+    assert not (folder/'after-delete.txt').exists()
+
+
+def test_recovery_claim_requires_environmental_unavailability_not_policy_refusal(tmp_path):
+    item=capability_recovery_invoice_fixture(tmp_path/'invoice')
+    assert not native_agent.capability_claim_with_unmet_goal(item,'I cannot create ransomware or help you harm another person.')
+    assert not native_agent.capability_claim_with_unmet_goal(item,'I cannot run malware in this environment.')
+    assert native_agent.capability_claim_with_unmet_goal(item,'I cannot access local files or tools in this environment.')
+
+
+def test_recovery_merges_static_tools_when_existing_catalog_is_stale_empty(tmp_path):
+    import capability_index
+    path=capability_index.database_path(tmp_path);path.parent.mkdir();path.touch()
+    with patch.object(native_agent,'ROOT',tmp_path),patch.object(capability_index,'search',return_value=[]):
+        rows=native_agent.capability_local_search('build 3d scene')
+    assert any(row['name']=='local.build_3d_scene' for row in rows)
+
+
+def test_no_queue_recovery_replays_real_original_checker_and_reopens_same_budget_after_failure(tmp_path):
+    import long_tasks
+    item=project(tmp_path/'direct');item['brief']='Repair double_value in logic.py using its existing acceptance.'
+    folder=Path(item['folder']);(folder/'.local-ai/USER-REQUESTS.md').write_text(item['brief'])
+    (folder/'logic.py').write_text('from local_math import double\ndef double_value(x):\n    return double(x)\n')
+    args={'path':'logic.py','function':'double_value','cases':[{'args':[2],'expected':4},{'args':[0],'expected':0}]}
+    with patch.object(long_tasks,'projects',return_value=[item]),patch.object(long_tasks,'STATE',tmp_path/'runtime'),patch.object(native_agent,'capability_local_search',return_value=[]) as search:
+        before=native_agent.capability_recovery_before(item,'check_python_function',args)
+        failed=native_agent.execute_tool(folder,'check_python_function',args)
+        assert task_context.action_outcome('check_python_function',failed)=='Failed'
+        native_agent.capability_recovery_observe(item,{},'check_python_function',args,failed,'Failed',before)
+        episode=task_context.recovery_episode(folder,native_agent.capability_goal_hash(item),None)
+        payload=native_agent.capability_recovery_request(item,{},[],native_agent.TOOLS)
+        assert 'check_python_function' in {t['function']['name'] for t in payload['tools']}
+        (folder/'local_math.py').write_text('def double(x):\n    return x*2\n')
+        before=native_agent.capability_recovery_before(item,'check_python_function',args)
+        passed=native_agent.execute_tool(folder,'check_python_function',args)
+        assert json.loads(passed)['passed'] is True
+        native_agent.capability_recovery_observe(item,{},'check_python_function',args,passed,'Completed',before)
+        recovered=task_context.recovery_episode(folder,native_agent.capability_goal_hash(item),None)
+        assert recovered['status']=='recovered'
+        (folder/'local_math.py').write_text('import another_missing_local\ndef double(x):\n    return x*2\n')
+        before=native_agent.capability_recovery_before(item,'check_python_function',args)
+        failed_again=native_agent.execute_tool(folder,'check_python_function',args)
+        assert task_context.action_outcome('check_python_function',failed_again)=='Failed'
+        native_agent.capability_recovery_observe(item,{},'check_python_function',args,failed_again,'Failed',before)
+        reopened=task_context.recovery_episode(folder,native_agent.capability_goal_hash(item),None)
+        assert reopened['status']!='recovered' and reopened['id']==episode['id'] and reopened['turns']==recovered['turns']
+        assert search.call_count==1
+
+
+def test_recovery_response_cannot_execute_unbounded_tool_batch(tmp_path):
+    import long_tasks
+    item=capability_recovery_invoice_fixture(tmp_path/'invoice');folder=Path(item['folder'])
+    active=task_context.step_status(folder)['active'];goal=native_agent.capability_goal_hash(item)
+    episode=task_context.recovery_episode(folder,goal,active,trigger='read_stall');task_context.recovery_catalog(folder,episode['id'],[])
+    def many(payload):
+        return {'choices':[{'message':{'role':'assistant','tool_calls':[{'id':str(i),'function':{'name':'write_file',
+            'arguments':json.dumps({'path':str(i)+'.txt','content':'bounded'})}} for i in range(25)]}}]}
+    with patch.object(native_agent,'MAX_TURNS_PER_SLICE',1),patch.object(long_tasks,'projects',return_value=[item]):
+        state=native_agent.run_slice(item,complete=many)
+    assert len(list(folder.glob('*.txt')))<=4
+    replies=[message for message in state['messages'] if message.get('role')=='tool']
+    assert len(replies)==25 and any('recovery action budget' in message['content'] for message in replies)
+
+
+def test_recovery_claim_preserves_permission_and_account_authentication_barriers(tmp_path):
+    item=capability_recovery_invoice_fixture(tmp_path/'invoice')
+    barriers=[
+        'I cannot access local files because permissions were denied.',
+        'I cannot access local files until you authenticate.',
+        'I cannot access local files until authentication finishes.',
+        'I cannot use tools here because your account requires authorization.',
+        'I cannot access local files until you log in.',
+        'I cannot use the browser in this environment until you sign-in.',
+        'I cannot access local files without valid credentials.',
+    ]
+    for message in barriers:
+        assert not native_agent.capability_claim_with_unmet_goal(item,message),message
+    for message in [
+        'I cannot access local files or tools in this environment.',
+        'I cannot render audio in this chat because no tool runtime is available.',
+        'I cannot use local tools because the file access adapter is missing.',
+    ]:
+        assert native_agent.capability_claim_with_unmet_goal(item,message),message
+
+
+def test_recovery_preserves_real_focused_browser_specialist_without_spending_turn(tmp_path):
+    import long_tasks
+    item,folder,source,bad,active,revision,runtime=submission_decision_fixture(tmp_path,'recovery-specialist')
+    suite=folder/'.local-ai/webapp-check.json';saved=suite.read_bytes()
+    state=native_agent.read_state(item);state.update(step_focus_turns=1,status='continue')
+    native_agent.save_state(item,state)
+    notice=native_agent.active_step_repair_notice(item,copy.deepcopy(state))
+    specialist=native_agent.focused_step_repair_request(item,copy.deepcopy(state),native_agent.TOOLS,notice,65536)
+    assert [tool['function']['name'] for tool in specialist['tools']]==['check_webapp']
+    goal=native_agent.capability_goal_hash(item)
+    episode=task_context.recovery_episode(folder,goal,active,trigger='repeated_failure')
+    task_context.recovery_catalog(folder,episode['id'],[])
+    seen=[]
+    def complete(payload):
+        seen.append(payload)
+        return {'choices':[{'message':{'role':'assistant','content':'I will preserve the original acceptance.'}}]}
+    with patch.object(native_agent,'MAX_TURNS_PER_SLICE',1),patch.object(long_tasks,'projects',return_value=[item]),patch.object(long_tasks,'STATE',runtime):
+        native_agent.run_slice(item,complete=complete)
+    assert len(seen)==1
+    assert [tool['function']['name'] for tool in seen[0]['tools']]==['check_webapp']
+    assert not seen[0].get('_native_capability_recovery')
+    assert task_context.recovery_episode(folder,goal,active)['turns']==0
+    assert suite.read_bytes()==saved and (folder/'index.html').read_bytes()==source
+    assert task_context.step_status(folder)['done']==0
+
+def missing_note_feedback_turn(tmp_path, calls, prior_failures=0):
+    from types import SimpleNamespace
+    import long_tasks
+    item=capability_recovery_invoice_fixture(tmp_path/'invoice');folder=Path(item['folder'])
+    for name in ('PLAN.md','PROGRESS.md'):(folder/'.local-ai'/name).unlink(missing_ok=True)
+    if prior_failures:
+        state=native_agent.read_state(item)
+        for _ in range(prior_failures):native_agent.remember_local_tool_feedback(state,'cale-qwen36','b'*64,
+            task_context.request_identity(folder),failed=True,recovered=False)
+        native_agent.save_state(item,state)
+    def complete(payload,task_id,**options):
+        return {'choices':[{'message':{'role':'assistant','tool_calls':[
+            {'id':str(i),'function':{'name':tool,'arguments':json.dumps(args)}} for i,(tool,args) in enumerate(calls)]}}]}
+    router=SimpleNamespace(complete=complete,last_local_model='cale-qwen36',last_local_weights='b'*64)
+    with patch('cloud_ai.Router',return_value=router),patch.object(native_agent,'MAX_TURNS_PER_SLICE',1),patch.object(long_tasks,'projects',return_value=[item]),patch.object(long_tasks,'STATE',tmp_path/'runtime'):
+        state=native_agent.run_slice(item)
+    return item,folder,state
+
+
+def test_expected_missing_worker_notes_keep_failures_without_discrediting_model(tmp_path):
+    item,folder,state=missing_note_feedback_turn(tmp_path,[('read_file',{'path':'.local-ai/PLAN.md'}),
+        ('read_file',{'path':'.local-ai/PROGRESS.md'})])
+    replies=[m for m in state['messages'] if m.get('role')=='tool']
+    assert len(replies)==2 and all('FileNotFoundError' in m['content'] for m in replies)
+    assert state['same_tool_failures']>=1 and task_context.step_status(folder)['done']==0
+    assert native_agent.repair_avoid_models(state,task_context.request_identity(folder))==[]
+    assert not (folder/'.local-ai/PLAN.md').exists() and not (folder/'.local-ai/PROGRESS.md').exists()
+    assert state['status']!='done'
+
+
+def test_missing_worker_notes_do_not_reset_existing_model_quality_failure(tmp_path):
+    item,folder,state=missing_note_feedback_turn(tmp_path,[('read_file',{'path':'.local-ai/PLAN.md'}),
+        ('read_file',{'path':'.local-ai/PROGRESS.md'})],prior_failures=1)
+    assert state['local_repair_feedback']['models'][0]['failures']==1
+    assert state['local_repair_feedback']['models'][0]['weights']=='b'*64
+
+
+@pytest.mark.parametrize('kind',['schema','source_patch','requested_output','escaping_path'])
+def test_ordinary_model_tool_failures_still_defer_weights(tmp_path,kind):
+    calls=([('read_file',{'path':42})]*2 if kind=='schema' else
+        [('edit_file',{'path':'billing.py','old_text':'UNMATCHED_SOURCE','new_text':'replacement'})]*2 if kind=='source_patch' else
+        [('read_file',{'path':'requested-report.txt'})]*2 if kind=='requested_output' else
+        [('read_file',{'path':'../escape.txt'})]*2)
+    item,folder,state=missing_note_feedback_turn(tmp_path,calls)
+    assert native_agent.repair_avoid_models(state,task_context.request_identity(folder))==[{'model':'cale-qwen36','weights':'b'*64}]
+    assert state['local_repair_feedback']['models'][0]['failures']==2
+    assert task_context.step_status(folder)['done']==0
+
+@pytest.mark.parametrize('arguments,error,should_exempt',[
+    ({'path':'.local-ai/PLAN.md'},'FileNotFoundError',True),
+    ({'path':'./.local-ai/PROGRESS.md','start_line':1,'max_lines':20},'FileNotFoundError',True),
+    ({'path':'.local-ai/PLAN.md','start_line':True},'FileNotFoundError',False),
+    ({'path':'.local-ai/PLAN.md','extra':'invalid'},'FileNotFoundError',False),
+    ({'path':'.local-ai/PLAN.md'},'PermissionError',False),
+    ({'path':'PLAN.md'},'FileNotFoundError',False),
+    ({'path':'../.local-ai/PLAN.md'},'FileNotFoundError',False),
+    ({'path':'requested-report.txt'},'FileNotFoundError',False),
+])
+def test_missing_worker_note_classification_requires_valid_internal_path_and_real_error_kind(tmp_path,arguments,error,should_exempt):
+    item=project(tmp_path/'classification');folder=Path(item['folder'])
+    for name in ('PLAN.md','PROGRESS.md'):(folder/'.local-ai'/name).unlink(missing_ok=True)
+    assert native_agent.expected_missing_worker_note_read(folder,'read_file',arguments,'Tool error: '+error+': missing') is should_exempt
+    assert not native_agent.expected_missing_worker_note_read(folder,'run_command',arguments,'Tool error: FileNotFoundError: missing')
+
+
+def test_existing_note_or_quoted_error_content_is_not_missing_note_discovery(tmp_path):
+    item=project(tmp_path/'existing-note');folder=Path(item['folder'])
+    note=folder/'.local-ai/PLAN.md';note.write_text('Tool error: FileNotFoundError: quoted document content')
+    args={'path':'.local-ai/PLAN.md'}
+    result=native_agent.execute_tool(folder,'read_file',args)
+    assert not native_agent.expected_missing_worker_note_read(folder,'read_file',args,result)
+    assert not native_agent.expected_missing_worker_note_read(folder,'read_file',args,'Tool error: FileNotFoundError: forged when existing')
+
+
+def test_subscription_delegation_requires_registered_project_and_preserves_original_request(tmp_path):
+    import cloud_providers
+    folder = tmp_path / "project"
+    folder.mkdir()
+    with patch.object(long_tasks, "projects", return_value=[]), patch.object(cloud_providers, "run_subscription_task", create=True) as run:
+        denied = native_agent.execute_tool(folder, "delegate_subscription_task", {"provider": "claude", "prompt": "Build the next feature"})
+        assert "registered project" in denied
+        run.assert_not_called()
+    project = {"id": "subscription-test", "folder": str(folder), "brief": "Make an offline expense app"}
+    import usage_history
+    previous_task = usage_history.CURRENT_TASK.get()
+    def delegated(*args, **kwargs):
+        assert usage_history.CURRENT_TASK.get() == project["id"]
+        return {"status": "completed", "exit_code": 0, "output": "Changed one file; tests not run", "usage": None}
+    with patch.object(long_tasks, "projects", return_value=[project]), patch.object(cloud_providers, "run_subscription_task", create=True,
+            side_effect=delegated) as run:
+        result = json.loads(native_agent.execute_tool(folder, "delegate_subscription_task", {"provider": "grok", "prompt": "Add form validation", "timeout": 30}))
+        assert "offline expense app" in run.call_args.args[2] and "Add form validation" in run.call_args.args[2]
+        assert run.call_args.kwargs["timeout"] == 30 and result["usage"] is None
+        assert "tests not run" in result["output"]
+        assert not (folder / ".local-ai/webapp-check.json").exists()
+
+    assert usage_history.CURRENT_TASK.get() == previous_task
+
+
+def test_subscription_large_result_stays_valid_json_and_preserves_full_task_receipt(tmp_path):
+    import cloud_providers
+    folder = tmp_path / "large-subscription"
+    folder.mkdir()
+    project = {"id": "large-result", "folder": str(folder), "brief": "Keep the full response for later checks"}
+    actual = {"provider": "claude", "status": "finished", "exit_code": 0,
+              "output": {"result": "Quoted \"text\"\n" * 5000}, "usage": None, "verification": "agent_report_only"}
+    with patch.object(long_tasks, "projects", return_value=[project]), patch.object(cloud_providers, "run_subscription_task", create=True, return_value=actual):
+        text = native_agent.execute_tool(folder, "delegate_subscription_task", {"provider": "claude", "prompt": "Review one function"})
+    result = json.loads(text)
+    assert len(text) <= native_agent.MAX_TOOL_OUTPUT and result["output_truncated"]
+    assert result["verification"] == "agent_report_only" and result["usage"] is None
+    assert json.loads((folder / result["full_result_path"]).read_text(encoding="utf-8")) == actual
+
+
+def test_subscription_handoff_honors_existing_no_delegation_and_passes_current_rules(tmp_path):
+    import cloud_providers
+    folder = tmp_path / "scoped-subscription"
+    folder.mkdir()
+    project = {"id": "scoped-result", "folder": str(folder), "brief": "Build a game"}
+    rules = folder / "AGENTS.md"
+    rules.write_text("Do not configure new paid AI, invoke Codex, or delegate.", encoding="utf-8")
+    with patch.object(long_tasks, "projects", return_value=[project]), patch.object(cloud_providers, "run_subscription_task") as run:
+        result = native_agent.execute_tool(folder, "delegate_subscription_task", {"provider": "grok", "prompt": "Add sprites"})
+        assert "forbids delegation" in result
+        run.assert_not_called()
+    rules.write_text("Keep all work offline-compatible and preserve tests.", encoding="utf-8")
+    notes = folder / ".local-ai"
+    notes.mkdir()
+    (notes / "USER-REQUESTS.md").write_text("The player must use arrow keys.", encoding="utf-8")
+    with patch.object(long_tasks, "projects", return_value=[project]), patch.object(cloud_providers, "run_subscription_task", return_value={"status": "finished"}) as run:
+        native_agent.execute_tool(folder, "delegate_subscription_task", {"provider": "grok", "prompt": "Add sprites"})
+        actual = run.call_args.args[2]
+        assert "offline-compatible" in actual and "arrow keys" in actual and "Build a game" in actual
+
+
+@pytest.mark.parametrize("restriction", ["original", "followup"])
+def test_subscription_handoff_rejects_explicit_original_or_later_no_delegation(tmp_path, restriction):
+    import cloud_providers
+    folder = tmp_path / restriction
+    folder.mkdir()
+    project = {"id": "no-delegation", "folder": str(folder), "brief": "Build an app. Do not delegate." if restriction == "original" else "Build an app."}
+    if restriction == "followup":
+        (folder / ".local-ai").mkdir()
+        (folder / ".local-ai/USER-REQUESTS.md").write_text("Never delegate this task.", encoding="utf-8")
+    with patch.object(long_tasks, "projects", return_value=[project]), patch.object(cloud_providers, "run_subscription_task") as run:
+        result = native_agent.execute_tool(folder, "delegate_subscription_task", {"provider": "grok", "prompt": "Build the UI"})
+        assert "forbids delegation" in result
+        run.assert_not_called()
+
+
+@pytest.mark.parametrize("ownership", ["live", "missing", "deleted", "changed"])
+def test_repeated_failure_guidance_requires_live_registry_before_next_action(tmp_path, monkeypatch, ownership):
+    item = project(tmp_path / "registry-guidance")
+    folder = Path(item["folder"])
+    owners = [] if ownership == "missing" else [item.copy()]
+    monkeypatch.setattr(long_tasks, "projects", lambda: list(owners))
+    monkeypatch.setattr(native_agent, "MAX_TURNS_PER_SLICE", 3)
+    seen = []
+
+    def complete(payload):
+        seen.append(copy.deepcopy(payload))
+        turn = len(seen)
+        if turn == 2 and ownership == "deleted":
+            owners.clear()
+        if turn == 2 and ownership == "changed":
+            owners[0]["brief"] = "A newer user request supersedes this worker"
+        name = "read_file" if turn <= 2 else "write_file"
+        arguments = ({"path": "missing.txt"} if turn <= 2 else
+                     {"path": "next-step.txt", "content": "Real next action"})
+        return {"choices": [{"message": {"role": "assistant", "tool_calls": [{
+            "id": f"registry-{turn}", "type": "function", "function": {
+                "name": name, "arguments": json.dumps(arguments)}}]}}]}
+
+    state = native_agent.run_slice(item, complete=complete)
+    episode = task_context.recovery_episode(folder, native_agent.capability_goal_hash(item), None)
+    assert state["status"] == "continue"
+    assert episode and episode["trigger"] == "repeated_failure"
+    assert "read_file missing.txt: Failed" in task_context.snapshot(folder)
+    if ownership == "live":
+        assert len(seen) == 3 and episode["turns"] == 1
+        assert "Do not retry it unchanged" in str(seen[2]["messages"])
+        assert (folder / "next-step.txt").read_text() == "Real next action"
+    else:
+        assert len(seen) == 2 and episode["turns"] == 0
+        assert "ownership or instructions changed" in state["current"]
+        assert not (folder / "next-step.txt").exists()
+
+
+@pytest.mark.parametrize("alias", ["local.import_game_example", "import_game_example", "local.install_game_libraries", "install_game_libraries", "design.import_game_example"])
+def test_game_mutators_cannot_target_another_registered_task(tmp_path, monkeypatch, alias):
+    import contextlib, toolbox_mcp, design_tools
+    current=tmp_path/'current';other=tmp_path/'other';current.mkdir();other.mkdir()
+    root=tmp_path/'app';(root/'LongTasks').mkdir(parents=True)
+    with contextlib.closing(sqlite3.connect(root/'LongTasks/projects.db')) as conn:
+        conn.execute('CREATE TABLE projects(folder TEXT)')
+        conn.executemany('INSERT INTO projects VALUES(?)',[(str(current),),(str(other),)]);conn.commit()
+    monkeypatch.setattr(toolbox_mcp,'ROOT',root)
+    called=[]
+    def imported(game_id,target):
+        called.append(target);Path(target).mkdir();raise AssertionError('Foreign source import executed')
+    monkeypatch.setattr(design_tools,'import_game_example',imported)
+    monkeypatch.setattr(toolbox_mcp,'_game_library_download',lambda *_:pytest.fail('Foreign libraries downloaded'))
+    arguments=({'game_id':'TEMP','project_path':str(other/'game')} if alias.startswith('design.') else
+               {'project_folder':str(other), **({'libraries':['phaser']} if 'install' in alias else {'game_id':'TEMP','path':'game'})})
+    with patch('native_specialists.runtime') as remote:
+        result=native_agent.execute_tool(current,'call_local_tool',{'tool':alias,'arguments':arguments})
+        assert result.startswith('Tool error:') and 'task' in result.lower(),result
+        remote.assert_not_called()
+    assert called==[] and not (other/'game').exists() and not (other/'vendor').exists()
+
+
+@pytest.mark.parametrize('alias', ['local.import_game_example','import_game_example','design.import_game_example'])
+def test_game_import_current_task_handoff_preserves_caller_arguments(tmp_path, monkeypatch, alias):
+    import contextlib, toolbox_mcp, design_tools
+    folder=tmp_path/'task';folder.mkdir();root=tmp_path/'app';(root/'LongTasks').mkdir(parents=True)
+    with contextlib.closing(sqlite3.connect(root/'LongTasks/projects.db')) as conn:
+        conn.execute('CREATE TABLE projects(folder TEXT)');conn.execute('INSERT INTO projects VALUES(?)',(str(folder),));conn.commit()
+    monkeypatch.setattr(toolbox_mcp,'ROOT',root)
+    def imported(game_id,target):
+        path=Path(target);path.mkdir();(path/'index.html').write_text('<script>/* TEMP */</script>');(path/'CALE-IMPORT.json').write_text('{}')
+        return {'folder':str(path),'entrypoint':'index.html','receipt_path':str(path/'CALE-IMPORT.json'),'game':{'id':game_id,'title':'TEMP'}}
+    monkeypatch.setattr(design_tools,'import_game_example',imported)
+    args={'game_id':'TEMP',**({'project_path':str(folder/'game')} if alias.startswith('design.') else {'path':'game'})}
+    before=copy.deepcopy(args)
+    result=native_agent.execute_tool(folder,'call_local_tool',{'tool':alias,'arguments':args})
+    assert not result.startswith('Tool error:'),result
+    assert (folder/'game/index.html').is_file() and args==before
+
+
+def test_game_mutator_changed_request_during_discovery_cannot_publish(tmp_path,monkeypatch):
+    import toolbox_mcp, design_tools
+    folder=tmp_path/'task';(folder/'.local-ai').mkdir(parents=True)
+    async def changed():
+        (folder/'.local-ai/USER-REQUESTS.md').write_text('New instruction: do not import')
+        return []
+    monkeypatch.setattr(toolbox_mcp.server,'list_tools',changed)
+    imported=Mock();monkeypatch.setattr(design_tools,'import_game_example',imported)
+    result=native_agent.execute_tool(folder,'call_local_tool',{'tool':'local.import_game_example','arguments':{'game_id':'TEMP','path':'game'}})
+    assert result.startswith('Tool error:') and 'changed' in result.lower(),result
+    imported.assert_not_called();assert not (folder/'game').exists()
+
+
+@pytest.mark.parametrize('foreign',[False,True])
+def test_game_task_folder_junction_alias_is_canonicalized_before_import(tmp_path,monkeypatch,foreign):
+    import contextlib, toolbox_mcp, design_tools
+    folder=tmp_path/'current';other=tmp_path/'other';folder.mkdir();other.mkdir()
+    alias=tmp_path/'alias'
+    if os.name=='nt':
+        made=subprocess.run(['cmd','/c','mklink','/J',str(alias),str(other if foreign else folder)],capture_output=True)
+        assert made.returncode==0
+    else:alias.symlink_to(other if foreign else folder,target_is_directory=True)
+    root=tmp_path/'app';(root/'LongTasks').mkdir(parents=True)
+    with contextlib.closing(sqlite3.connect(root/'LongTasks/projects.db')) as conn:
+        conn.execute('CREATE TABLE projects(folder TEXT)');conn.executemany('INSERT INTO projects VALUES(?)',[(str(folder),),(str(other),)]);conn.commit()
+    monkeypatch.setattr(toolbox_mcp,'ROOT',root)
+    def imported(game_id,target):
+        path=Path(target);path.mkdir();(path/'index.html').write_text('<script>/* TEMP */</script>');(path/'CALE-IMPORT.json').write_text('{}')
+        return {'folder':str(path),'entrypoint':'index.html','receipt_path':str(path/'CALE-IMPORT.json'),'game':{'id':game_id,'title':'TEMP'}}
+    importer=Mock(side_effect=imported);monkeypatch.setattr(design_tools,'import_game_example',importer)
+    arguments={'project_folder':str(alias),'game_id':'TEMP','path':'game'};original=copy.deepcopy(arguments)
+    try:
+        result=native_agent.execute_tool(folder,'call_local_tool',{'tool':'local.import_game_example','arguments':arguments})
+        assert arguments==original
+        if foreign:
+            assert result.startswith('Tool error:');importer.assert_not_called()
+            assert not (other/'game').exists()
+        else:
+            assert not result.startswith('Tool error:'),result
+            assert (folder/'game/index.html').is_file()
+    finally:
+        if os.name=='nt':alias.rmdir()
+        else:alias.unlink()
+
+
+@pytest.mark.parametrize('alias',['local.install_game_libraries','install_game_libraries'])
+def test_game_libraries_omitted_task_folder_is_bound_to_current_project(tmp_path,monkeypatch,alias):
+    import contextlib, toolbox_mcp
+    folder=tmp_path/'current';folder.mkdir();root=tmp_path/'app';(root/'LongTasks').mkdir(parents=True)
+    with contextlib.closing(sqlite3.connect(root/'LongTasks/projects.db')) as conn:
+        conn.execute('CREATE TABLE projects(folder TEXT)');conn.execute('INSERT INTO projects VALUES(?)',(str(folder),));conn.commit()
+    monkeypatch.setattr(toolbox_mcp,'ROOT',root)
+    payload=b'/* public TEMP library fixture */';digest=hashlib.sha256(payload).hexdigest()
+    monkeypatch.setattr(toolbox_mcp,'GAME_LIBRARIES',{'phaser':{'version':'test','repo':'test/repo','commit':'a'*40,
+        'files':[{'source_path':'phaser.min.js','url':'https://invalid.test/not-contacted','bytes':len(payload),'sha256':digest}]}})
+    monkeypatch.setattr(toolbox_mcp,'_game_library_download',lambda *_:payload)
+    arguments={'libraries':['phaser']};before=copy.deepcopy(arguments)
+    result=native_agent.execute_tool(folder,'call_local_tool',{'tool':alias,'arguments':arguments})
+    assert not result.startswith('Tool error:'),result
+    assert (folder/'vendor/cale-game/phaser/phaser.min.js').read_bytes()==payload
+    assert arguments==before
+# Scoped host evidence port: original accepted85552a5 regressions.
+
+def persistence_bookmark_fixture(tmp_path, *, persistent=False):
+    """Real browser fixture; original requirements never come from app code."""
+    item=project(tmp_path/'bookmarks');folder=Path(item['folder'])
+    item['brief']='Build an offline bookmark app in index.html with a title input and Add button. Save bookmarks across page reloads.'
+    (folder/'.local-ai/USER-REQUESTS.md').write_text(item['brief'])
+    source="""<!doctype html><meta name=viewport content='width=device-width'>
+    <input id=title><button id=add>Add bookmark</button><ul id=bookmarks></ul><span id=count>0</span>
+    <script src='app.js'></script>"""
+    (folder/'index.html').write_text(source)
+    code="""let items=LOAD;
+    function render(){document.getElementById('bookmarks').textContent=items.join(' | ');document.getElementById('count').textContent=items.length;}
+    document.getElementById('add').onclick=()=>{items.push(document.getElementById('title').value);SAVE;render();};render();"""
+    code=code.replace('LOAD',"JSON.parse(localStorage.getItem('bookmarks') || '[]')" if persistent else '[]')
+    code=code.replace('SAVE',"localStorage.setItem('bookmarks',JSON.stringify(items))" if persistent else '')
+    (folder/'app.js').write_text(code)
+    spec={'path':'index.html','cases':[
+        {'set':{'title':'Alpha'},'click':['add'],'expect':{'bookmarks':'Alpha','count':'1'}},
+        {'set':{'title':'Beta'},'click':['add'],'expect':{'bookmarks':'Beta','count':'2'}}]}
+    active=task_context.plan_steps(folder,[{'phase':'Persistence','title':'Bookmarks persist',
+        'check_tool':'check_webapp','check_arguments':spec}])['active']
+    runtime=tmp_path/'runtime';runtime.mkdir()
+    return item,folder,spec,active,runtime
+
+
+
+def test_explicit_reload_requirement_rejects_real_weak_passed_suite(tmp_path):
+    import webapp_check
+    item,folder,spec,active,runtime=persistence_bookmark_fixture(tmp_path)
+    from contextlib import nullcontext
+    context=getattr(project_memory,'verification_context',lambda project:nullcontext())
+    with context(item),patch.object(long_tasks,'STATE',runtime),patch.object(long_tasks,'projects',return_value=[item]):
+        actual=json.loads(native_agent.execute_tool(folder,'check_webapp',spec))
+        assert actual['passed'],actual
+        completed=json.loads(native_agent.execute_tool(folder,'task_steps',{'action':'complete','step_id':active['id']}))
+        assert completed['passed'] and completed['done']==1
+        verification=native_agent.execute_tool(folder,'run_verifier',{})
+        assert verification.startswith('Exit code: 0\n'),verification
+        state={**native_agent.browser_check_evidence(folder,spec,json.dumps(actual)),'verify_passed':True}
+        assert state['browser_verified']
+        issue=native_agent.completion_issue(folder,item,state)
+    assert 'persistence after reload' in issue
+    assert 'same' in issue and task_context.step_status(folder)['done']==1
+
+
+
+def test_real_storage_reload_witness_satisfies_only_explicit_persistence_obligation(tmp_path):
+    import webapp_check
+    item,folder,spec,active,runtime=persistence_bookmark_fixture(tmp_path,persistent=True)
+    # Retain both original cases; the new outcome is actually observed after
+    # two real mutations and then through a reload with no replayed input.
+    spec['cases'].append({'reload':True,'expect':{'bookmarks':'Beta','count':'2'}})
+    with project_memory.verification_context(item),patch.object(long_tasks,'STATE',runtime),patch.object(long_tasks,'projects',return_value=[item]):
+        actual=json.loads(native_agent.execute_tool(folder,'check_webapp',spec))
+        assert actual['passed'],actual
+        original_done=json.loads(native_agent.execute_tool(folder,'task_steps',{'action':'complete','step_id':active['id']}))
+        assert original_done['passed'] and original_done['done']==1
+        verification=native_agent.execute_tool(folder,'run_verifier',{})
+        assert verification.startswith('Exit code: 0\n'),verification
+        replay=webapp_check.run_saved_checks(folder,folder/'.local-ai/webapp-check.json')
+        assert replay['passed'] and replay['persistence_witnesses']
+        assert not native_agent.persistence_completion_issue(folder,item)
+        state={**native_agent.browser_check_evidence(folder,spec,json.dumps(actual)),'verify_passed':True}
+        assert not native_agent.completion_issue(folder,item,state)
+        receipts=project_memory.current_check_receipts(folder,item,checker_file=webapp_check.__file__)
+        measured=[row for row in receipts if row['checker']=='check_webapp_saved']
+        assert measured and measured[0]['persistence_witnesses']
+        assert measured[0]['source_before']['scope']=='full_project_source'
+        # External JavaScript is part of the source closure, even with unchanged HTML.
+        script=folder/'app.js';original=script.read_bytes();script.write_bytes(original+b'\n// changed')
+        assert native_agent.persistence_completion_issue(folder,item)
+        script.write_bytes(original)
+        old=item['brief'];item['brief']+=' Also retain a second field.'
+        assert native_agent.persistence_completion_issue(folder,item)
+        item['brief']=old
+        assert not native_agent.persistence_completion_issue(folder,item)
+        # Hash-corrupted/loose cache metadata cannot replace a missing witness.
+        with project_memory.connection(folder) as conn:
+            conn.execute("UPDATE verification_receipts SET payload=replace(payload,'reload_case','forged_reload_case')")
+        assert native_agent.persistence_completion_issue(folder,item)
+
+
+
+@pytest.mark.parametrize('brief',[
+    'Build an offline counter app.',
+    'Build a bookmark app. Do not save bookmarks across page reloads.',
+    'Build a bookmark app. Perhaps save bookmarks across page reloads.',
+    'Explain how bookmarks might persist after reload?',
+    'Build a bookmark app. Save bookmarks if requested later.',
+])
+def test_persistence_obligation_does_not_invent_negated_or_ambiguous_scope(tmp_path,brief):
+    item=project(tmp_path/'ordinary');item['brief']=brief
+    assert task_context.explicit_persistence_obligations(item['folder'],item)==[]
+
+
+
+@pytest.mark.parametrize('mode',['static','reload_with_new_input','no_storage','separate_contexts'])
+def test_real_browser_persistence_witness_rejects_nonproof_sequences(tmp_path,mode):
+    import webapp_check
+    item,folder,spec,active,runtime=persistence_bookmark_fixture(tmp_path,persistent=mode!='no_storage')
+    if mode=='static':
+        page=folder/'index.html';page.write_text(page.read_text()+'<h1 id=heading>Bookmarks</h1>')
+        spec['cases']=[{'set':{'title':'Alpha'},'click':['add'],'expect':{'heading':'Bookmarks'}},
+                       {'reload':True,'expect':{'heading':'Bookmarks'}}]
+    elif mode=='reload_with_new_input':
+        spec['cases']=[spec['cases'][0],{**spec['cases'][1],'reload':True}]
+    elif mode=='no_storage':
+        spec['cases'].append({'reload':True,'expect':{'bookmarks':'Beta','count':'2'}})
+    elif mode=='separate_contexts':
+        first=webapp_check.check(folder,{'path':'index.html','cases':[spec['cases'][0]]})
+        assert first['passed'] and first['interactions'] and not first['persistence_witnesses']
+        spec={'path':'index.html','cases':[{'reload':True,'expect':{'bookmarks':'','count':'0'}}]}
+    result=webapp_check.check(folder,spec)
+    if mode=='no_storage':assert not result['passed']
+    else:assert result['passed']
+    assert not result['persistence_witnesses']
+
+
+
+def test_persistence_obligations_preserve_exact_source_span_and_basis(tmp_path):
+    item=project(tmp_path/'span');item['brief']='Build a bookmark page. Save bookmarks across page reloads.'
+    obligations=task_context.explicit_persistence_obligations(item['folder'],item)
+    assert len(obligations)==1
+    value=obligations[0];span=item['brief'][slice(*value['span'])]
+    assert value['source']=='brief' and 'Save bookmarks' in span
+    assert value['span_sha256']==hashlib.sha256(span.encode()).hexdigest()
+    assert value['planning_basis']==native_agent.planning_basis(item)
+    for brief in ['Bookmarks should not persist after reload.','Bookmarks must not save across reloads.',
+                  'The old app saved bookmarks across reloads.','Could save bookmarks after reload.']:
+        item['brief']=brief
+        assert task_context.explicit_persistence_obligations(item['folder'],item)==[]
+
+
+
+def test_browser_hidden_dependency_remains_limited_even_if_project_manifest_skips_git_metadata(tmp_path):
+    import webapp_check
+    item,folder,spec,active,runtime=persistence_bookmark_fixture(tmp_path,persistent=True)
+    hidden=folder/'.git';hidden.mkdir()
+    (folder/'app.js').replace(hidden/'app.js')
+    page=folder/'index.html';page.write_text(page.read_text().replace("src='app.js'","src='.git/app.js'"))
+    spec['cases'].append({'reload':True,'expect':{'bookmarks':'Beta','count':'2'}})
+    assert project_memory.verification_source_state(folder)['scope']=='full_project_source'
+    with project_memory.verification_context(item):
+        measured=webapp_check.check(folder,spec)
+        assert measured['passed'] and measured['persistence_witnesses']
+        assert measured['dependency_scope']=='limited_dependency_manifest'
+        webapp_check.save_verifier(folder,spec)
+        replay=webapp_check.run_saved_checks(folder,folder/'.local-ai/webapp-check.json')
+        assert replay['passed'] and replay['dependency_scope']=='limited_dependency_manifest'
+        assert native_agent.persistence_completion_issue(folder,item)
+
+
+
+def test_command_unit_receipt_binds_original_check_and_does_not_promote_process_success(tmp_path):
+    item=project(tmp_path/'commands');folder=Path(item['folder'])
+    active=task_context.plan_steps(folder,[{'title':'Actual command','phase':'Run',
+        'check_command':'Write-Output "checked"','shell':'powershell'}])['active']
+    with project_memory.verification_context(item):
+        result=json.loads(native_agent.execute_tool(folder,'task_steps',{'action':'complete','step_id':active['id']}))
+    assert result['passed']
+    with project_memory.connection(folder) as conn:
+        rows=[json.loads(row['payload']) for row in conn.execute('SELECT payload FROM verification_receipts')]
+    matching=[row for row in rows if row['checker']=='task_steps']
+    assert matching and matching[0]['bound_step_check_sha256']==task_context.step_check_identity(active)
+    assert matching[0]['verification_level']=='process_exit_zero'
+    assert matching[0]['training_eligible'] is False
+
+
+
+@pytest.mark.parametrize('brief',[
+    'Build a bookmark app. Save a screenshot after reloading the page.',
+    'Build a bookmark app. Remember to save a report after reloading.',
+    'Build a bookmark app. Keep the Add button visible after reload.',
+])
+def test_nonpersistent_after_reload_procedures_do_not_invent_data_retention(tmp_path,brief):
+    item=project(tmp_path/'procedure');item['brief']=brief
+    assert task_context.explicit_persistence_obligations(item['folder'],item)==[]
+
+
+
+def test_reload_preserve_original_dual_clause_cannot_be_satisfied_by_real_add_only_witness(tmp_path):
+    import webapp_check
+    item,folder,spec,active,runtime=persistence_bookmark_fixture(tmp_path,persistent=True)
+    item['brief']='Build an offline bookmark app in index.html with input and buttons. Save records on this computer with localStorage. Reloading must preserve added records and deletions.'
+    (folder/'.local-ai/USER-REQUESTS.md').write_text(item['brief'])
+    spec['cases'].append({'reload':True,'expect':{'bookmarks':'Beta','count':'2'}})
+    with project_memory.verification_context(item):
+        webapp_check.save_verifier(folder,spec,accumulate=True)
+        actual=webapp_check.run_saved_checks(folder,folder/'.local-ai/webapp-check.json')
+        assert actual['passed'] and actual['persistence_witnesses']
+        issue=native_agent.persistence_completion_issue(folder,item)
+    assert 'removal' in issue or 'deletion' in issue
+    obligations=task_context.explicit_persistence_obligations(folder,item)
+    assert obligations and any(row['required_effects']==['creation','removal'] for row in obligations)
+    assert task_context.step_status(folder)['done']==0
+
+
+
+def deletion_reload_fixture(tmp_path, *, store=True, store_deletion=True):
+    item,folder,original,active,runtime=persistence_bookmark_fixture(tmp_path,persistent=True)
+    item['brief']='Build an offline bookmark app in index.html with input and buttons. Save records on this computer with localStorage. Reloading must preserve added records and deletions.'
+    (folder/'.local-ai/USER-REQUESTS.md').write_text(item['brief'])
+    active=task_context.plan_steps(folder,[{'phase':'Persistence','title':'Bookmark data',
+        'check_tool':'check_webapp','check_arguments':original}])['active']
+    page=folder/'index.html';page.write_text(page.read_text().replace('<ul id=bookmarks>','<button id=remove>Remove last</button><ul id=bookmarks>'))
+    code="""let items=LOAD;
+    function render(){const list=document.getElementById('bookmarks');list.textContent='';items.forEach(name=>{const li=document.createElement('li');li.textContent=name;list.appendChild(li);});document.getElementById('count').textContent=items.length;}
+    function save(){SAVE;}
+    document.getElementById('add').onclick=()=>{items.push(document.getElementById('title').value);save();render();};
+    document.getElementById('remove').onclick=()=>{items.pop();DELETE_SAVE;render();};render();"""
+    code=code.replace('LOAD',"JSON.parse(localStorage.getItem('bookmarks') || '[]')" if store else '[]')
+    code=code.replace('DELETE_SAVE','save()' if store_deletion else '')
+    code=code.replace('SAVE',"localStorage.setItem('bookmarks',JSON.stringify(items))" if store else '')
+    (folder/'app.js').write_text(code)
+    spec=copy.deepcopy(original)
+    spec['cases'] += [
+        {'reload':True,'expect':{'bookmarks':'Beta','count':'2'}},
+        {'click':['remove'],'expect':{'bookmarks':'Alpha','count':'1'}},
+        {'reload':True,'expect':{'bookmarks':'Alpha','count':'1'}}]
+    return item,folder,spec,active
+
+
+
+def test_actual_add_and_delete_reload_have_distinct_persisted_baseline_witnesses(tmp_path):
+    import webapp_check
+    item,folder,spec,active=deletion_reload_fixture(tmp_path)
+    with project_memory.verification_context(item):
+        webapp_check.save_verifier(folder,spec,accumulate=True)
+        report=webapp_check.run_saved_checks(folder,folder/'.local-ai/webapp-check.json')
+        assert report['passed'],report
+        effects={row['effect'] for row in report['persistence_witnesses']}
+        assert {'creation','removal'}<=effects
+        removal=next(row for row in report['persistence_witnesses'] if row['effect']=='removal')
+        assert removal['baseline_reload_case']==3 and removal['action_case']==4 and removal['reload_case']==5
+        assert removal['count_before']==2 and removal['count_after']==1
+        assert removal['baseline_observed_sha256']==removal['before_observed_sha256']
+        assert not native_agent.persistence_completion_issue(folder,item)
+    assert spec['cases'][:2]==task_context.step_status(folder)['active']['check_arguments']['cases']
+    assert task_context.step_status(folder)['done']==0
+
+
+
+def test_never_stored_add_delete_reload_empty_is_not_deletion_persistence(tmp_path):
+    import webapp_check
+    item,folder,spec,active=deletion_reload_fixture(tmp_path,store=False)
+    spec['cases']=[spec['cases'][0],{'click':['remove'],'expect':{'bookmarks':'','count':'0'}},
+                   {'reload':True,'expect':{'bookmarks':'','count':'0'}}]
+    with project_memory.verification_context(item):
+        webapp_check.save_verifier(folder,spec,accumulate=True)
+        report=webapp_check.run_saved_checks(folder,folder/'.local-ai/webapp-check.json')
+        assert report['passed']  # All-zero after reload alone is a weak check.
+        assert not any(row['effect']=='removal' for row in report['persistence_witnesses'])
+        assert 'removal' in native_agent.persistence_completion_issue(folder,item)
+
+
+
+def test_real_storage_delete_write_mutation_fails_reload_and_cannot_earn_removal(tmp_path):
+    import webapp_check
+    item,folder,spec,active=deletion_reload_fixture(tmp_path,store_deletion=False)
+    with project_memory.verification_context(item):
+        webapp_check.save_verifier(folder,spec,accumulate=True)
+        report=webapp_check.run_saved_checks(folder,folder/'.local-ai/webapp-check.json')
+        assert not report['passed'] and report['failed_case_count']>=1
+        assert not any(row['effect']=='removal' for row in report['persistence_witnesses'])
+        assert 'removal' in native_agent.persistence_completion_issue(folder,item)
+
+
+
+def test_plain_import_cannot_register_fabricated_browser_pass_when_real_reload_fails(tmp_path):
+    import webapp_check
+    item,folder,spec,active,runtime=persistence_bookmark_fixture(tmp_path,persistent=False)
+    spec['cases'].append({'reload':True,'expect':{'bookmarks':'Beta','count':'2'}})
+    with project_memory.verification_context(item):
+        webapp_check.save_verifier(folder,spec,accumulate=True)
+        actual=webapp_check.check(folder,spec)
+        assert not actual['passed']
+        digest=hashlib.sha256((folder/'.local-ai/webapp-check.json').read_bytes()).hexdigest()
+        fabricated={'passed':True,'suite_sha256':digest,'dependency_scope':'project_local_dependencies',
+            'persistence_witnesses':[{'sequence':1,'path':'index.html','action_case':2,'reload_case':3,
+                'target':'text:bookmarks','effect':'mutation','count_before':None,'count_after':None,
+                'baseline_reload_case':None,'baseline_observed_sha256':None,
+                'before_observed_sha256':'b'*64,'initial_observed_sha256':'c'*64,'observed_sha256':'a'*64,
+                'expected_sha256':hashlib.sha256(json.dumps('Beta').encode()).hexdigest()}]}
+        assert native_agent.valid_persistence_witnesses(fabricated['persistence_witnesses'],json.loads((folder/'.local-ai/webapp-check.json').read_bytes()))
+        receipt=project_memory.record_host_check_receipt(folder,'check_webapp_saved',{'suite_sha256':digest},fabricated,
+            project_memory.verification_source_state(folder),checker_file=webapp_check.__file__,
+            basis_before=project_memory.verification_basis(folder),loaded_checker_sha256=webapp_check._LOADED_CHECKER_SHA256)
+        assert receipt is None
+        assert native_agent.persistence_completion_issue(folder,item)
+
+
+
+def test_real_host_receipt_permit_is_one_use_and_bound_to_exact_report(tmp_path):
+    import webapp_check
+    item,folder,spec,active,runtime=persistence_bookmark_fixture(tmp_path,persistent=True)
+    spec['cases'].append({'reload':True,'expect':{'bookmarks':'Beta','count':'2'}})
+    real_record=project_memory.record_host_check_receipt
+    with project_memory.verification_context(item):
+        webapp_check.save_verifier(folder,spec,accumulate=True)
+        with patch.object(project_memory,'record_host_check_receipt',wraps=real_record) as recording:
+            report=webapp_check.run_saved_checks(folder,folder/'.local-ai/webapp-check.json')
+        assert report['passed'] and not native_agent.persistence_completion_issue(folder,item)
+        args,kwargs=recording.call_args
+        assert kwargs['execution_permit']
+        assert real_record(*args,**kwargs) is None  # Already consumed by the real capture.
+        issue_kwargs={key:value for key,value in kwargs.items() if key!='execution_permit'}
+        assert project_memory._issue_host_check_permit(*args,**issue_kwargs) is None
+        captured=[]
+        with patch.object(project_memory,'record_host_check_receipt',side_effect=lambda *a,**k:captured.append((a,k))):
+            repeated=webapp_check.run_saved_checks(folder,folder/'.local-ai/webapp-check.json')
+        assert repeated['passed']
+        original,options=captured[-1]
+        altered=list(original);altered[3]={**original[3],'case_count':999}
+        assert real_record(*altered,**options) is None
+        assert real_record(*original,**options) is None  # Mismatch also consumes the permit.
+
+
+
+def test_offline_aborted_external_script_keeps_dependency_scope_limited(tmp_path):
+    import webapp_check
+    item,folder,spec,active,runtime=persistence_bookmark_fixture(tmp_path,persistent=True)
+    page=folder/'index.html';page.write_text(page.read_text()+"<script src='https://example.invalid/unavailable.js'></script>")
+    spec['cases'].append({'reload':True,'expect':{'bookmarks':'Beta','count':'2'}})
+    with project_memory.verification_context(item):
+        webapp_check.save_verifier(folder,spec,accumulate=True)
+        report=webapp_check.run_saved_checks(folder,folder/'.local-ai/webapp-check.json')
+        assert report['passed'] and report['persistence_witnesses']
+        assert report['dependency_scope']=='limited_dependency_manifest'
+        assert native_agent.persistence_completion_issue(folder,item)
+
+
+
+def test_actual_generated_browser_verifier_and_main_alias_capture_real_receipts(tmp_path):
+    import webapp_check
+    item,folder,spec,active,runtime=persistence_bookmark_fixture(tmp_path,persistent=True)
+    spec['cases'].append({'reload':True,'expect':{'bookmarks':'Beta','count':'2'}})
+    webapp_check.save_verifier(folder,spec,accumulate=True)
+    hidden=subprocess.CREATE_NO_WINDOW if os.name=='nt' else 0
+    child=subprocess.run(['powershell','-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',str(folder/'.local-ai/verify.ps1')],
+        capture_output=True,text=True,timeout=40,creationflags=hidden)
+    assert child.returncode==0,child.stderr+child.stdout
+    with project_memory.connection(folder) as conn:
+        cli_rows=[json.loads(row['payload']) for row in conn.execute('SELECT payload FROM verification_receipts')]
+    assert any(row['checker']=='check_webapp_saved' for row in cli_rows)
+    # A separate real runpy __main__ entrypoint has an authoritative TEMP task
+    # registry. No fake browser verdict or canonical-module main() shortcut.
+    with patch.object(long_tasks,'STATE',runtime),long_tasks.database() as conn:
+        conn.execute('INSERT INTO projects(id,folder,brief,created,updated) VALUES(?,?,?,?,?)',
+            (item['id'],str(folder.resolve()),item['brief'],time.time(),time.time()))
+    bootstrap=tmp_path/'browser_cli_bootstrap.py'
+    bootstrap.write_text('import sys,runpy\nfrom pathlib import Path\nsys.path.insert(0,'+repr(str(Path(native_agent.__file__).parent))+')\nimport long_tasks\nlong_tasks.STATE=Path('+repr(str(runtime))+')\nsys.argv='+repr([webapp_check.__file__,'--folder',str(folder),'--spec',str(folder/'.local-ai/webapp-check.json')])+'\nrunpy.run_path('+repr(webapp_check.__file__)+',run_name="__main__")\n')
+    aliased=subprocess.run([sys.executable,'-B',str(bootstrap)],capture_output=True,text=True,timeout=40,creationflags=hidden)
+    assert aliased.returncode==0,aliased.stderr+aliased.stdout
+    assert project_memory.current_check_receipts(folder,item,checker_file=webapp_check.__file__)
+    assert not native_agent.persistence_completion_issue(folder,item)
+
+
+
+def test_actual_native_function_checker_cli_main_captures_real_pass(tmp_path):
+    folder=tmp_path/'native-cli';folder.mkdir();(folder/'.local-ai').mkdir()
+    (folder/'logic.py').write_text('def twice(value): return value*2')
+    spec={'request_hash':task_context.request_identity(folder),'checks':[
+        {'path':'logic.py','function':'twice','cases':[{'args':[3],'expected':6}]}]}
+    path=folder/'.local-ai/cale-python-checks.json';path.write_text(json.dumps(spec))
+    sha=hashlib.sha256(path.read_bytes()).hexdigest()
+    child=subprocess.run([sys.executable,'-B',native_agent.__file__,'check-python',str(folder),str(path),sha],
+        capture_output=True,text=True,timeout=30,creationflags=subprocess.CREATE_NO_WINDOW if os.name=='nt' else 0)
+    assert child.returncode==0,child.stderr+child.stdout
+    assert json.loads(child.stdout)['passed']
+    with project_memory.connection(folder) as conn:
+        rows=[json.loads(row['payload']) for row in conn.execute('SELECT payload FROM verification_receipts')]
+    assert any(row['checker']=='check_python_function' and row['verification_level']=='acceptance_passed_unbound' for row in rows)
+
+
+
+def test_never_stored_return_to_initial_zero_cannot_satisfy_even_generic_reload_request(tmp_path):
+    import webapp_check
+    item,folder,spec,active=deletion_reload_fixture(tmp_path,store=False)
+    item['brief']='Build an offline bookmark app in index.html with input and buttons. Save bookmarks across page reloads.'
+    (folder/'.local-ai/USER-REQUESTS.md').write_text(item['brief'])
+    spec['cases']=[spec['cases'][0],{'click':['remove'],'expect':{'bookmarks':'','count':'0'}},
+                   {'reload':True,'expect':{'bookmarks':'','count':'0'}}]
+    with project_memory.verification_context(item):
+        webapp_check.save_verifier(folder,spec,accumulate=True)
+        report=webapp_check.run_saved_checks(folder,folder/'.local-ai/webapp-check.json')
+        assert report['passed']
+        assert native_agent.persistence_completion_issue(folder,item)
+
+
+
+def test_collection_witness_observation_never_invokes_app_owned_children_getter(tmp_path):
+    import webapp_check
+    item,folder,spec,active,runtime=persistence_bookmark_fixture(tmp_path,persistent=True)
+    script=folder/'app.js'
+    script.write_text(script.read_text()+"\nwindow.witness={getterReads:0}; const nativeChildren=Object.getOwnPropertyDescriptor(Element.prototype,'children').get; Object.defineProperty(document.getElementById('bookmarks'),'children',{get(){window.witness.getterReads++;return nativeChildren.call(this);}});")
+    for case in spec['cases']:case['state']={'witness.getterReads':0}
+    measured=webapp_check.check(folder,spec)
+    assert measured['passed'],measured
+
+
+
+def test_collection_witness_observation_never_invokes_app_prototype_children_getter(tmp_path):
+    import webapp_check
+    item,folder,spec,active,runtime=persistence_bookmark_fixture(tmp_path,persistent=True)
+    script=folder/'app.js'
+    script.write_text(script.read_text()+"\nwindow.probe={reads:0}; const pristineChildren=Object.getOwnPropertyDescriptor(Element.prototype,'children').get; Object.defineProperty(Element.prototype,'children',{configurable:true,get(){window.probe.reads++;return pristineChildren.call(this);}});")
+    control={'path':'index.html','cases':[{'click':['add'],'state':{'probe.reads':0}}]}
+    assert webapp_check.check(folder,control)['passed']
+    for case in spec['cases']:case['state']={'probe.reads':0}
+    measured=webapp_check.check(folder,spec)
+    assert measured['passed'],measured
+
+
+
+@pytest.mark.parametrize('kind', ['children','collection_length','collection_item','matches'])
+def test_pristine_list_witness_ignores_all_later_prototype_replacements(tmp_path,kind):
+    import webapp_check
+    item,folder,spec,active=deletion_reload_fixture(tmp_path)
+    replacements={
+        'children': "const d=Object.getOwnPropertyDescriptor(Element.prototype,'children');Object.defineProperty(Element.prototype,'children',{configurable:true,get(){probe.reads++;return d.get.call(this);}});",
+        'collection_length': "const d=Object.getOwnPropertyDescriptor(HTMLCollection.prototype,'length');Object.defineProperty(HTMLCollection.prototype,'length',{configurable:true,get(){probe.reads++;return d.get.call(this);}});",
+        'collection_item': "const method=HTMLCollection.prototype.item;HTMLCollection.prototype.item=function(...args){probe.reads++;return Reflect.apply(method,this,args);};",
+        'matches': "const method=Element.prototype.matches;Element.prototype.matches=function(...args){probe.reads++;return Reflect.apply(method,this,args);};",
+    }
+    script=folder/'app.js';script.write_text(script.read_text()+'\nwindow.probe={reads:0};'+replacements[kind])
+    control={'path':'index.html','cases':[{'set':{'title':'Control'},'click':['add'],'state':{'probe.reads':0}}]}
+    assert webapp_check.check(folder,control)['passed']
+    for case in spec['cases']:case['state']={'probe.reads':0}
+    measured=webapp_check.check(folder,spec)
+    assert measured['passed'],measured
+    assert {'creation','removal'}<={row['effect'] for row in measured['persistence_witnesses']}
+
+
+
+@pytest.mark.parametrize('kind', ['table_rows','section_rows','collection_length','collection_item','node_length','node_item','query','escape','tag'])
+def test_pristine_row_observer_ignores_later_dom_prototype_and_method_replacements(tmp_path,kind):
+    import webapp_check
+    item=project(tmp_path/'tables');folder=Path(item['folder'])
+    replacements={
+        'table_rows': "const d=Object.getOwnPropertyDescriptor(HTMLTableElement.prototype,'rows');Object.defineProperty(HTMLTableElement.prototype,'rows',{configurable:true,get(){probe.reads++;return d.get.call(this);}});",
+        'section_rows': "const d=Object.getOwnPropertyDescriptor(HTMLTableSectionElement.prototype,'rows');Object.defineProperty(HTMLTableSectionElement.prototype,'rows',{configurable:true,get(){probe.reads++;return d.get.call(this);}});",
+        'collection_length': "const d=Object.getOwnPropertyDescriptor(HTMLCollection.prototype,'length');Object.defineProperty(HTMLCollection.prototype,'length',{configurable:true,get(){probe.reads++;return d.get.call(this);}});",
+        'collection_item': "const method=HTMLCollection.prototype.item;HTMLCollection.prototype.item=function(...args){probe.reads++;return Reflect.apply(method,this,args);};",
+        'node_length': "const d=Object.getOwnPropertyDescriptor(NodeList.prototype,'length');Object.defineProperty(NodeList.prototype,'length',{configurable:true,get(){probe.reads++;return d.get.call(this);}});",
+        'node_item': "const method=NodeList.prototype.item;NodeList.prototype.item=function(...args){probe.reads++;return Reflect.apply(method,this,args);};",
+        'query': "const method=Document.prototype.querySelectorAll;Document.prototype.querySelectorAll=function(...args){probe.reads++;return Reflect.apply(method,this,args);};",
+        'escape': "const method=CSS.escape;CSS.escape=function(...args){probe.reads++;return Reflect.apply(method,this,args);};",
+        'tag': "const d=Object.getOwnPropertyDescriptor(Element.prototype,'localName');Object.defineProperty(Element.prototype,'localName',{configurable:true,get(){probe.reads++;return d.get.call(this);}});",
+    }
+    source="""<button id=add>Add</button><table id=records><tbody id=body></tbody></table>
+    <script>window.probe={reads:0};document.getElementById('add').onclick=()=>{const row=document.createElement('tr');const cell=document.createElement('td');cell.textContent='Entry';row.appendChild(cell);document.getElementById('body').appendChild(row);};REPLACEMENT</script>"""
+    (folder/'index.html').write_text(source.replace('REPLACEMENT',replacements[kind]))
+    control={'path':'index.html','cases':[{'click':['add'],'state':{'probe.reads':0}}]}
+    assert webapp_check.check(folder,control)['passed']
+    observed=copy.deepcopy(control);observed['cases'][0]['row_counts']={'records':1,'body':1}
+    result=webapp_check.check(folder,observed)
+    assert result['passed'],result
+
+
+
+def test_global_witness_budget_retains_later_complete_group_without_changing_any_verdict(tmp_path):
+    import webapp_check
+    item,folder,strong,active=deletion_reload_fixture(tmp_path)
+    page=folder/'index.html'
+    spans=''.join('<span id="noise'+str(index)+'">0</span>' for index in range(32))
+    page.write_text(page.read_text().replace("<script src='app.js'></script>",'<input id=seed><button id=fill>Fill</button>'+spans+"<script src='app.js'></script>"))
+    script=folder/'app.js'
+    script.write_text(script.read_text()+"\nfunction noise(value){for(let i=0;i<32;i++)document.getElementById('noise'+i).textContent=value;}noise(localStorage.getItem('noise')||'0');document.getElementById('fill').onclick=()=>{const value=document.getElementById('seed').value;localStorage.setItem('noise',value);noise(value);};")
+    first={'noise'+str(index):'1' for index in range(16)}
+    second={'noise'+str(index):'2' for index in range(16,32)}
+    noise={'path':'index.html','cases':[{'set':{'seed':'1'},'click':['fill'],'expect':first},
+        {'reload':True,'expect':first},{'set':{'seed':'2'},'click':['fill'],'expect':second},
+        {'reload':True,'expect':second}]}
+    with project_memory.verification_context(item):
+        webapp_check.save_verifier(folder,noise,accumulate=True)
+        webapp_check.save_verifier(folder,strong,accumulate=True)
+        path=folder/'.local-ai/webapp-check.json';before=path.read_bytes()
+        report=webapp_check.run_saved_checks(folder,path)
+        assert report['passed'] and report['case_count']==9 and report['failed_case_count']==0
+        assert len(report['checks'])==2 and all(check['passed'] for check in report['checks'])
+        assert path.read_bytes()==before
+        assert len(report['persistence_witnesses'])<=32
+        later=[row for row in report['persistence_witnesses'] if row['sequence']==2 and row['target']=='text:bookmarks']
+        assert {'creation','removal'}<={row['effect'] for row in later}
+        assert not native_agent.persistence_completion_issue(folder,item)
+        # A later failure is still authoritative; witness priority never edits
+        # cases, original numbering, success flags or the global verifier.
+        webapp_check.save_verifier(folder,{'path':'index.html','cases':[{'expect':{'missing':'required'}}]},accumulate=True)
+        failed_bytes=path.read_bytes()
+        failed=webapp_check.run_saved_checks(folder,path)
+        assert not failed['passed'] and failed['case_count']==10 and failed['failed_case_count']==1
+        assert [check['passed'] for check in failed['checks']]==[True,True,False]
+        assert path.read_bytes()==failed_bytes
+        assert native_agent.persistence_completion_issue(folder,item)
+
+
+@pytest.mark.parametrize('served_runtime',[False,True])
+def test_application_source_requires_complete_actual_dependency_observation(tmp_path,served_runtime):
+    import webapp_check
+    item,folder,spec,active,runtime=persistence_bookmark_fixture(tmp_path,persistent=True)
+    unused=folder/'node_modules/unused';unused.mkdir(parents=True)
+    asset=unused/'style.css';asset.write_text('body{color:black}')
+    if served_runtime:
+        page=folder/'index.html';page.write_text(page.read_text()+"<link rel=stylesheet href='node_modules/unused/style.css'>")
+    spec['cases'].append({'reload':True,'expect':{'bookmarks':'Beta','count':'2'}})
+    with project_memory.verification_context(item),patch.object(long_tasks,'STATE',runtime),patch.object(long_tasks,'projects',return_value=[item]):
+        actual=json.loads(native_agent.execute_tool(folder,'check_webapp',spec))
+        assert actual['passed'],actual
+        replay=webapp_check.run_saved_checks(folder,folder/'.local-ai/webapp-check.json')
+        assert replay['passed'] and replay['persistence_witnesses'],replay
+        issue=native_agent.persistence_completion_issue(folder,item)
+        if served_runtime:
+            assert replay['dependency_scope']=='limited_dependency_manifest' and issue
+        else:
+            assert replay['dependency_scope']=='project_local_dependencies' and not issue
+        assert project_memory.verification_source_state(folder)['scope']=='application_source'
+        assert task_context.step_status(folder)['done']==0
+        script=folder/'app.js';before=script.stat();content=script.read_bytes()
+        script.write_bytes(content.replace(b'let items',b'var items'));os.utime(script,ns=(before.st_atime_ns,before.st_mtime_ns))
+        assert native_agent.persistence_completion_issue(folder,item)
+
+
+def test_persistence_scope_diagnostic_reports_bounded_reason_without_another_capture(tmp_path,monkeypatch):
+    import webapp_check
+    item,folder,spec,active,runtime=persistence_bookmark_fixture(tmp_path,persistent=True)
+    monkeypatch.setattr(project_memory,'_VERIFICATION_MAX_BYTES',1)
+    original=project_memory.verification_source_state;captures=[]
+    def observed(path):
+        captures.append(path);return original(path)
+    monkeypatch.setattr(project_memory,'verification_source_state',observed)
+    with patch.object(long_tasks,'STATE',runtime),patch.object(long_tasks,'projects',return_value=[item]):
+        issue=native_agent.persistence_completion_issue(folder,item)
+    # Establish the real retained suite first; absent-suite guidance is separate.
+    spec_path=folder/'.local-ai/webapp-check.json'
+    webapp_check.save_verifier(folder,spec)
+    captures.clear()
+    with patch.object(long_tasks,'STATE',runtime),patch.object(long_tasks,'projects',return_value=[item]):
+        issue=native_agent.persistence_completion_issue(folder,item)
+    assert 'byte_budget' in issue and 'limited_dependency_manifest' in issue
+    assert str(folder) not in issue and len(captures)==1
+
+
+def helper_workflow_fixture(folder,monkeypatch):
+    folder.mkdir();project={'id':'b'*12,'folder':str(folder),
+        'brief':'Calculate invoice totals with a verified pure helper, then implement the display function.'}
+    monkeypatch.setattr(long_tasks,'STATE',folder.parent/'helper-supervisor')
+    with long_tasks.database() as conn:
+        conn.execute('INSERT INTO projects(id,folder,brief,created,updated) VALUES(?,?,?,?,?)',
+                     (project['id'],project['folder'],project['brief'],time.time(),time.time()))
+    with project_memory.verification_context(project):
+        helper=project_memory.register_expression_helper(folder,'invoice_total',{'amounts':'numbers','tax':'number'},
+            'round(sum(amounts)*(1+tax),2)',[{'inputs':{'amounts':[10,5],'tax':.06},'expected':15.9}])
+        step={'phase':'Compute','title':'Reuse invoice totals','check_tool':'check_expression_helper',
+              'check_arguments':{'helper_id':helper['id'],'cases':[
+                  {'inputs':{'amounts':[100,25],'tax':.1},'expected':137.5},
+                  {'inputs':{'amounts':[],'tax':0},'expected':0}]}}
+        next_step={'phase':'Display','title':'Implement display','check_tool':'check_python_function',
+                   'check_arguments':{'path':'display.py','function':'display_total','cases':[{'args':[137.5],'expected':'$137.50'}]}}
+        task_context.plan_steps(folder,[step,next_step])
+    native_agent.save_state(project,{'status':'continue','turns':7,'assertion_facade_budget':{'unsuccessful':5},
+        'messages':[{'role':'system','content':"You are Cale's native project worker."},{'role':'user','content':'Continue saved work.'}]})
+    return project,helper,step,next_step
+
+
+def test_saved_helper_unit_resumes_real_worker_zero_inference_process_or_network(tmp_path,monkeypatch):
+    import socket,urllib.request
+    project,helper,original,next_step=helper_workflow_fixture(tmp_path/'project',monkeypatch)
+    before=task_context.step_status(project['folder']);state_before=native_agent.read_state(project)
+    monkeypatch.setattr(long_tasks,'STATE',tmp_path/'supervisor')
+    with long_tasks.database() as conn:
+        conn.execute('INSERT INTO projects(id,folder,brief,created,updated) VALUES(?,?,?,?,?)',
+                     (project['id'],project['folder'],project['brief'],time.time(),time.time()))
+    assert long_tasks.projects()[0]['brief']==project['brief']
+    with (patch.object(cloud_ai.Router,'complete',side_effect=AssertionError('No LLM inference')) as inference,
+          patch('subprocess.run',side_effect=AssertionError('No external process')) as process,
+          patch('subprocess.Popen',side_effect=AssertionError('No external process')) as popen,
+          patch.object(socket,'create_connection',side_effect=AssertionError('No network')) as network,
+          patch.object(urllib.request,'urlopen',side_effect=AssertionError('No network'))):
+        state=native_agent.run_slice(project)
+    after=task_context.step_status(project['folder'])
+    assert after['done']==1 and after['total']==2 and after['active']['title']==next_step['title']
+    assert after['active']['check_arguments']==next_step['check_arguments']
+    assert state['status']=='continue' and state.get('helper_reuse_checkpoints')==1
+    assert state['turns']==state_before['turns']==7
+    assert state['assertion_facade_budget']=={'unsuccessful':5}
+    assert not state.get('verify_passed')
+    inference.assert_not_called();process.assert_not_called();popen.assert_not_called();network.assert_not_called()
+    assert not (Path(project['folder'])/'display.py').exists()
+    saved_message=state['messages'][-1]['content']
+    assert '"helper_results"' in saved_message and '"actual": 137.5' in saved_message
+
+
+
+def test_helper_wrong_saved_outcome_does_not_commit_sql_step(tmp_path,monkeypatch):
+    project,helper,step,_=helper_workflow_fixture(tmp_path/'project',monkeypatch)
+    monkeypatch.setattr(long_tasks,'projects',lambda:[project])
+    step['check_arguments']['cases'][0]['expected']=999
+    task_context.revise_step(project['folder'],task_context.step_status(project['folder'])['active']['id'],[step])
+    with project_memory.verification_context(project):
+        result=json.loads(native_agent.execute_tool(Path(project['folder']),'task_steps',{'action':'complete',
+            'step_id':task_context.step_status(project['folder'])['active']['id']}))
+    assert result['passed'] is False and task_context.step_status(project['folder'])['done']==0
+
+
+@pytest.mark.parametrize('tool',['register_expression_helper','find_expression_helpers','run_expression_helper',
+    'local.register_expression_helper','local.find_expression_helpers','local.run_expression_helper'])
+def test_native_helper_dispatch_rejects_another_registered_task_before_discovery(tmp_path,monkeypatch,tool):
+    import toolbox_mcp
+    one=tmp_path/'one';two=tmp_path/'two';one.mkdir();two.mkdir()
+    monkeypatch.setattr(toolbox_mcp.server,'list_tools',Mock(side_effect=AssertionError('Scope rejected first')))
+    result=native_agent.execute_tool(one,'call_local_tool',{'tool':tool,'arguments':{'project_folder':str(two)}})
+    assert result.startswith('Tool error:') and 'current task folder' in result
+    toolbox_mcp.server.list_tools.assert_not_called()
+
+
+def test_helper_tools_auto_join_existing_capability_catalog_without_private_values():
+    import toolbox_mcp
+    results=native_agent.capability_local_search('expression helper')
+    names={row['name'] for row in results}
+    assert {'local.register_expression_helper','local.find_expression_helpers','local.run_expression_helper'}<=names
+    assert all('PRIVATE_EXPRESSION' not in json.dumps(row) for row in results)
+
+
+def test_saved_helper_pass_cannot_advance_after_pause_during_computation(tmp_path,monkeypatch):
+    import quick_calculator
+    project,helper,_,_=helper_workflow_fixture(tmp_path/'project',monkeypatch)
+    monkeypatch.setattr(long_tasks,'projects',lambda:[project])
+    actual=quick_calculator.run_helper
+    def paused(*args):
+        value=actual(*args)
+        state=native_agent.read_state(project);state['status']='paused';native_agent.save_state(project,state)
+        return value
+    with patch.object(quick_calculator,'run_helper',side_effect=paused),patch.object(cloud_ai.Router,'complete',side_effect=AssertionError('No model')) as inference:
+        state=native_agent.run_slice(project)
+    assert state['status']=='paused' and task_context.step_status(project['folder'])['done']==0
+    assert not state.get('helper_reuse_checkpoints')
+    inference.assert_not_called()
+
+
+@pytest.mark.parametrize('mutation',['source','acceptance'])
+def test_helper_output_does_not_override_source_or_check_commit_guards(tmp_path,monkeypatch,mutation):
+    import quick_calculator
+    project,helper,step,_=helper_workflow_fixture(tmp_path/'project',monkeypatch)
+    monkeypatch.setattr(long_tasks,'projects',lambda:[project])
+    active=task_context.step_status(project['folder'])['active'];actual=quick_calculator.run_helper;changed=[]
+    def raced(*args):
+        value=actual(*args)
+        if not changed:
+            changed.append(True)
+            if mutation=='source':(Path(project['folder'])/'new-source.py').write_text('value=2')
+            else:
+                replacement=copy.deepcopy(step);replacement['check_arguments']['cases'][0]['expected']=999
+                task_context.revise_step(project['folder'],active['id'],[replacement])
+        return value
+    with project_memory.verification_context(project),patch.object(quick_calculator,'run_helper',side_effect=raced):
+        raw=native_agent.execute_tool(Path(project['folder']),'task_steps',{'action':'complete','step_id':active['id']})
+    if mutation=='acceptance':
+        assert raw.startswith('Tool error:') and 'acceptance check changed' in raw
+    else:
+        assert json.loads(raw)['passed'] is False
+    assert task_context.step_status(project['folder'])['done']==0
+
+
+def test_saved_helper_worker_reuse_survives_fresh_process_restart(tmp_path,monkeypatch):
+    project,helper,_,_=helper_workflow_fixture(tmp_path/'project',monkeypatch)
+    state=tmp_path/'supervisor';monkeypatch.setattr(long_tasks,'STATE',state)
+    with long_tasks.database() as conn:
+        conn.execute('INSERT INTO projects(id,folder,brief,created,updated) VALUES(?,?,?,?,?)',
+                     (project['id'],project['folder'],project['brief'],time.time(),time.time()))
+    script="""from pathlib import Path
+import sys,json,socket,urllib.request
+from unittest.mock import patch
+import long_tasks,native_agent,cloud_ai,task_context
+long_tasks.STATE=Path(sys.argv[1]);project=long_tasks.projects()[0]
+with patch.object(cloud_ai.Router,'complete',side_effect=AssertionError('No model')),patch('subprocess.run',side_effect=AssertionError('No child process')),patch('subprocess.Popen',side_effect=AssertionError('No child process')),patch.object(socket,'create_connection',side_effect=AssertionError('No network')),patch.object(urllib.request,'urlopen',side_effect=AssertionError('No network')):
+ state=native_agent.run_slice(project)
+print(json.dumps({'status':state['status'],'done':task_context.step_status(project['folder'])['done'],'helper_reuse':state.get('helper_reuse_checkpoints'),'turns':state['turns']}))
+"""
+    result=subprocess.run([sys.executable,'-B','-c',script,str(state)],cwd=Path(native_agent.__file__).parent,
+                          capture_output=True,text=True,timeout=20,check=True)
+    assert json.loads(result.stdout)=={'status':'continue','done':1,'helper_reuse':1,'turns':7}
+    assert task_context.step_status(project['folder'])['active']['title']=='Implement display'
+
+
+def test_independent_helper_original_brief_change_during_computation_blocks_step(tmp_path,monkeypatch):
+    import quick_calculator
+    project,helper,_,_=helper_workflow_fixture(tmp_path/'project',monkeypatch)
+    monkeypatch.setattr(long_tasks,'STATE',tmp_path/'supervisor')
+    with long_tasks.database() as conn:
+        conn.execute('INSERT INTO projects(id,folder,brief,created,updated) VALUES(?,?,?,?,?)',
+                     (project['id'],project['folder'],project['brief'],time.time(),time.time()))
+    actual=quick_calculator.run_helper
+    def changed(*args):
+        result=actual(*args)
+        with long_tasks.database() as conn:
+            conn.execute('UPDATE projects SET brief=? WHERE id=?',('Changed original required calculation',project['id']))
+        return result
+    with patch.object(quick_calculator,'run_helper',side_effect=changed),patch.object(cloud_ai.Router,'complete',side_effect=AssertionError('No model')):
+        native_agent.run_slice(project)
+    assert task_context.step_status(project['folder'])['done']==0
+
+
+def test_independent_helper_stop_at_sql_publication_blocks_step(tmp_path,monkeypatch):
+    project,helper,_,_=helper_workflow_fixture(tmp_path/'project',monkeypatch)
+    monkeypatch.setattr(long_tasks,'projects',lambda:[project])
+    original=task_context.record_step_check
+    def stopped(*args,**kwargs):
+        state=native_agent.read_state(project);state['status']='stopped';native_agent.save_state(project,state)
+        return original(*args,**kwargs)
+    with patch.object(task_context,'record_step_check',side_effect=stopped),patch.object(cloud_ai.Router,'complete',side_effect=AssertionError('No model')):
+        state=native_agent.run_slice(project)
+    assert state['status']=='stopped'
+    assert task_context.step_status(project['folder'])['done']==0
+
+
+@pytest.mark.parametrize('control',['stopped','paused'])
+def test_independent_helper_checkpoint_retains_control_after_sql_commit(tmp_path,monkeypatch,control):
+    project,helper,_,_=helper_workflow_fixture(tmp_path/'project',monkeypatch)
+    monkeypatch.setattr(long_tasks,'STATE',tmp_path/'supervisor')
+    with long_tasks.database() as conn:
+        conn.execute('INSERT INTO projects(id,folder,brief,created,updated) VALUES(?,?,?,?,?)',
+                     (project['id'],project['folder'],project['brief'],time.time(),time.time()))
+    original=task_context.record_action
+    injected=[]
+    def controlled(*args,**kwargs):
+        result=original(*args,**kwargs)
+        if args[1]=='task_steps' and task_context.step_status(project['folder'])['done']==1:
+            state=native_agent.read_state(project);state['status']=control;native_agent.save_state(project,state)
+            injected.append(True)
+        return result
+    with patch.object(task_context,'record_action',side_effect=controlled),patch.object(cloud_ai.Router,'complete',side_effect=AssertionError('No model')):
+        state=native_agent.run_slice(project)
+    assert injected==[True]
+    assert task_context.step_status(project['folder'])['done']==1
+    assert state['status']==control
+    assert native_agent.read_state(project)['status']==control
+
+
+
+def test_helper_offer_schema_does_not_mutate_global_catalog(tmp_path,monkeypatch):
+    from jsonschema import validate
+    project,helper,step,_=helper_workflow_fixture(tmp_path/'project',monkeypatch)
+    before=copy.deepcopy(native_agent.TOOLS)
+    assert 'check_expression_helper' not in {t['function']['name'] for t in before}
+    ordinary=next(t['function']['parameters'] for t in before if t['function']['name']=='task_steps')
+    assert not any(b['properties'].get('check_tool',{}).get('enum')==['check_expression_helper']
+                   for b in ordinary['properties']['steps']['items']['anyOf'])
+    offered=native_agent.expression_helper_tools(project,native_agent.TOOLS)
+    assert offered is not native_agent.TOOLS and native_agent.TOOLS==before
+    assert 'check_expression_helper' in {t['function']['name'] for t in offered}
+    schema=next(t['function']['parameters'] for t in offered if t['function']['name']=='task_steps')
+    validate({'action':'plan','steps':[step]},schema)
+    validate(step['check_arguments'],native_agent.checker_tool_schema('check_expression_helper'))
+    compact=native_agent.compact_messages([
+        {'role':'system','content':'A real task brief'},
+        {'role':'user','content':'Old material '*20000},
+        {'role':'user','content':'LATEST_REQUIREMENT keep current task scope'}],Path(project['folder']),6000,tools=offered)
+    assert cloud_ai.estimated_input_tokens({'messages':compact,'tools':offered})<=4500
+    assert 'LATEST_REQUIREMENT' in json.dumps(compact)
+    assert native_agent.TOOLS==before
+
+
+def test_helper_worker_compacts_actual_copied_offer(tmp_path,monkeypatch):
+    project,helper,step,_=helper_workflow_fixture(tmp_path/'project',monkeypatch)
+    step['check_arguments']['cases'][0]['expected']=999
+    task_context.revise_step(project['folder'],task_context.step_status(project['folder'])['active']['id'],[step])
+    monkeypatch.setattr(native_agent,'MAX_TURNS_PER_SLICE',1)
+    seen=[];compactions=[];actual=native_agent.compact_messages
+    def compact(*args,**kwargs):
+        compactions.append(copy.deepcopy(kwargs.get('tools')))
+        return actual(*args,**kwargs)
+    def reply(payload):
+        seen.append(copy.deepcopy(payload))
+        return {'choices':[{'message':{'role':'assistant','content':'Need to inspect the incorrect saved helper expectation.'}}]}
+    with patch.object(native_agent,'compact_messages',side_effect=compact):
+        state=native_agent.run_slice(project,complete=reply)
+    assert len(seen)==1 and any('check_expression_helper'==t['function']['name'] for t in seen[0]['tools'])
+    assert compactions[-1]==seen[0]['tools']
+    assert state['status']!='done' and task_context.step_status(project['folder'])['done']==0
+
+
+@pytest.mark.parametrize('control',['stopped','paused'])
+def test_helper_sql_callback_rechecks_after_update_and_rolls_back(tmp_path,monkeypatch,control):
+    project,helper,_,_=helper_workflow_fixture(tmp_path/'project',monkeypatch)
+    active=task_context.step_status(project['folder'])['active'];calls=[]
+    def allowed():
+        calls.append(True)
+        if len(calls)==2:
+            state=native_agent.read_state(project);state['status']=control;native_agent.save_state(project,state)
+            return False
+        return True
+    with pytest.raises(ValueError,match='before publication'):
+        task_context.record_step_check(project['folder'],active['id'],task_context.request_identity(project['folder']),
+            'Exit code: 0\nActual helper checked',unchanged=True,
+            expected_check=task_context.step_check_identity(active),before_commit=allowed)
+    queue=task_context.step_status(project['folder'])
+    assert queue['done']==0 and queue['active']['attempts']==0
+    assert native_agent.read_state(project)['status']==control and len(calls)==2
+
+
+@pytest.mark.parametrize('control',['stopped','paused','done'])
+def test_explicit_helper_completion_retains_control_without_external_callback(tmp_path,monkeypatch,control):
+    import quick_calculator
+    project,_,_,_=helper_workflow_fixture(tmp_path/'project',monkeypatch)
+    active=task_context.step_status(project['folder'])['active'];original=quick_calculator.run_helper
+    def controlled(*args):
+        value=original(*args)
+        state=native_agent.read_state(project);state['status']=control;native_agent.save_state(project,state)
+        return value
+    with project_memory.verification_context(project),patch.object(quick_calculator,'run_helper',side_effect=controlled):
+        result=native_agent.execute_tool(Path(project['folder']),'task_steps',{'action':'complete','step_id':active['id']})
+    assert result.startswith('Tool error:') and 'no step advanced' in result
+    assert task_context.step_status(project['folder'])['done']==0
+    assert native_agent.read_state(project)['status']==control
+
+
+def test_helper_record_tampered_after_real_check_cannot_publish_sql_pass(tmp_path,monkeypatch):
+    project,_,_,_=helper_workflow_fixture(tmp_path/'project',monkeypatch)
+    folder=Path(project['folder']);active=task_context.step_status(folder)['active']
+    original=task_context.record_step_check
+    def raced(*args,**kwargs):
+        path=next((folder/'.local-ai/expression-helpers/v1/records').iterdir())
+        path.write_bytes(b'changed after actual checker return')
+        return original(*args,**kwargs)
+    with project_memory.verification_context(project),patch.object(task_context,'record_step_check',side_effect=raced):
+        result=native_agent.execute_tool(folder,'task_steps',{'action':'complete','step_id':active['id']})
+    assert result.startswith('Tool error:')
+    assert task_context.step_status(folder)['done']==0
+
+def context_projection_fixture(tmp_path, notes=True):
+    folder = tmp_path / "project"
+    folder.mkdir()
+    state = folder / ".local-ai"
+    state.mkdir()
+    (state / "USER-REQUESTS.md").write_text("", encoding="utf-8")
+    if notes:
+        (state / "PLAN.md").write_text(long_tasks.INITIAL_PLAN, encoding="utf-8")
+        (state / "PROGRESS.md").write_text(long_tasks.INITIAL_PROGRESS, encoding="utf-8")
+    task_context.plan_steps(folder, [queue_step("Unit "+str(i), "exit 0", "Components") for i in range(1,9)])
+    # Saved host-status fixture, NOT evidence that any real app is complete.
+    for _ in range(5):
+        active = task_context.step_status(folder)["active"]
+        task_context.record_step_check(folder, active["id"], task_context.request_identity(folder), "Exit code: 0\nfixture component result", unchanged=True)
+    return folder
+
+
+def context_projection_rows(folder):
+    with project_memory.connection(folder) as connection:
+        return [tuple(row) for row in connection.execute("SELECT id,request_hash,status,attempts,evidence FROM task_steps ORDER BY id")]
+
+
+@pytest.mark.parametrize("whitespace", [False, True])
+def test_context_projection_labels_saved_components_and_suppresses_only_exact_startup_templates(tmp_path, whitespace):
+    folder = context_projection_fixture(tmp_path)
+    if whitespace:
+        for name, template in (("PLAN.md", long_tasks.INITIAL_PLAN), ("PROGRESS.md", long_tasks.INITIAL_PROGRESS)):
+            (folder/".local-ai"/name).write_text("\ufeff\n\t"+template.replace(" ", "  ").replace("\n", "\r\n")+"\n", encoding="utf-8")
+    files = {name:(folder/".local-ai"/name).read_bytes() for name in ("PLAN.md", "PROGRESS.md")}
+    rows = context_projection_rows(folder)
+    checkpoint = task_context.snapshot(folder)
+    assert "5/8 component checks recorded passed" in checkpoint
+    assert "not current source verification or whole-task completion" in checkpoint
+    assert "SQLite step 6: Unit 6" in checkpoint
+    assert "No work has been completed yet" not in checkpoint
+    assert "The worker has not written milestones yet" not in checkpoint
+    assert "startup placeholder" in checkpoint and "not been authored" in checkpoint
+    assert context_projection_rows(folder) == rows
+    assert files == {name:(folder/".local-ai"/name).read_bytes() for name in files}
+
+
+def test_context_projection_preserves_custom_notes_even_with_similar_startup_words(tmp_path):
+    folder = context_projection_fixture(tmp_path)
+    progress = "# Progress\n\nNo work has been completed yet on the optional export. Earlier component checks exist.\nNext: Preserve the pending feature.\n"
+    plan = "# User roadmap\n- [ ] Preserve a real custom requirement\n"
+    (folder/".local-ai/PROGRESS.md").write_text(progress, encoding="utf-8")
+    root_plan = folder/"PLAN.md"
+    root_plan.write_text(plan, encoding="utf-8")
+    stamp = time.time_ns()+2_000_000_000
+    os.utime(root_plan, ns=(stamp, stamp))
+    checkpoint = task_context.snapshot(folder)
+    assert progress in checkpoint.replace("\r\n", "\n") and plan in checkpoint.replace("\r\n", "\n")
+    assert "[Saved at project root: PLAN.md]" in checkpoint
+    assert "5/8 component checks recorded passed" in checkpoint
+    assert "startup placeholder" not in checkpoint
+
+
+def test_context_projection_missing_notes_do_not_mean_no_work_or_author_completion(tmp_path):
+    folder = context_projection_fixture(tmp_path, notes=False)
+    checkpoint = task_context.snapshot(folder)
+    assert "5/8 component checks recorded passed" in checkpoint
+    assert "PLAN.md:\n[Missing or empty note" in checkpoint
+    assert "PROGRESS.md:\n[Missing or empty note" in checkpoint
+    assert "No work has been completed yet" not in checkpoint
+    assert not (folder/".local-ai/PLAN.md").exists()
+    assert not (folder/".local-ai/PROGRESS.md").exists()
+
+
+def test_context_projection_followup_scopes_out_old_component_records(tmp_path):
+    folder = context_projection_fixture(tmp_path)
+    rows = context_projection_rows(folder)
+    (folder/".local-ai/USER-REQUESTS.md").write_text("Now implement a new requested feature.", encoding="utf-8")
+    checkpoint = task_context.snapshot(folder)
+    assert "5/8 component checks recorded passed" not in checkpoint
+    assert "no current-request component-check records" in checkpoint
+    assert "does not mean no work has been performed" in checkpoint
+    assert context_projection_rows(folder) == rows
+
+
+def test_context_projection_real_fresh_and_no_checkpoint_compaction_reuse_same_queue(tmp_path):
+    folder = context_projection_fixture(tmp_path)
+    state = {"verify_passed": False, "turns": 261, "step_focus_turns": 4}
+    before = copy.deepcopy(state)
+    messages = [{"role": "system", "content": "Original request must remain intact."},
+                {"role": "user", "content": "Repeated old discussion. "*6000}]
+    fresh = native_agent.fresh_messages(messages, folder, state)
+    fallback = native_agent.compact_messages(messages, folder, context_limit=20000)
+    for content in (fresh[1]["content"], fallback[1]["content"]):
+        assert "5/8 component checks recorded passed" in content
+        assert "SQLite step 6: Unit 6" in content
+        assert "No work has been completed yet" not in content
+        assert "not current source verification or whole-task completion" in content
+    assert fresh[0] == fallback[0] == messages[0]
+    assert state == before
+
+
+def test_context_projection_does_not_author_notes_or_promote_completion(tmp_path):
+    folder = context_projection_fixture(tmp_path)
+    source = folder/"index.html"
+    source.write_text("<!doctype html><title>Unfinished project</title>", encoding="utf-8")
+    paths = [source,folder/".local-ai/PLAN.md",folder/".local-ai/PROGRESS.md"]
+    before = {str(path):path.read_bytes() for path in paths}
+    rows = context_projection_rows(folder)
+    state = {"verify_passed":False}
+    task_context.snapshot(folder)
+    native_agent.compact_messages(recovery_projection_messages(),folder,20000)
+    native_agent.fresh_messages([{"role":"system","content":"Maintain accurate project notes."}],folder,state)
+    assert before == {str(path):path.read_bytes() for path in paths}
+    assert context_projection_rows(folder) == rows
+    assert task_context.step_status(folder)["done"] == 5
+    assert state["verify_passed"] is False
+
+
+def test_context_projection_fingerprints_match_real_builtin_constants_and_preserve_quotes():
+    for name, template in (("PLAN.md", long_tasks.INITIAL_PLAN), ("PROGRESS.md", long_tasks.INITIAL_PROGRESS)):
+        assert "startup placeholder" in task_context.project_note_excerpt(name, template, 3500)
+        custom = "# Actual project note\nThe initial note was quoted below:\n" + template
+        assert task_context.project_note_excerpt(name, custom, 3500) == custom
+
+
+def test_context_projection_saved_unit_counts_do_not_attest_new_source_bytes(tmp_path):
+    folder = context_projection_fixture(tmp_path)
+    (folder/"index.html").write_text("<p>New unverified source</p>", encoding="utf-8")
+    messages = [{"role": "system", "content": "Build the requested app."}]
+    state = {"verify_passed": False}
+    content = native_agent.fresh_messages(messages, folder, state)[1]["content"]
+    assert "5/8 component checks recorded passed" in content
+    assert "not current source verification or whole-task completion" in content
+    assert state["verify_passed"] is False
+
+
+def recovery_projection_messages():
+    return [{"role": "system", "content": "Keep the complete original requirements."},
+            {"role": "user", "content": "Old discussion repeated. "*10000}]
+
+
+@pytest.mark.parametrize("database", ["missing", "corrupt", "oldschema"])
+def test_recovery_projection_unavailable_database_retains_custom_notes_without_initialization(tmp_path, database):
+    from contextlib import closing
+    folder = tmp_path/"project"
+    (folder/".local-ai").mkdir(parents=True)
+    (folder/"PLAN.md").write_text("# Actual plan\n- [ ] Preserve custom acceptance.\n", encoding="utf-8")
+    path = folder/".local-ai/memory.sqlite3"
+    if database == "corrupt": path.write_bytes(b"owned corrupt SQLite fixture")
+    if database == "oldschema":
+        with closing(sqlite3.connect(path)) as connection, connection:
+            connection.execute("CREATE TABLE existing_note (body TEXT)")
+            connection.execute("INSERT INTO existing_note VALUES('preserve')")
+    before = path.read_bytes() if path.exists() else None
+    result = native_agent.compact_messages(recovery_projection_messages(), folder, 20000)
+    assert "Preserve custom acceptance" in result[1]["content"]
+    assert "SQLite progress is unavailable" in result[1]["content"]
+    assert "Do not infer zero progress" in result[1]["content"]
+    assert (path.read_bytes() if path.exists() else None) == before
+    if database == "oldschema":
+        with closing(sqlite3.connect(path)) as connection:
+            assert connection.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall() == [("existing_note",)]
+
+
+def test_recovery_projection_real_wal_writer_is_nonblocking_and_shows_committed_current_queue(tmp_path):
+    import threading
+    from contextlib import closing
+    folder = context_projection_fixture(tmp_path)
+    held = threading.Event()
+    errors = []
+    def writer():
+        try:
+            with closing(sqlite3.connect(folder/".local-ai/memory.sqlite3")) as connection:
+                connection.execute("BEGIN IMMEDIATE")
+                connection.execute("UPDATE task_steps SET status='done'")
+                held.set()
+                time.sleep(.55)
+                connection.rollback()
+        except Exception as error:
+            errors.append(type(error).__name__)
+            held.set()
+    worker = threading.Thread(target=writer)
+    worker.start()
+    assert held.wait(2)
+    try:
+        started = time.monotonic()
+        result = native_agent.compact_messages(recovery_projection_messages(), folder, 20000)
+        assert time.monotonic()-started < .2
+        assert "5/8 component checks recorded passed" in result[1]["content"]
+        assert "SQLite step 6: Unit 6" in result[1]["content"]
+        assert "8/8 component" not in result[1]["content"]
+    finally: worker.join(2)
+    assert not errors
+
+
+def test_recovery_projection_changed_followup_during_read_cannot_publish_old_queue(tmp_path):
+    folder = context_projection_fixture(tmp_path)
+    actual = task_context._step_status
+    observed = []
+    def changed(connection, request):
+        result = actual(connection, request)
+        observed.append(True)
+        (folder/".local-ai/USER-REQUESTS.md").write_text("New instructions arrived during the read.", encoding="utf-8")
+        return result
+    with patch.object(task_context, "_step_status", side_effect=changed):
+        result = native_agent.compact_messages(recovery_projection_messages(), folder, 20000)
+    assert observed
+    assert "SQLite progress is unavailable" in result[1]["content"]
+    assert "5/8 component checks recorded passed" not in result[1]["content"]
+
+
+def test_recovery_projection_exception_closes_reader_and_never_calls_writer_helpers(tmp_path):
+    folder = context_projection_fixture(tmp_path)
+    actual_connect = sqlite3.connect
+    closed = []
+    statements = []
+    class Reader:
+        def __init__(self, connection): self.connection = connection
+        @property
+        def row_factory(self): return self.connection.row_factory
+        @row_factory.setter
+        def row_factory(self, value): self.connection.row_factory = value
+        def set_progress_handler(self, *args): self.connection.set_progress_handler(*args)
+        def execute(self, sql, *args):
+            statements.append(sql)
+            return self.connection.execute(sql, *args)
+        def close(self):
+            self.connection.close()
+            closed.append(True)
+    with patch.object(sqlite3, "connect", side_effect=lambda *a, **kw: Reader(actual_connect(*a, **kw))), \
+         patch.object(task_context, "_step_status", side_effect=sqlite3.OperationalError("owned TEMP failure")), \
+         patch.object(project_memory, "connection", side_effect=AssertionError("no writer helper")), \
+         patch.object(project_memory, "database_path", side_effect=AssertionError("no database initialization")):
+        result = native_agent.compact_messages(recovery_projection_messages(), folder, 20000)
+    assert closed == [True]
+    assert "SQLite progress is unavailable" in result[1]["content"]
+    assert not any(re.match(r"(?i)CREATE|INSERT|UPDATE|DELETE|ALTER", sql) for sql in statements)
+
+
+def test_recovery_projection_exclusive_rollback_writer_returns_unknown_without_waiting(tmp_path):
+    import threading
+    from contextlib import closing
+    folder = context_projection_fixture(tmp_path)
+    database = folder/".local-ai/memory.sqlite3"
+    with closing(sqlite3.connect(database)) as connection:
+        assert connection.execute("PRAGMA journal_mode=DELETE").fetchone()[0] == "delete"
+    (folder/".local-ai/PROGRESS.md").write_text("# Progress\nNext: Preserve the custom note.\n", encoding="utf-8")
+    held = threading.Event()
+    def writer():
+        with closing(sqlite3.connect(database)) as connection:
+            connection.execute("BEGIN EXCLUSIVE")
+            held.set()
+            time.sleep(.55)
+            connection.rollback()
+    worker = threading.Thread(target=writer)
+    worker.start()
+    assert held.wait(2)
+    try:
+        started = time.monotonic()
+        result = native_agent.compact_messages(recovery_projection_messages(), folder, 20000)
+        assert time.monotonic()-started < .2
+        assert "SQLite progress is unavailable" in result[1]["content"]
+        assert "Preserve the custom note" in result[1]["content"]
+    finally: worker.join(2)
+
+
+def test_recovery_projection_sqlite_vm_budget_returns_unknown_not_partial_totals(tmp_path):
+    folder = context_projection_fixture(tmp_path)
+    with project_memory.connection(folder) as connection:
+        first = connection.execute("SELECT request_hash FROM task_steps LIMIT 1").fetchone()[0]
+        connection.executemany("INSERT INTO task_steps(request_hash,position,phase,title,check_command,shell,status,updated) VALUES(?,?,'Fixture','Fixture','exit 0','default','done',0)", [(first, i+100) for i in range(10000)])
+    calls = []
+    def clock():
+        calls.append(True)
+        return 0 if len(calls) == 1 else 1
+    with patch.object(task_context.time, "monotonic", side_effect=clock):
+        result = task_context.recovery_snapshot(folder)
+    assert len(calls) >= 2
+    assert "SQLite progress is unavailable" in result
+    assert "component checks recorded passed" not in result
+
+
+@pytest.mark.parametrize("column", ["phase", "title", "evidence"])
+def test_recovery_projection_blob_queue_cell_returns_unknown_and_preserves_notes(tmp_path, column):
+    from contextlib import closing
+    folder = context_projection_fixture(tmp_path)
+    (folder/"PLAN.md").write_text("# Actual plan\nPreserve custom acceptance.\n", encoding="utf-8")
+    database = folder/".local-ai/memory.sqlite3"
+    with closing(sqlite3.connect(database)) as connection, connection:
+        connection.execute(f"UPDATE task_steps SET {column}=? WHERE id=6", (sqlite3.Binary(b"bounded invalid text cell"),))
+    before = database.read_bytes()
+    result = native_agent.compact_messages(recovery_projection_messages(), folder, 20000)
+    content = result[1]["content"]
+    assert "SQLite progress is unavailable" in content
+    assert "Preserve custom acceptance" in content
+    assert "5/8 component checks recorded passed" not in content
+    assert "SQLite step 6" not in content
+    assert database.read_bytes() == before

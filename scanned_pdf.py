@@ -79,7 +79,13 @@ def read_scanned_pdf(path: str, max_pages: int = 6) -> dict:
                 selected.discard(index)
                 continue
             try:
-                with tempfile.TemporaryDirectory(prefix="cale-pdf-") as folder:
+                try:
+                    temporary_directory = tempfile.TemporaryDirectory(prefix="cale-pdf-")
+                except OSError:
+                    # Unavailable temporary storage must not discard readable pages.
+                    selected.discard(index)
+                    continue
+                with temporary_directory as folder:
                     image_path = Path(folder) / "page.png"
                     try:
                         width, height = page.get_size()
@@ -94,13 +100,18 @@ def read_scanned_pdf(path: str, max_pages: int = 6) -> dict:
                         selected.discard(index)
                         continue
                     try:
-                        image = bitmap.to_pil()
                         try:
-                            image.save(image_path)
+                            image = bitmap.to_pil()
+                            try:
+                                image.save(image_path)
+                            finally:
+                                image.close()
                         finally:
-                            image.close()
-                    finally:
-                        bitmap.close()
+                            bitmap.close()
+                    except OSError:
+                        # A failed image export must not discard other readable pages.
+                        selected.discard(index)
+                        continue
                     try:
                         observed = recognize_image(
                             str(image_path),

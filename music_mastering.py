@@ -76,6 +76,7 @@ def master_music(source_path: str, reference_path: str, output_path: str) -> dic
         result = subprocess.run(
             [str(python), str(Path(__file__).resolve()), "--worker", str(source),
              str(reference), str(staged)], capture_output=True, text=True,
+            encoding="utf-8", errors="replace",
             timeout=3600, creationflags=HIDE,
         )
         if result.returncode or not staged.is_file() or staged.stat().st_size == 0:
@@ -94,13 +95,20 @@ def master_music(source_path: str, reference_path: str, output_path: str) -> dic
                 destination = output.open("xb")
             except FileExistsError:
                 raise ValueError("Choose a new output filename so existing audio is preserved.") from None
+            created_stat = None
             try:
                 with destination:
+                    created_stat = os.fstat(destination.fileno())
                     with staged.open("rb") as rendered:
                         shutil.copyfileobj(rendered, destination)
             except BaseException as exc:
                 try:
-                    output.unlink()
+                    # Another operation may have moved or replaced the partial
+                    # file. Do not deliberately remove a different file or link.
+                    if created_stat is not None and os.path.samestat(created_stat, output.lstat()):
+                        output.unlink()
+                except FileNotFoundError:
+                    pass
                 except OSError as cleanup_error:
                     raise exc from cleanup_error
                 raise

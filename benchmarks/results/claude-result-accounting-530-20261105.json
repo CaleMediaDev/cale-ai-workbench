@@ -1,0 +1,37 @@
+{
+  "release": "0.5.530",
+  "base": "57373d8ea5b3183e75e785370648247f2a3c39f6",
+  "sha256": {
+    "cloud_providers.py": "52e77da5fc086799cef9ebf05d8e541313591a39172e18c61cd803edd1be37c6",
+    "Validation/test_cloud_ai.py": "4ed6b460019ba9f669a0914f34431e5056627ef0501dd4b3f46b4d07578b9f4b"
+  },
+  "validation": {
+    "cloud_module": {
+      "passed": 241,
+      "subtests": 57,
+      "seconds": 25.73,
+      "exit_code": 0
+    },
+    "native_subscription": {
+      "passed": 5,
+      "deselected": 541,
+      "seconds": 1.79,
+      "exit_code": 0
+    }
+  },
+  "baseline": "10 new focused cases failed before the production correction; 1 passed. Valid failed SDK results lost usage and unknown JSON could be treated as finished.",
+  "changes": [
+    "Parse documented Claude final error results even when the official CLI exits nonzero; preserve reported usage, preferring per-model totals.",
+    "Require recognized final result envelopes before completion or usage attribution; report turn, execution, budget and structured-output failures distinctly.",
+    "Malformed Claude authentication JSON yields a controlled disconnected result instead of an attribute error."
+  ],
+  "references": [
+    "https://code.claude.com/docs/en/headless",
+    "https://code.claude.com/docs/en/agent-sdk/typescript#sdkresultmessage"
+  ],
+  "limits": [
+    "Tests use fake CLI process/auth boundaries and isolated local data; no actual Claude account invocation or plan allowance was consumed.",
+    "Agent results still require host verification. No automatic session resumption, account setup or permission/routing change.",
+    "No full installed-suite, fresh-PC, media generation or whole-app completion pass is claimed."
+  ]
+}

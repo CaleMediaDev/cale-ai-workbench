@@ -542,6 +542,22 @@ def test_whitespace_padded_revision_still_offers_finished_task(text):
     assert chat_assistant.choose_task(text, candidates) == tasks[0]
 
 
+@pytest.mark.parametrize("prefix", [
+    "Please", "Can you", "Could you", "I want you to", "I need you to",
+    "I want to", "I need to", "Help me to", "Please could you",
+])
+def test_polite_revision_offers_finished_task_instead_of_creating_new_work(prefix):
+    tasks = [
+        {"id": "song", "title": "Finished song", "status": "accepted", "updated": 10},
+    ]
+    text = f"{prefix} make it louder"
+    candidates = chat_assistant.followup_tasks(tasks, text)
+    assert candidates == tasks
+    assert chat_assistant.route(text, candidates) == "note"
+    assert chat_assistant.choose_task(text, candidates) == tasks[0]
+    assert chat_assistant.followup_tasks(tasks, f"{prefix} make a new app") == []
+
+
 def test_oversized_numeric_task_selection_does_not_crash():
     tasks = [
         {"id": "a", "title": "Build bakery site"},

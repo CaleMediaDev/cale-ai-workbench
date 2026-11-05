@@ -1,0 +1,58 @@
+{
+  "release": "0.5.514",
+  "base": "ded025e6440aa0845997b615a58328aa186c4cd9",
+  "changes": [
+    "Compare recent finite output-token counts against total response elapsed time; reject malformed/future sample timestamps",
+    "Preserve explicit caller reasoning effort instead of overwriting it with model catalog defaults",
+    "Use native required/named tool transport only for source-qualified Ollama 0.40.13; original host schema/tool-choice validation retained",
+    "Reject avatar inputs/results older than 750ms and restore neutral artwork after capture stalls"
+  ],
+  "checks": [
+    {
+      "scope": "Seven routing, model and usage modules",
+      "source": "9c35e39",
+      "passed": 389,
+      "subtests": 134,
+      "seconds": 39.1
+    },
+    {
+      "scope": "Camera, video and model-fitness modules",
+      "source": "f9388d4",
+      "passed": 125,
+      "seconds": 12.7
+    }
+  ],
+  "actual_local_tool_probe": {
+    "server": "Ollama0.40.13",
+    "model": "cale-fast/qwen3.5:9b",
+    "required_seconds": 4.705,
+    "named_seconds": 0.628,
+    "host_contract_passed": true,
+    "scope": "Two simple literal tool responses, not application-building correctness"
+  },
+  "actual_live_avatar": {
+    "source": "f9388d4",
+    "capture_seconds": 35.0368,
+    "camera_dimensions": [
+      1920,
+      1080
+    ],
+    "captured_frames": 741,
+    "published_avatar_frames": 161,
+    "render_calls": 159,
+    "median_render_ms": 147.9309,
+    "owned_worker_stopped": true,
+    "raw_camera_frames_saved": false,
+    "gpu_pause_or_error_notices": false
+  },
+  "limits": [
+    "No controlled end-to-end frame-rate improvement claim; live face presence and system load varied",
+    "Actual neutral-only first attempt deferred for other GPU work; not counted as neural qualification",
+    "GPU pixel-conversion experiment excluded: static parity passed after correct binding setup but saved only about4ms; initial invalid post-capture rebind experiment rejected",
+    "Both Ollama endpoints lose some tool-schema keywords; exact original host schema remains authoritative",
+    "End-to-end speed samples are advisory and not normalized by workload, output length, model weights or cold/warm state",
+    "Original expense-app benchmark remains incomplete; no general small-model task-quality claim",
+    "No fresh-PC install, third-party meeting app, native4K-avatar or full installed self-check requalification",
+    "Freshness is measured since submission, not physical exposure; the single consumer can replace stale output only after an in-flight render returns, not while CUDA itself is hung"
+  ]
+}

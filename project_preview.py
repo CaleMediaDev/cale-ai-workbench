@@ -66,18 +66,26 @@ def source(folder):
     """Prefer a declared local server; otherwise preview a project HTML file."""
     try:
         folder = Path(folder).resolve()
-    except (OSError, RuntimeError, ValueError):
+    except (OSError, RuntimeError, ValueError, TypeError):
         # An inaccessible, invalid, or looping root leaves no usable preview.
         return ""
     declaration = folder / ".local-ai/preview.json"
     try:
         declaration = declaration.resolve()
         if declaration.is_relative_to(folder) and declaration.is_file():
-            url = safe_loopback_url(
-                json.loads(declaration.read_text(encoding="utf-8"))["url"]
-            )
+            record = json.loads(declaration.read_text(encoding="utf-8"))
+            if not isinstance(record, dict):
+                raise ValueError("Preview declaration must be an object")
+            url = safe_loopback_url(record.get("url"))
             if url:
                 return url
+            # Imported games may live below the task root. This remains a
+            # contained local HTML file, never an arbitrary file or URL.
+            relative = record.get("file")
+            if isinstance(relative, str) and relative and not Path(relative).is_absolute():
+                page = (folder / relative).resolve()
+                if page.is_relative_to(folder) and page.is_file() and page.suffix.lower() in (".html", ".htm"):
+                    return page.as_uri()
     except (OSError, ValueError, KeyError, TypeError, RuntimeError):
         pass
     for name in HTML_CANDIDATES:

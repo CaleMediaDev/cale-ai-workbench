@@ -91,8 +91,15 @@ def inspect(folder: str | Path, path: str, question: str = "",
              f"{CACHE_VERSION}-{digest}-{source.suffix.lower().lstrip('.')}-{int(vision)}.txt")
     cached = cache.is_file()
     if cached:
-        with cache.open("r", encoding="utf-8", newline="") as cached_text:
-            text = cached_text.read()
+        try:
+            with cache.open("r", encoding="utf-8", newline="") as cached_text:
+                text = cached_text.read(MAX_EXTRACTED_CHARS + 1)
+            cached = len(text) <= MAX_EXTRACTED_CHARS
+        except UnicodeDecodeError:
+            # Derived text is disposable; recover from a corrupt cache using
+            # the authoritative source rather than failing every later read.
+            cached = False
+    if cached:
         if _digest(source) != digest:
             raise RuntimeError("The document changed while it was being read; try again")
     else:

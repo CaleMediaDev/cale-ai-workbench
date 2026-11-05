@@ -44,7 +44,10 @@ def social_reply(utterance: str) -> str:
         choice = result["choices"][0]
         if choice.get("finish_reason") in ("length", "content_filter", "tool_calls", "function_call"):
             return "I heard you. What do you need?"
-        content = choice["message"].get("content")
+        message = choice["message"]
+        if message.get("tool_calls") or message.get("function_call"):
+            return "I heard you. What do you need?"
+        content = message.get("content")
         # Protocol data is not speech: never read Python/JSON representations.
         if isinstance(content, str):
             # Preserve a useful short reply when a model inserts line breaks,

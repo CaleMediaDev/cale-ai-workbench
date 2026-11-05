@@ -59,3 +59,11 @@ The Windows compatibility patch contains modifications to MIT-licensed Hermes co
 Model names and logos belong to their respective owners. This project is not affiliated with those publishers, OpenRouter, or OpenAI. No claim is made that community derivatives retain the benchmarks of their base models.
 
 LCM Dreamshaper v7 derives from Dreamshaper and Stable Diffusion 1.5. Review the upstream model card and base licenses before redistribution or commercial use of generated material. The installer downloads these weights to the user's PC; this repository and release installer do not bundle them.
+
+
+## Optional subscription agents
+
+Claude Code and Grok Build are separate vendor programs, downloaded only when the user selects their connection. Their executables and credentials are not included in Workbench releases. Workbench verifies the pinned official package checksum and runs the native binary without modifications. Each person signs in through the vendor's own flow and remains subject to their plan, usage limits and vendor terms. Names are used to identify the optional connections; no affiliation or endorsement is implied.
+
+- Claude Code: https://code.claude.com/docs/en/legal-and-compliance and https://support.claude.com/en/articles/15036540-use-the-claude-agent-sdk-with-your-claude-plan.
+- Grok Build: https://github.com/xai-org/grok-build (Apache-2.0 source) and https://docs.x.ai/build/overview.

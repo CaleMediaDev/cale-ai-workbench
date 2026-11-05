@@ -831,3 +831,262 @@ def test_radio_admission_is_atomic_across_services(tmp_path):
         with ThreadPoolExecutor(max_workers=2) as pool:
             list(pool.map(lambda service: service.tick(), (first, second)))
     assert len(calls) == 1
+
+
+def test_studio_manual_crossfade_real_gains_hold_and_auto_resumes_without_jump(tmp_path):
+    import math
+    moment = [0.0]
+    player = radio.Player(lambda: Deck(lambda: moment[0]), lambda: moment[0])
+    player.play(tmp_path / "a.wav")
+    old = player.active
+    player.prepare(tmp_path / "b.wav")
+    player.blend(tmp_path / "b.wav", 8)
+    new = player.active
+    assert old.channel == 0 and new.channel == 1
+    player.set_deck_volume(0, 80)
+    player.set_deck_volume(1, 50)
+    player.set_crossfade(.25)
+    assert old.volume == pytest.approx(65*.8*math.cos(math.pi/8))
+    assert new.volume == pytest.approx(65*.5*math.sin(math.pi/8))
+    moment[0] = 90
+    player.advance_mix()
+    assert player.crossfade_position == .25 and old.opened
+    player.set_auto_mix(True)
+    assert player.crossfade_position == pytest.approx(.25)
+    moment[0] += 6
+    player.advance_mix()
+    assert not old.opened and new.volume == pytest.approx(65*.5)
+    player.prepare(tmp_path / "c.wav")
+    player.blend(tmp_path / "c.wav", 8)
+    assert player.active.channel == 0 and player.outgoing.channel == 1
+    assert player.crossfade_position == pytest.approx(1)
+    player.set_crossfade(0)
+    assert player.outgoing is None and player.active.channel == 0
+    assert player.active.volume == pytest.approx(65*.8)
+
+
+def test_studio_service_manual_fader_uses_existing_ready_queue_and_real_transition(tmp_path):
+    _, service, _, jobs, calls, generate = fixture(tmp_path)
+    moment = [0]
+    service.player = radio.Player(lambda: Deck(lambda: moment[0]), lambda: moment[0])
+    with patch("music_backend.start_music_job", side_effect=generate), patch("music_backend.music_job_status", side_effect=lambda job: jobs[job]):
+        service.tick(); finish(jobs, calls, 0); service.tick(); finish(jobs, calls, 1); service.tick()
+        old = service.player.active
+        service.crossfade(.5)
+        assert service.auto_blend and not service.player.mixing  # UI only queued a command.
+        service.tick()
+        assert not service.auto_blend and service.player.mixing
+        assert service.current["path"] == calls[1][1]
+        assert old.busy() and service.player.active.busy()
+        assert service.player.crossfade_position == .5
+        service.auto_mix(True); service.tick()
+        assert service.auto_blend and service.player.manual_fraction is None
+
+
+def _studio_pcm(path):
+    import array
+    import wave
+    values = array.array("h", [0]*4000 + [16384, -16384]*2000)
+    with wave.open(str(path), "wb") as output:
+        output.setnchannels(1); output.setsampwidth(2); output.setframerate(4000)
+        output.writeframes(values.tobytes())
+    return path
+
+
+def test_studio_waveform_comes_from_pcm_and_invalid_audio_is_blank(tmp_path):
+    path = _studio_pcm(tmp_path / "actual-preview-tone.wav")
+    peaks = radio.waveform_peaks(path, bins=8)
+    assert len(peaks) == 8 and peaks[:4] == [0]*4
+    assert peaks[4:] == [.5]*4
+    assert len(radio.waveform_peaks(path, bins=9000)) <= 512
+    (tmp_path / "bad.wav").write_text("not an audio waveform")
+    assert radio.waveform_peaks(tmp_path / "bad.wav") == []
+    assert radio.waveform_peaks(tmp_path / "missing.wav") == []
+
+
+def studio_preview_fixture(tmp_path):
+    """Screenshot-capable real Tk harness; no generation, audio device or user state."""
+    import tkinter as tk
+    import shutil
+    radio.ensure_stations(tmp_path)
+    (tmp_path / "assets").mkdir(exist_ok=True)
+    logo = radio.ROOT / "assets/cale-logo.png"
+    if logo.exists():
+        shutil.copyfile(logo, tmp_path / "assets/cale-logo.png")
+    import array, math, wave
+    def preview_tone(path, beat):
+        samples = array.array("h", (round(27000*(.16+.8*abs(math.sin(number/8000*beat*math.pi)))*
+            math.sin(number/8000*440*math.pi)) for number in range(16000)))
+        with wave.open(str(path), "wb") as audio:
+            audio.setnchannels(1); audio.setsampwidth(2); audio.setframerate(8000); audio.writeframes(samples.tobytes())
+        return radio.waveform_peaks(path)
+    peaks = preview_tone(tmp_path / "preview-tone-a.wav", 3.5)
+    next_peaks = preview_tone(tmp_path / "preview-tone-b.wav", 5)
+    class PreviewService:
+        root = tmp_path
+        enabled = True
+        def __init__(self):
+            self.calls = []
+            self.station_catalog = radio.stations(self.root)
+        def station_prompt(self, *args, **kwargs): self.calls.append(("station_prompt", args, kwargs))
+        def snapshot(self):
+            return {"message": "Preview tone · real PCM waveform", "playing": True, "paused": False,
+                "on_air": True, "ready": 2, "next_loaded": True, "auto_blend": True,
+                "crossfade": .3, "tracks_made": 12, "radio_tokens": 12480, "local_tokens": 82360,
+                "decks": [{"title": "Cale Club · preview", "status": "Playing", "duration": 2,
+                    "elapsed": 1.25, "peaks": peaks, "gain": 65},
+                    {"title": "Next track · preview", "status": "Cued", "duration": 2,
+                    "elapsed": 0, "peaks": next_peaks, "gain": 0}]}
+        def start(self): self.calls.append(("start",))
+        def skip(self): self.calls.append(("skip",))
+        def stop(self): self.calls.append(("stop",))
+        def toggle(self): self.calls.append(("toggle",))
+        def choose(self, identity): self.calls.append(("choose", identity))
+        def volume(self, value): self.calls.append(("volume", value))
+        def crossfade(self, value): self.calls.append(("crossfade", value))
+        def auto_mix(self, value): self.calls.append(("auto_mix", value))
+        def deck_volume(self, *value): self.calls.append(("deck_volume", *value))
+    window = tk.Tk()
+    from tkinter import ttk
+    ttk.Style(window).theme_use("clam")
+    window.title("NIGHTSHIFT — Music Studio preview")
+    window.geometry("1360x760+40+40")
+    songs = []
+    service = PreviewService()
+    controls = radio.Controls(window, window, service, on_make_song=songs.append)
+    window.update_idletasks(); window.update()
+    return window, controls, service, songs
+
+
+def test_studio_tk_song_callback_radio_controls_and_auto_position_do_not_fake_audio(tmp_path):
+    import tkinter as tk
+    try:
+        window, controls, service, songs = studio_preview_fixture(tmp_path)
+    except tk.TclError as error:
+        pytest.skip("Tk desktop unavailable: "+str(error))
+    window.withdraw()
+    try:
+        controls.set_mode("song")
+        controls.prompt.insert(0, "A clear female vocal electronic song")
+        controls.generate_button.invoke()
+        assert songs == ["A clear female vocal electronic song"]
+        assert not any(call[0] == "choose" for call in service.calls)
+        controls.set_mode("radio"); controls.deck_action(1)
+        assert service.calls[-1] == ("skip",)
+        controls.set_crossfade(.6)
+        assert service.calls[-1] == ("crossfade", .6)
+        service.calls.clear(); controls.poll(); window.update()
+        assert not any(call[0] == "crossfade" for call in service.calls)
+        assert controls.waves.find_all()
+        assert controls.frame.winfo_reqwidth() <= 1360
+        assert controls.frame.winfo_reqheight() <= 760
+    finally:
+        window.destroy()
+
+
+def test_studio_station_changes_are_queued_without_ui_database_io(tmp_path):
+    _, service, _, _, _, _ = fixture(tmp_path)
+    with patch.object(radio, "database", side_effect=AssertionError("Tk callback opened SQLite")):
+        identity = service.station_prompt("New station", "Clear vocals and synthesizers", False)
+        service.choose(identity)
+    service._commands()
+    assert service.station["id"] == identity and service.enabled
+    assert next(row for row in radio.stations(tmp_path) if row["id"] == identity)["instrumental"] == 0
+
+
+def test_studio_player_gains_reach_windows_audio_commands_not_just_ui_values():
+    deck = radio.AudioDeck()
+    deck.opened = True
+    with patch.object(deck, "command") as command:
+        deck.set_volume(23.4)
+    command.assert_called_once_with(f"setaudio {deck.alias} volume to 234")
+
+
+def test_studio_waveform_does_not_open_oversized_audio(tmp_path):
+    path = tmp_path / "oversized.wav"
+    from types import SimpleNamespace
+    with patch.object(Path, "stat", return_value=SimpleNamespace(st_size=129*1024*1024)), patch("wave.open") as opened:
+        assert radio.waveform_peaks(path) == []
+    opened.assert_not_called()
+
+
+def test_studio_failed_song_callback_keeps_the_description(tmp_path):
+    import tkinter as tk
+    try:
+        window, controls, service, songs = studio_preview_fixture(tmp_path)
+    except tk.TclError as error:
+        pytest.skip("Tk desktop unavailable: "+str(error))
+    window.withdraw()
+    try:
+        controls.on_make_song = lambda _prompt: False
+        controls.set_mode("song")
+        controls.prompt.insert(0, "Keep my exact song description")
+        controls.generate()
+        assert controls.prompt.get() == "Keep my exact song description"
+        assert "did not start" in controls.text.get()
+    finally:
+        window.destroy()
+
+
+def test_studio_vocals_is_radio_only_and_missing_song_launcher_keeps_prompt(tmp_path):
+    import tkinter as tk
+    try:
+        window, controls, service, songs = studio_preview_fixture(tmp_path)
+    except tk.TclError as error:
+        pytest.skip("Tk desktop unavailable: "+str(error))
+    window.withdraw()
+    try:
+        controls.vocals.set(False)
+        controls.on_make_song = None
+        controls.set_mode("song")
+        assert not controls.vocals_toggle.winfo_manager()
+        assert str(controls.generate_button.cget("state")) == "disabled"
+        controls.prompt.insert(0, "A song with my original vocal instructions")
+        controls.generate()  # Return-key path must also give an honest response.
+        assert controls.prompt.get() == "A song with my original vocal instructions"
+        assert "not connected" in controls.text.get()
+        assert not songs
+        controls.set_mode("radio")
+        assert controls.vocals_toggle.winfo_manager() == "pack"
+        assert controls.vocals.get() is False
+    finally:
+        window.destroy()
+
+
+def test_studio_song_acknowledgement_and_errors_survive_radio_polling(tmp_path):
+    import tkinter as tk
+    try:
+        window, controls, service, songs = studio_preview_fixture(tmp_path)
+    except tk.TclError as error:
+        pytest.skip("Tk desktop unavailable: "+str(error))
+    window.withdraw()
+    try:
+        controls.set_mode("song")
+        controls.prompt.insert(0, "An upbeat song with clear vocals")
+        controls.generate()
+        assert songs == ["An upbeat song with clear vocals"]
+        assert not controls.prompt.get()
+        acknowledgement = controls.song_notice.get()
+        assert acknowledgement == "Song started. Follow its progress in Home → My tasks."
+        controls.poll(); window.update()
+        assert controls.song_notice.get() == acknowledgement
+        assert controls.song_notice_label.winfo_manager() == "pack"
+        controls.on_make_song = lambda _prompt: False
+        controls.prompt.insert(0, "Retain this failed song request")
+        controls.generate(); failed = controls.song_notice.get()
+        controls.poll(); window.update()
+        assert controls.song_notice.get() == failed and "did not start" in failed
+        assert controls.prompt.get() == "Retain this failed song request"
+        def broken(_prompt):
+            raise RuntimeError("Readiness check failed")
+        controls.on_make_song = broken
+        controls.generate(); errored = controls.song_notice.get()
+        controls.poll(); window.update()
+        assert controls.song_notice.get() == errored and "Readiness check failed" in errored
+        assert controls.prompt.get() == "Retain this failed song request"
+        controls.set_mode("radio")
+        assert not controls.song_notice_label.winfo_manager()
+        controls.set_mode("song"); controls.poll(); window.update()
+        assert controls.song_notice.get() == errored
+    finally:
+        window.destroy()

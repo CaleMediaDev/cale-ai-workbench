@@ -5,11 +5,57 @@ import subprocess
 import sys
 from pathlib import Path
 from textwrap import dedent
+from urllib.parse import unquote
 
 ROOT = Path(__file__).resolve().parent
 PLUGIN = ROOT / "data/plugins/hermes-connector"
 STORE_URL = "https://chromewebstore.google.com/detail/hermes-connector-%E2%80%94-by-cor/cdhaldcgafmkcnpanlmmpaebabnlledm"
 EXPECTED_VERSION = "0.2.6"
+
+
+def _strip_tag_directives(contents: str) -> str | None:
+    """Recognize a conservative TAG prologue, not an entire YAML document.
+
+    Hermes accepts ASCII URI characters and percent-encoded UTF-8 prefixes.
+    A bare comment, invalid escape, or misplaced directive must not disappear
+    and make an indented manifest appear to be a matching installation.
+    """
+    lines = contents.splitlines()
+    if not any(line.lstrip().startswith("%TAG") for line in lines):
+        return contents
+    kept, handles = [], set()
+    prologue, document_started, yaml_seen = True, False, False
+    for line in lines:
+        if line.lstrip().startswith("%TAG"):
+            if not prologue or not line.startswith("%TAG"):
+                # Indented text in a mapping/block scalar is ordinary content.
+                if not line.startswith("%TAG") and not prologue:
+                    kept.append(line)
+                    continue
+                return None
+            directive = re.fullmatch(
+                r"%TAG +(!|!!|![0-9A-Za-z_-]+!) +"
+                r"((?:[0-9A-Za-z;/?:@&=+$,_.!~*'()\[\]-]|%[0-9A-Fa-f]{2})+)"
+                r"(?: +#[^\r\n]*)? *", line)
+            if not directive or directive[1] in handles:
+                return None
+            try:
+                unquote(directive[2], encoding="utf-8", errors="strict")
+            except UnicodeError:
+                return None
+            handles.add(directive[1])
+            continue
+        if re.fullmatch(r"---(?: +#[^\r\n]*)? *", line):
+            document_started = True
+            prologue = False
+        elif re.fullmatch(r"%YAML +1\.[12](?: +#[^\r\n]*)? *", line):
+            if not prologue or yaml_seen:
+                return None
+            yaml_seen = True
+        elif line.strip() and not line.lstrip().startswith("#"):
+            prologue = False
+        kept.append(line)
+    return "\n".join(kept) if not handles or document_started else None
 
 
 def installed_version() -> str:
@@ -21,13 +67,17 @@ def installed_version() -> str:
         contents = manifest.read_text(encoding="utf-8-sig")
     except (OSError, UnicodeError):
         return ""
-    # YAML comments and document markers may be less indented than the root mapping.
+    contents = _strip_tag_directives(contents)
+    if contents is None:
+        return ""
+    # YAML comments, directives and document markers may be less indented than the root mapping.
     mapping_lines = "\n".join(
         line for line in contents.splitlines()
         if not line.lstrip().startswith("#")
+        and not re.fullmatch(r"%YAML[ \t]+1\.[12](?:[ \t]+#[^\r\n]*)?[ \t]*", line)
         and not re.fullmatch(r"(?:---|\.\.\.)(?:[ \t]+#[^\r\n]*)?[ \t]*", line)
     )
-    match = re.search(r"^(?:version|'version'|\"version\")[ \t]*:[ \t]*(['\"]?)([\w.\-]+)\1(?:[ \t]+#[^\r\n]*)?[ \t]*\r?$", dedent(mapping_lines), re.M)
+    match = re.search(r"^(?:version|'version'|\"version\")[ \t]*:[ \t]+(['\"]?)([\w.\-]+)\1(?:[ \t]+#[^\r\n]*)?[ \t]*\r?$", dedent(mapping_lines), re.M)
     return match.group(2) if match else ""
 
 

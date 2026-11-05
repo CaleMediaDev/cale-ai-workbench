@@ -1,0 +1,22 @@
+{
+  "release": "0.5.505",
+  "reviewed_change": "ddf88da6c37b38ff6d16a1ba2f5983097f67c0cb",
+  "base": "5bcf26eb7c4902dab1a7f832aee5c7bbc68a6463",
+  "regression": "Two valid reads of absent internal PLAN.md and PROGRESS.md added model-quality failures and deferred the model's weights despite no evidence of a model capability failure.",
+  "before": "Actual native-tool regression failed on public504; missing files and model deferral were reproduced without inference.",
+  "after": "Canonical contained internal-note FileNotFoundError reads still fail, preserve diagnostics and leave the task unfinished, while adding no model-quality blame.",
+  "validation": {
+    "author": "26 focused tests passed in 5.36s",
+    "independent_public_checkout": "27 passed in 7.74s",
+    "combined_private_checkout": "27 passed in 8.28s; 429 existing test/helper functions preserved unchanged",
+    "controls": [
+      "Existing model-quality failures are not cleared",
+      "Invalid arguments, permission/path errors and other missing outputs remain ordinary failures",
+      "Failed source patches and schema errors still defer model weights after the existing threshold",
+      "Manual model selection, local-only, offline, free-cloud restrictions and fallbacks remain intact",
+      "No tool success, task completion or new permission is fabricated"
+    ]
+  },
+  "manifest_runtime_files": 250,
+  "claim_limits": "This fixes a proven feedback-classification error. No new model-speed benchmark or broad routing quality improvement is claimed. Experimental requirement coverage and near-completion browser repair are excluded."
+}

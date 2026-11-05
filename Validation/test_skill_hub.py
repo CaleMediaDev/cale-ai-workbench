@@ -108,6 +108,31 @@ class SkillHubTests(unittest.TestCase):
         self.assertEqual(set(skill_hub.SEEN), {identifier})
         self.assertEqual(skill_hub.INSPECTED, {})
 
+    def test_search_matches_topic_beyond_display_limits(self):
+        identifier = "skills-sh/example/accessibility"
+        for field, limit in (("name", 100), ("description", 500)):
+            with self.subTest(field=field):
+                skill_hub.SEEN.clear()
+                row = {
+                    "identifier": identifier,
+                    "name": "Interface helper",
+                    "description": "Checks local interfaces.",
+                }
+                row[field] = "x" * limit + " accessibility"
+                payload = json.dumps([
+                    {"identifier": "skills-sh/example/unrelated", "name": "Unrelated"},
+                    row,
+                ])
+                with patch.object(skill_hub, "_run", return_value=payload):
+                    result = skill_hub.search("accessibility")
+                self.assertEqual(
+                    [match["identifier"] for match in result["matches"]],
+                    [identifier],
+                )
+                self.assertEqual(result["matches"][0][field], "x" * limit)
+                self.assertEqual(set(skill_hub.SEEN), {identifier})
+                self.assertEqual(skill_hub.INSPECTED, {})
+
     def test_search_skips_non_object_entries(self):
         identifier = "skills-sh/example/workflows/accessibility"
         payload = json.dumps([None, "invalid entry", [], {

@@ -1,0 +1,85 @@
+{
+  "release": "0.5.531",
+  "base": "44df6b61a63f990da84176d22b006fab8d0721e8",
+  "sha256": {
+    "Validation/test_model_fitness.py": "1344489dc6fd56540d8234aae001a13f03d47bfe0e1ba2fded5fbadbd3c89356",
+    "Validation/test_self_diagnostics.py": "f25ac3f36d4a04bbb7380340ebd6d9091e54bb9c9e34067d2365eb4a2e310154",
+    "Validation/test_tone_adaptation.py": "4565b0ef2e1b487060ec88e41f6ad8406e00685b164a6f8af3ce94e3c991f617",
+    "model_fitness.py": "a35d8fbcc50d3d67d91def7f459708fe9292d866ecca600a1d4a3601b9e1b968",
+    "self_diagnostics.py": "ef6eb6e87f803c3b4d6bc3cce7c9ee9d005e38d669a7d2985eea0689c2620b8c",
+    "tone_adaptation.py": "0331ceeb98e066345c8801f735de820cded1f7a69968bda86c33931e5a0e3138"
+  },
+  "validation": {
+    "affected_modules": {
+      "passed": 103,
+      "skipped": 1,
+      "subtests": 30,
+      "seconds": 103.81,
+      "exit_code": 0
+    }
+  },
+  "merged_proposals": [
+    {
+      "headRefOid": "173badde38cd2a51eeecb4bebfbedaba83bc2d3a",
+      "isDraft": false,
+      "mergeCommit": {
+        "oid": "54ab1c19b637a0eaabd3c2340fd764650da3dde3"
+      },
+      "mergedAt": "2026-11-05T21:50:57Z",
+      "number": 669,
+      "state": "MERGED",
+      "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/669"
+    },
+    {
+      "headRefOid": "85d7c8b3e83189cbf32d78f4ef1c72bd0ff5d1b4",
+      "isDraft": false,
+      "mergeCommit": {
+        "oid": "560323a5440e82e497ca3d5a58e8d05af74549d5"
+      },
+      "mergedAt": "2026-11-05T21:51:04Z",
+      "number": 671,
+      "state": "MERGED",
+      "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/671"
+    },
+    {
+      "headRefOid": "9c7c7173c292684d46aab71481c614befc781510",
+      "isDraft": false,
+      "mergeCommit": {
+        "oid": "44df6b61a63f990da84176d22b006fab8d0721e8"
+      },
+      "mergedAt": "2026-11-05T21:51:10Z",
+      "number": 717,
+      "state": "MERGED",
+      "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/717"
+    }
+  ],
+  "baseline": {
+    "source": "0762743403ffdc19166d9234830f2f19396b6582",
+    "tests_only_before_production_patch": true,
+    "targeted_nodes": 3,
+    "failed_nodes": 2,
+    "failed_subtests": 4,
+    "passed_parent_nodes": 1,
+    "deselected": 101,
+    "seconds": 0.9,
+    "exit_code": 1,
+    "failures": [
+      "social reply spoke tool-call completion text for both function-call formats and absent/stop finish_reason",
+      "game probe json.loads(None) raised TypeError",
+      "deeply nested self-check report raised RecursionError"
+    ],
+    "limits": [
+      "The first collection attempt used the wrong working directory and failed import; this receipt records the subsequent correctly collected baseline."
+    ]
+  },
+  "changes": [
+    "Record an invalid game-model probe sample instead of crashing on a non-string completion body.",
+    "Treat excessive JSON nesting in a saved self-check report as unreadable state, allowing the normal scheduler to launch validation.",
+    "Use the ordinary social-reply fallback when a response contains tool/function call metadata, independently of finish_reason."
+  ],
+  "limits": [
+    "Tests use isolated data and mocked model/process boundaries; no live model, microphone or real corrupted client installation was exercised.",
+    "Full affected modules only, not the full installed suite. Game quality and entire app-building capability are not established by these checks.",
+    "The independent installed self-check is allowed to finish; this package preparation does not stop it or apply an update."
+  ]
+}

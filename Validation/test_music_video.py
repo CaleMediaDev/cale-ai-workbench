@@ -308,7 +308,11 @@ def test_music_video_cover_pixel_aspect_does_not_distort_output(tmp_path):
     assert cover.read_bytes() == original_cover
 
 
-def test_music_video_crops_cover_using_display_aspect_ratio(tmp_path):
+@pytest.mark.parametrize("dpi, band", [
+    ((72, 144), (0, 80, 320, 240)),
+    ((144, 72), (80, 0, 240, 320)),
+])
+def test_music_video_crops_cover_using_display_aspect_ratio(tmp_path, dpi, band):
     song = tmp_path / "song.wav"
     cover = tmp_path / "narrow-cover.png"
     video = tmp_path / "square.mp4"
@@ -319,10 +323,10 @@ def test_music_video_crops_cover_using_display_aspect_ratio(tmp_path):
         audio.setframerate(16000)
         audio.writeframes(b"\x00\x00" * 16000)
     artwork = Image.new("RGB", (320, 320), (20, 20, 220))
-    artwork.paste((220, 20, 20), (0, 80, 320, 240))
-    # SAR 1:2 makes the displayed cover half as wide as it is tall.
-    # Filling a square must crop away the top and bottom blue bands.
-    artwork.save(cover, dpi=(144, 72))
+    artwork.paste((220, 20, 20), band)
+    # Exercise both SAR directions as decoded by the bundled FFmpeg: crop
+    # vertically for a narrow displayed cover and horizontally for a wide one.
+    artwork.save(cover, dpi=dpi)
     original_cover = cover.read_bytes()
 
     music_video.make_music_video(
