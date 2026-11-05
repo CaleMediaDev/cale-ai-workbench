@@ -145,6 +145,44 @@ def test_mix_music_renders_both_tracks_and_is_discoverable(tmp_path):
     assert duration(foreground) == pytest.approx(0.3)
 
 
+def test_edit_music_rejects_decode_errors_with_playable_partial_output(tmp_path, monkeypatch):
+    source = tmp_path / "song.wav"
+    output = tmp_path / "clip.wav"
+    original = b"original audio with a damaged packet"
+    source.write_bytes(original)
+    staged_paths = []
+    monkeypatch.setattr(music_edit.imageio_ffmpeg, "get_ffmpeg_exe", lambda: "ffmpeg")
+
+    def decode_error(command, **kwargs):
+        assert kwargs["timeout"] == 3600
+        assert "-n" in command
+        staged = Path(command[-1])
+        staged_paths.append(staged)
+        assert not output.exists()
+        # Decoding can yield valid frames before encountering a corrupt packet.
+        with wave.open(str(staged), "wb") as audio:
+            audio.setnchannels(1)
+            audio.setsampwidth(2)
+            audio.setframerate(16000)
+            audio.writeframes(b"\x00\x00" * 160)
+        # Without -xerror, FFmpeg may continue and report success despite errors.
+        returncode = 1 if "-xerror" in command else 0
+        return music_edit.subprocess.CompletedProcess(
+            command, returncode, "", "Error while decoding stream"
+        )
+
+    monkeypatch.setattr(music_edit.subprocess, "run", decode_error)
+
+    for _ in range(2):
+        with pytest.raises(RuntimeError, match="Error while decoding stream"):
+            music_edit.edit_music(str(source), str(output))
+        assert not output.exists()
+        assert source.read_bytes() == original
+        assert all(not path.parent.exists() for path in staged_paths)
+
+    assert len(staged_paths) == 2
+
+
 def test_edit_music_removes_empty_output_after_successful_exit(tmp_path, monkeypatch):
     source = tmp_path / "song.wav"
     output = tmp_path / "clip.wav"
