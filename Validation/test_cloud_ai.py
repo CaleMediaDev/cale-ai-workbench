@@ -1041,6 +1041,114 @@ class CloudTests(unittest.TestCase):
         self.addCleanup(self.plan.stop)
         self.addCleanup(self.offline.stop)
 
+    def test_native_sized_transport_preserves_history_and_actual_usage(self):
+        router = cloud.Router()
+        router.model_native_contexts = {cloud.LOCAL_MODEL: 262144}
+        router.native_version_ready = True
+        router.native_version_until = time.monotonic() + 60
+        payload = {**REQUEST, "max_tokens": 80, "messages": [
+            {"role": "user", "content": "Return the checked answer."}]}
+        original = json.loads(json.dumps(payload))
+        seen = []
+        def upstream(url, body, **kwargs):
+            seen.append((url, body))
+            if url.endswith("/api/chat"):
+                return {"model": cloud.LOCAL_MODEL, "done": True,
+                        "message": {"role": "assistant", "content": "checked"},
+                        "prompt_eval_count": 12, "eval_count": 3, "eval_duration": 300000000}
+            return ANSWER
+        with patch.object(cloud, "post", side_effect=upstream), patch("usage_history.record_completion") as usage:
+            result = router.complete(payload)
+        self.assertEqual(seen[0][0], "http://127.0.0.1:11434/api/chat")
+        body = seen[0][1]
+        self.assertEqual(body["messages"], payload["messages"])
+        self.assertLess(body["options"]["num_ctx"], 262144)
+        self.assertGreaterEqual(body["options"]["num_ctx"], cloud.estimated_input_tokens(payload) + 80 + 1024)
+        self.assertIs(body["truncate"], False)
+        self.assertIs(body["shift"], False)
+        self.assertEqual(body["options"]["num_predict"], 80)
+        self.assertEqual(result["usage"]["total_tokens"], 15)
+        self.assertEqual(result["eval_duration"], 300000000)
+        usage.assert_called_once()
+        self.assertEqual(payload, original)
+
+    def test_native_transport_unknown_version_or_features_preserves_legacy_request(self):
+        for version, extra in ((False, {}), (True, {"reasoning_effort": "high"}),
+                               (True, {"tool_choice": "required"}), (True, {"max_tokens": None})):
+            with self.subTest(version=version, extra=extra):
+                router = cloud.Router()
+                router.model_native_contexts = {cloud.LOCAL_MODEL: 262144}
+                router.native_version_ready = version
+                router.native_version_until = time.monotonic() + 60
+                with patch.object(cloud, "post", return_value=ANSWER) as upstream:
+                    if extra.get("tool_choice") == "required":
+                        with self.assertRaisesRegex(ValueError, "Required tool call"):
+                            router.complete({**REQUEST, "max_tokens": 80, **extra})
+                    else:
+                        router.complete({**REQUEST, "max_tokens": 80, **extra})
+                self.assertTrue(upstream.call_args.args[0].endswith("/v1/chat/completions"))
+                for key, value in extra.items():
+                    self.assertEqual(upstream.call_args.args[1].get(key), value)
+
+    def test_native_transport_version_probe_and_retry_are_bounded(self):
+        router = cloud.Router()
+        router.model_native_contexts = {cloud.LOCAL_MODEL: 262144}
+        raw = {"model": cloud.LOCAL_MODEL, "done": True,
+               "message": {"role": "assistant", "content": "checked"}}
+        with (patch.object(cloud, "urlopen", return_value=io.BytesIO(b'{"version":"0.40.13"}')) as version,
+              patch.object(cloud, "post", side_effect=[HTTPError("local", 503, "busy", {}, None), raw]) as upstream,
+              patch("usage_history.record_completion") as usage):
+            result = router.complete({**REQUEST, "max_tokens": 80})
+        version.assert_called_once_with("http://127.0.0.1:11434/api/version", timeout=3)
+        self.assertEqual(upstream.call_count, 2)
+        self.assertTrue(all(call.args[0].endswith("/api/chat") for call in upstream.call_args_list))
+        self.assertEqual(upstream.call_args_list[0].args, upstream.call_args_list[1].args)
+        self.assertNotIn("usage", result)
+        usage.assert_called_once()
+
+    def test_native_actual_usage_survives_invalid_reply_without_a_fake_success(self):
+        router = cloud.Router()
+        router.model_native_contexts = {cloud.LOCAL_MODEL: 262144}
+        router.native_version_ready = True
+        router.native_version_until = time.monotonic() + 60
+        raw = {"model": cloud.LOCAL_MODEL, "done": True, "prompt_eval_count": 9,
+               "eval_count": 7, "eval_duration": 800000000,
+               "message": {"role": "assistant", "tool_calls": [{"function": {"name": "lookup", "arguments": "malformed"}}]}}
+        with patch.object(cloud, "post", return_value=raw), patch("usage_history.record_completion") as usage:
+            with self.assertRaisesRegex(ValueError, "Invalid native Ollama tool arguments"):
+                router.complete({**REQUEST, "max_tokens": 80})
+        usage.assert_called_once()
+        self.assertEqual(usage.call_args.args[0]["usage"]["total_tokens"], 16)
+        self.assertEqual(usage.call_args.args[0]["eval_duration"], 800000000)
+
+    def test_native_failure_does_not_switch_to_legacy_transport(self):
+        router = cloud.Router()
+        router.model_native_contexts = {cloud.LOCAL_MODEL: 262144}
+        router.native_version_ready = True
+        router.native_version_until = time.monotonic() + 60
+        with (patch.object(router, "local_candidates", return_value=[cloud.LOCAL_MODEL, "other-local"]),
+              patch.object(cloud, "post", side_effect=HTTPError("local", 400, "context overflow", {}, None)) as upstream):
+            with self.assertRaisesRegex(RuntimeError, "legacy transport was not attempted"):
+                router.complete({**REQUEST, "max_tokens": 80})
+        self.assertTrue(upstream.called)
+        self.assertTrue(all(call.args[0].endswith("/api/chat") for call in upstream.call_args_list))
+
+    def test_native_optional_metadata_cannot_hide_existing_vision_thinking(self):
+        self.candidates.stop()
+        alias = "cale-code7"
+        tags = {"models": [{"name": alias+":latest", "size": 5*2**30}]}
+        for metadata in (None, [], {}):
+            with (self.subTest(metadata=metadata),
+                  patch.object(cloud, "post", return_value={"capabilities": ["tools", "vision", "thinking"],
+                        "parameters": "num_ctx 32768\n", "details": {"parameter_size": "7.6B"}, "model_info": metadata}),
+                  patch.object(cloud, "urlopen", return_value=io.BytesIO(json.dumps(tags).encode())),
+                  patch.object(cloud, "candidate_approved", return_value=True), patch.object(cloud, "refresh_catalog")):
+                router = cloud.Router()
+                self.assertEqual(router.local_candidates("quick", required_context=16000), [alias])
+                self.assertIn(alias, router.model_vision)
+                self.assertIn(alias, router.model_thinking)
+                self.assertNotIn(alias, router.model_native_contexts)
+
     def test_native_32k_candidate_only_serves_requests_that_fit(self):
         self.candidates.stop()
         alias = "cale-code7"
@@ -2471,3 +2579,75 @@ def test_official_connection_helper_runs_without_console_or_terminal_input(tmp_p
     assert not options.get("shell", False)
     if sys.platform == "win32":
         assert options["creationflags"] & subprocess.CREATE_NO_WINDOW
+
+
+def test_native_context_codec_preserves_tool_ids_schema_options_and_no_mutation():
+    payload = {"model": "local", "max_tokens": 200, "reasoning_effort": "none",
+               "temperature": 0.3, "top_p": 0.8, "seed": 2, "stop": ["END"],
+               "tools": [{"type": "function", "function": {"name": "lookup", "parameters": {"type": "object"}}}],
+               "messages": [{"role": "assistant", "content": None, "reasoning": "checked first",
+                    "tool_calls": [{"id": "call-original", "type": "function", "function": {
+                        "name": "lookup", "arguments": '{"q":"private"}'}}]},
+                    {"role": "tool", "tool_call_id": "call-original", "content": "result"}],
+               "response_format": {"type": "json_schema", "json_schema": {"name": "answer",
+                    "strict": True, "schema": {"type": "object", "properties": {"x": {"type": "string"}}}}}}
+    original = json.loads(json.dumps(payload))
+    body = cloud.native_chat_request(payload, 65536)
+    assert body["messages"][0]["tool_calls"][0]["id"] == "call-original"
+    assert body["messages"][0]["tool_calls"][0]["function"]["arguments"] == {"q": "private"}
+    assert body["messages"][1]["tool_name"] == "lookup"
+    assert body["messages"][1]["tool_call_id"] == "call-original"
+    assert body["messages"][0]["thinking"] == "checked first" and body["think"] is False
+    assert body["format"] == payload["response_format"]["json_schema"]["schema"]
+    assert body["tools"] == payload["tools"] and body["options"]["temperature"] == .3
+    assert payload == original
+
+
+def test_native_context_unsupported_features_keep_legacy_and_overflow_never_truncates():
+    import pytest
+    base = {"model": "local", "max_tokens": 30, "messages": [{"role": "user", "content": "hello"}]}
+    for change in ({"tool_choice": "required"}, {"reasoning_effort": "high"}, {"n": 2},
+                   {"messages": [{"role": "user", "content": [{"type": "image_url", "image_url": {"url": "data:image/png;base64,YQ=="}}]}]},
+                   {"messages": [{"role": "developer", "content": "rules"}]}, {"max_tokens": None}):
+        assert cloud.native_chat_request({**base, **change}, 65536) is None
+    with pytest.raises(ValueError, match="not truncated"):
+        cloud.native_chat_request({**base, "max_tokens": 65000}, 65536)
+    assert cloud.native_chat_request(base, 3000)["options"]["num_ctx"] <= 3000
+
+
+def test_native_context_normalization_preserves_reasoning_calls_and_unknown_counts():
+    import pytest
+    raw = {"model": "local", "done": True, "done_reason": "stop", "message": {
+        "role": "assistant", "content": "", "thinking": "reason", "tool_calls": [
+            {"id": "original", "function": {"name": "lookup", "arguments": {"x": 1}}},
+            {"function": {"name": "lookup", "arguments": {"x": 2}}}]}}
+    reply = cloud.native_chat_completion(raw)
+    assert "usage" not in reply
+    message = reply["choices"][0]["message"]
+    assert message["reasoning"] == "reason" and message["tool_calls"][0]["id"] == "original"
+    assert message["tool_calls"][1]["id"] != "original"
+    assert json.loads(message["tool_calls"][0]["function"]["arguments"]) == {"x": 1}
+    assert cloud.native_chat_completion({**raw, "eval_count": 0, "prompt_eval_count": 0})["usage"]["total_tokens"] == 0
+    assert "usage" not in cloud.native_chat_completion({**raw, "eval_count": True, "prompt_eval_count": 1})
+    with pytest.raises(ValueError):
+        cloud.native_chat_completion({**raw, "done": False})
+    with pytest.raises(ValueError):
+        cloud.native_chat_completion({**raw, "message": {"role": "assistant", "tool_calls": [{"function": {"name": "x", "arguments": "bad"}}]}})
+
+
+def test_native_context_counts_long_requests_without_product_cap_and_defaults_match_v1():
+    body = cloud.native_chat_request({"model": "local", "max_tokens": 8192,
+        "messages": [{"role": "user", "content": "hello " * 18000}], "stop": "END"}, 262144)
+    assert body["options"]["num_ctx"] > 32768
+    assert body["options"]["num_ctx"] <= 262144
+    assert body["options"]["temperature"] == 1.0 and body["options"]["top_p"] == 1.0
+    assert body["options"]["stop"] == ["END"]
+    assert body["messages"][0]["content"] == "hello " * 18000
+
+
+def test_native_context_nullable_sampling_matches_legacy_defaults():
+    body = cloud.native_chat_request({"model": "local", "messages": [{"role": "user", "content": "hi"}],
+        "max_tokens": 20, "temperature": None, "top_p": None, "seed": None,
+        "presence_penalty": None, "frequency_penalty": None}, 65536)
+    assert body["options"]["temperature"] == 1.0 and body["options"]["top_p"] == 1.0
+    assert not {"seed", "presence_penalty", "frequency_penalty"} & body["options"].keys()
