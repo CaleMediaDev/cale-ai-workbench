@@ -4351,10 +4351,11 @@ def persistence_completion_issue(folder, project):
     if len(raw)>64000:return 'The saved browser suite exceeds the bounded persistence evidence limit; restore its valid retained checks.'
     saved=json.loads(raw)
     digest=hashlib.sha256(raw).hexdigest()
-    receipts=project_memory.current_check_receipts(folder,project,checker_file=webapp_check.__file__)
+    source_status={}
+    receipts=project_memory.current_check_receipts(folder,project,checker_file=webapp_check.__file__,source_status=source_status)
     for receipt in receipts:
         if (receipt.get('checker')=='check_webapp_saved' and receipt.get('suite_sha256')==digest
-                and receipt.get('source_after',{}).get('scope')=='full_project_source'
+                and receipt.get('source_after',{}).get('scope') in {'full_project_source','application_source'}
                 and receipt.get('dependency_scope')=='project_local_dependencies'
                 and receipt.get('check_sha256')==project_memory._verification_digest({'suite_sha256':digest})
                 and valid_persistence_witnesses(receipt.get('persistence_witnesses'),saved)):
@@ -4364,11 +4365,14 @@ def persistence_completion_issue(folder, project):
                 if len(pages)==1 and witness['path']!=pages[0]:continue
                 groups.setdefault((witness['path'],witness['sequence'],witness['target']),set()).add(witness['effect'])
             if any(('mutation' not in required or observed) and required-{'mutation'}<=observed for observed in groups.values()):return ''
-    return ('The original request explicitly requires persistence after reload, but no fresh full-source browser witness records it. '
+    limitations=', '.join(source_status.get('limitations',[]))
+    scope_note=(' Source scope: '+str(source_status.get('scope','unknown'))+
+                (('; limitations: '+limitations) if limitations else '')+'.')
+    return ('The original request explicitly requires persistence after reload, but no fresh complete-source and local-dependency browser witness records it. '
             'Use check_webapp with one saved sequence: change data through its controls, assert the changed text/state/count, '
             'then reload in a later case and assert that same value with no new fill/click/key actions. Retain all earlier cases '
             'and run the actual saved verifier after the final source edit. Static visibility or SQL done rows are not reload proof. '
-            +' Required measured effects: '+', '.join(sorted(required))+'. A removal/deletion needs an earlier successful reload baseline, then an observed collection decrease, then another reload retaining the new outcome. Supported counts are table rows, UL/OL items, or exported array.length state; add-only evidence does not cover deletion. For click/key-only mutation, first assert a reload baseline. Returning to the initial empty/zero without a persisted baseline is not evidence.')
+            +scope_note+' Required measured effects: '+', '.join(sorted(required))+'. A removal/deletion needs an earlier successful reload baseline, then an observed collection decrease, then another reload retaining the new outcome. Supported counts are table rows, UL/OL items, or exported array.length state; add-only evidence does not cover deletion. For click/key-only mutation, first assert a reload baseline. Returning to the initial empty/zero without a persisted baseline is not evidence.')
 
 
 

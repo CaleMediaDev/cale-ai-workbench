@@ -7865,3 +7865,49 @@ def test_global_witness_budget_retains_later_complete_group_without_changing_any
         assert [check['passed'] for check in failed['checks']]==[True,True,False]
         assert path.read_bytes()==failed_bytes
         assert native_agent.persistence_completion_issue(folder,item)
+
+
+@pytest.mark.parametrize('served_runtime',[False,True])
+def test_application_source_requires_complete_actual_dependency_observation(tmp_path,served_runtime):
+    import webapp_check
+    item,folder,spec,active,runtime=persistence_bookmark_fixture(tmp_path,persistent=True)
+    unused=folder/'node_modules/unused';unused.mkdir(parents=True)
+    asset=unused/'style.css';asset.write_text('body{color:black}')
+    if served_runtime:
+        page=folder/'index.html';page.write_text(page.read_text()+"<link rel=stylesheet href='node_modules/unused/style.css'>")
+    spec['cases'].append({'reload':True,'expect':{'bookmarks':'Beta','count':'2'}})
+    with project_memory.verification_context(item),patch.object(long_tasks,'STATE',runtime),patch.object(long_tasks,'projects',return_value=[item]):
+        actual=json.loads(native_agent.execute_tool(folder,'check_webapp',spec))
+        assert actual['passed'],actual
+        replay=webapp_check.run_saved_checks(folder,folder/'.local-ai/webapp-check.json')
+        assert replay['passed'] and replay['persistence_witnesses'],replay
+        issue=native_agent.persistence_completion_issue(folder,item)
+        if served_runtime:
+            assert replay['dependency_scope']=='limited_dependency_manifest' and issue
+        else:
+            assert replay['dependency_scope']=='project_local_dependencies' and not issue
+        assert project_memory.verification_source_state(folder)['scope']=='application_source'
+        assert task_context.step_status(folder)['done']==0
+        script=folder/'app.js';before=script.stat();content=script.read_bytes()
+        script.write_bytes(content.replace(b'let items',b'var items'));os.utime(script,ns=(before.st_atime_ns,before.st_mtime_ns))
+        assert native_agent.persistence_completion_issue(folder,item)
+
+
+def test_persistence_scope_diagnostic_reports_bounded_reason_without_another_capture(tmp_path,monkeypatch):
+    import webapp_check
+    item,folder,spec,active,runtime=persistence_bookmark_fixture(tmp_path,persistent=True)
+    monkeypatch.setattr(project_memory,'_VERIFICATION_MAX_BYTES',1)
+    original=project_memory.verification_source_state;captures=[]
+    def observed(path):
+        captures.append(path);return original(path)
+    monkeypatch.setattr(project_memory,'verification_source_state',observed)
+    with patch.object(long_tasks,'STATE',runtime),patch.object(long_tasks,'projects',return_value=[item]):
+        issue=native_agent.persistence_completion_issue(folder,item)
+    # Establish the real retained suite first; absent-suite guidance is separate.
+    spec_path=folder/'.local-ai/webapp-check.json'
+    webapp_check.save_verifier(folder,spec)
+    captures.clear()
+    with patch.object(long_tasks,'STATE',runtime),patch.object(long_tasks,'projects',return_value=[item]):
+        issue=native_agent.persistence_completion_issue(folder,item)
+    assert 'byte_budget' in issue and 'limited_dependency_manifest' in issue
+    assert str(folder) not in issue and len(captures)==1

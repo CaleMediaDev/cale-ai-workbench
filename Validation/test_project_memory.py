@@ -670,3 +670,25 @@ def test_verification_detects_directory_listing_changes(tmp_path,monkeypatch):
     result=memory.verification_source_state(tmp_path)
     assert changed and result['scope']=='limited_dependency_manifest'
     assert 'changed_directory' in result['limitations']
+
+
+def test_application_source_names_only_intentional_runtime_exclusions(tmp_path,monkeypatch):
+    (tmp_path/'index.html').write_text('<p>App</p>')
+    (tmp_path/'node_modules').mkdir()
+    first=memory.verification_source_state(tmp_path)
+    assert first['scope']=='application_source'
+    assert first['excluded_runtime_roots']==['node_modules']
+    (tmp_path/'Toolbox').mkdir()
+    second=memory.verification_source_state(tmp_path)
+    assert second['scope']=='application_source' and first['sha256']!=second['sha256']
+    monkeypatch.setattr(memory,'_VERIFICATION_MAX_BYTES',1)
+    limited=memory.verification_source_state(tmp_path)
+    assert limited['scope']=='limited_dependency_manifest' and 'byte_budget' in limited['limitations']
+
+
+def test_application_source_exclusion_metadata_overflow_is_limited(tmp_path):
+    for i in range(129):
+        parent=tmp_path/str(i);parent.mkdir();(parent/'node_modules').mkdir()
+    observed=memory.verification_source_state(tmp_path)
+    assert observed['scope']=='limited_dependency_manifest'
+    assert 'excluded_runtime_budget' in observed['limitations']

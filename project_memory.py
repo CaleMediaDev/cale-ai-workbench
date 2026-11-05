@@ -521,7 +521,7 @@ def verification_source_state(folder):
     root = _artifact_project_root(folder)
     started=time.monotonic()
     entries=[]; pending=[root]; directories=[]; total=consumed=visited=path_bytes=0
-    omitted=0; reasons=set(); exhausted=False
+    omitted=0; reasons=set(); exhausted=False; excluded_roots=[]; excluded_path_bytes=0
     excluded={'.git','__pycache__'}
     runtime={'.venv','venv','node_modules','Toolbox'}
     def limited(reason):
@@ -554,7 +554,12 @@ def verification_source_state(folder):
                         if unsafe(before):limited('linked_path');continue
                         if stat.S_ISDIR(before.st_mode):
                             if item.name in excluded:continue
-                            if item.name in runtime:limited('excluded_runtime');continue
+                            if item.name in runtime:
+                                limited('excluded_runtime')
+                                excluded_path_bytes+=len(relative.encode('utf-8'))
+                                if len(excluded_roots)>=128 or excluded_path_bytes>8192:
+                                    limited('excluded_runtime_budget');exhausted=True;break
+                                excluded_roots.append(relative);continue
                             if path==root/'.local-ai':
                                 # Mutable task metadata is not app source. Code
                                 # or nested/linked assets here prevent full scope.
@@ -617,10 +622,16 @@ def verification_source_state(folder):
                 limited('changed_directory')
         except (OSError,ValueError):limited('unavailable_directory')
     if pending:omitted+=len(pending);reasons.add('unvisited_directories')
-    encoded=json.dumps(sorted(entries),separators=(',',':')).encode()
+    # Name intentional runtime exclusions in the content identity. This scope
+    # can be used only with a complete actual local dependency observation;
+    # served runtime assets remain unverified, even when this scan is complete.
+    application_only=bool(excluded_roots) and reasons=={'excluded_runtime'}
+    manifest={'files':sorted(entries),'excluded_runtime_roots':sorted(excluded_roots)} if excluded_roots else sorted(entries)
+    encoded=json.dumps(manifest,separators=(',',':')).encode()
     return {'sha256':hashlib.sha256(encoded).hexdigest(),'files':len(entries),'bytes':total,
-            'omitted':omitted,'scope':'limited_dependency_manifest' if omitted else 'full_project_source',
-            'limitations':sorted(reasons)}
+            'omitted':omitted,'scope':('application_source' if application_only else
+                                     'limited_dependency_manifest' if omitted else 'full_project_source'),
+            'limitations':sorted(reasons),'excluded_runtime_roots':sorted(excluded_roots)}
 
 
 def verification_basis(folder, project=None):
@@ -693,12 +704,14 @@ def record_host_check_receipt(folder, checker, arguments, report, source_before,
     return identifier
 
 
-def current_check_receipts(folder, project, *, checker_file):
+def current_check_receipts(folder, project, *, checker_file, source_status=None):
     """Revalidate local cache integrity/freshness; this does not execute any check."""
     import json
     import task_context
     root=_artifact_project_root(folder);basis=verification_basis(root,project)
     current=verification_source_state(root)
+    if isinstance(source_status,dict):
+        source_status.update(scope=current['scope'],limitations=current.get('limitations',[])[:16])
     runner=hashlib.sha256(Path(checker_file).read_bytes()).hexdigest()
     output=[]
     with connection(root) as conn:
