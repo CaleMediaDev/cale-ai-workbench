@@ -62,13 +62,19 @@ def _connect(root: str | Path):
                 conn.execute("CREATE INDEX feedback_kind ON feedback(kind, created DESC)")
         # Retraction must not make superseded generations current again.
         # Keep only generation metadata here, never review text or preferences.
-        conn.execute("""CREATE TABLE IF NOT EXISTS feedback_generations (
-            task_id TEXT PRIMARY KEY, generation INTEGER NOT NULL
-        )""")
-        conn.execute("""INSERT INTO feedback_generations (task_id,generation)
-            SELECT task_id,MAX(generation) FROM feedback GROUP BY task_id
-            ON CONFLICT(task_id) DO UPDATE SET
-                generation=MAX(feedback_generations.generation,excluded.generation)""")
+        generation_schema = "SELECT 1 FROM sqlite_master WHERE type='table' AND name='feedback_generations'"
+        if not conn.execute(generation_schema).fetchone():
+            # Backfill once, under the same writer lock as table creation.
+            # Rechecking after admission avoids rescanning history when two
+            # openers simultaneously encounter an older database.
+            if not conn.in_transaction:
+                conn.execute("BEGIN IMMEDIATE")
+            if not conn.execute(generation_schema).fetchone():
+                conn.execute("""CREATE TABLE feedback_generations (
+                    task_id TEXT PRIMARY KEY, generation INTEGER NOT NULL
+                )""")
+                conn.execute("""INSERT INTO feedback_generations (task_id,generation)
+                    SELECT task_id,MAX(generation) FROM feedback GROUP BY task_id""")
         yield conn
         conn.commit()
     finally:
