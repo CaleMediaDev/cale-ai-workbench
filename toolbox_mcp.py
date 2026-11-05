@@ -759,7 +759,10 @@ async def media_run(action: str, timeout: int = 900, **arguments) -> dict:
                 pass  # It may exit between the return-code check and kill.
         # Drain piped output as well as reaping: wait() alone can deadlock
         # when a worker filled a pipe before communication was cancelled.
-        await process.communicate()
+        try:
+            await process.communicate()
+        except Exception:
+            pass  # A broken pipe during cleanup must not replace cancellation.
         raise
     except asyncio.TimeoutError:
         if process.returncode is None:
@@ -767,7 +770,10 @@ async def media_run(action: str, timeout: int = 900, **arguments) -> dict:
                 process.kill()
             except ProcessLookupError:
                 pass  # It may exit between the return-code check and kill.
-        await process.communicate()
+        try:
+            await process.communicate()
+        except Exception:
+            pass  # Preserve the timeout if output draining also fails.
         raise TimeoutError(f"Local {action} exceeded {timeout} seconds.")
     except Exception:
         if process.returncode is None:
@@ -775,7 +781,10 @@ async def media_run(action: str, timeout: int = 900, **arguments) -> dict:
                 process.kill()
             except ProcessLookupError:
                 pass  # It may exit between the return-code check and kill.
-        await process.communicate()
+        try:
+            await process.communicate()
+        except Exception:
+            pass  # Preserve the original worker communication failure.
         raise
     lines = stdout.decode("utf-8", errors="replace").splitlines()
     try:
