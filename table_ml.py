@@ -80,9 +80,10 @@ def _schema(rows: list[dict], columns: list[str]) -> dict:
     return schema
 
 
-def _features(rows: list[dict], schema: dict) -> list[dict]:
+def _features(rows: list[dict], schema: dict, feature_owners: dict | None = None) -> list[dict]:
     output = []
-    feature_owners = {}
+    if feature_owners is None:
+        feature_owners = {}
     for row in rows:
         features = {}
         for column, spec in schema.items():
@@ -261,9 +262,10 @@ def predict_table_model(model_path: str, csv_path: str, output_path: str) -> dic
         with staged.open("x", encoding="utf-8", newline="") as stream:
             writer = csv.DictWriter(stream, fieldnames=[*columns, output_column])
             writer.writeheader()
+            feature_owners = {}
             for start in range(0, len(rows), 4096):
                 batch = rows[start:start + 4096]
-                matrix = vectorizer.transform(_features(batch, model["schema"]))
+                matrix = vectorizer.transform(_features(batch, model["schema"], feature_owners))
                 with np.errstate(over="ignore", invalid="ignore"):
                     scores = matrix @ weights.T + biases
                 if not np.isfinite(scores).all():
