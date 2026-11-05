@@ -34,6 +34,10 @@ DISCOVERY_MAX_PAGES = 32
 DISCOVERY_MAX_TOOLS = 2000
 DISCOVERY_SECONDS = 15
 LOCAL_CATALOG = {
+    "local.install_game_libraries": {
+        "description": "Install pinned offline Phaser game engine and Yuka NPC seek/patrol JS plus MIT licenses/API notes in a registered task. No npm, accounts, CDN dependency or game execution; preserves existing files.",
+        "inputSchema": {"type":"object", "properties":{"project_folder":{"type":"string"}, "libraries":{"type":"array", "minItems":1, "maxItems":2, "uniqueItems":True, "items":{"enum":["phaser","yuka"]}}}, "required":["project_folder"], "additionalProperties":False},
+    },
     "local.start_3d_job": {
         "description": "Generate a real local 3D model with TripoSR from an image, or draw a local reference from a prompt first. Auto-installs isolated dependencies and verified weights; no account. Needs one NVIDIA GPU with 6 GB VRAM. Export GLB, OBJ or STL. Poll local.model_3d_job_status; do not start duplicate jobs while it downloads. Vertex colors, no UV/PBR textures or rigging.",
         "inputSchema": {"type": "object", "properties": {
@@ -423,6 +427,7 @@ async def toolbox_call(tool: str, arguments_json: str = "{}", project_folder: st
         raise ValueError("arguments_json must be a JSON object")
     if tool in LOCAL_CATALOG:
         local_tools = {
+            "local.install_game_libraries": install_game_libraries,
             "local.start_3d_job": start_3d_job,
             "local.build_3d_scene": build_3d_scene,
             "local.model_3d_job_status": model_3d_job_status,
@@ -1221,6 +1226,189 @@ def sqlite_read(path: str, query: str, max_rows: int = 100) -> dict:
         }
     finally:
         conn.close()
+
+
+
+# Reviewed upstream runtime distributions. Each immutable commit, byte length
+# and digest is an allowlist: neither model arguments nor project files can
+# change the downloaded code. MIT notices travel with every project copy.
+GAME_LIBRARIES = {'phaser': {'repo': 'phaserjs/phaser',
+            'commit': '41be1e462bc600064e498cba370bfa8c5c055a22',
+            'files': [{'source_path': 'dist/phaser.min.js',
+                       'url': 'https://raw.githubusercontent.com/phaserjs/phaser/41be1e462bc600064e498cba370bfa8c5c055a22/dist/phaser.min.js',
+                       'sha256': '66348b1b5141e49b7d5ebbe688cddcb502eab1cb00f21c538686a5b2c5abe4de',
+                       'bytes': 1375976},
+                      {'source_path': 'LICENSE.md',
+                       'url': 'https://raw.githubusercontent.com/phaserjs/phaser/41be1e462bc600064e498cba370bfa8c5c055a22/LICENSE.md',
+                       'sha256': 'c3a9ba7e38d4ef33dccf5fdd1046655c63df06714f84776118fe406f43db5cf2',
+                       'bytes': 1100},
+                      {'source_path': 'README.md',
+                       'url': 'https://raw.githubusercontent.com/phaserjs/phaser/41be1e462bc600064e498cba370bfa8c5c055a22/README.md',
+                       'sha256': '14735751fff0e0a93fc6fd40e5b1393ff8d5b951ce176d8f430eb754aa386379',
+                       'bytes': 15891}],
+            'version': '4.2.1'},
+ 'yuka': {'repo': 'Mugen87/yuka',
+          'commit': 'e6250dc7f5899fa9a752d817cfa4b0d37e7fd983',
+          'files': [{'source_path': 'build/yuka.min.js',
+                     'url': 'https://raw.githubusercontent.com/Mugen87/yuka/e6250dc7f5899fa9a752d817cfa4b0d37e7fd983/build/yuka.min.js',
+                     'sha256': '525fb85e2f9dee055b453b302098c1ccaaf0bbf7f9b072f1f11b5cc25e24209b',
+                     'bytes': 123214},
+                    {'source_path': 'LICENSE',
+                     'url': 'https://raw.githubusercontent.com/Mugen87/yuka/e6250dc7f5899fa9a752d817cfa4b0d37e7fd983/LICENSE',
+                     'sha256': '5053117e2e3ef2326460d86f6073271c9d7ef56ebda09e2983538003293d593e',
+                     'bytes': 1072},
+                    {'source_path': 'README.md',
+                     'url': 'https://raw.githubusercontent.com/Mugen87/yuka/e6250dc7f5899fa9a752d817cfa4b0d37e7fd983/README.md',
+                     'sha256': 'd35685d4fbc1bf867b5b9ce367288ad32f8d6e4c22bab3e7cdc1667d9b16297b',
+                     'bytes': 2368}],
+          'version': '0.7.8'}}
+
+GAME_LIBRARY_GUIDES = {
+    "phaser": """# Phaser 4.2.1 — local browser games
+Load `<script src="vendor/cale-game/phaser/phaser.min.js"></script>` from your root HTML.
+Use `new Phaser.Game({type:Phaser.CANVAS,width:640,height:360,audio:{noAudio:true},
+scene:{create(){this.add.rectangle(100,100,40,40,0x16cbd6);},update(time,delta){}}});`.
+`delta` is milliseconds. Use scene keyboard input and Arcade Physics only when
+configured; this installer does not provide a finished game, textures or sounds.
+Use the local file, not an npm/CDN import. Preserve LICENSE.md when sharing.
+""",
+    "yuka": """# Yuka 0.7.8 — deterministic steering, not an LLM
+Load `<script src="vendor/cale-game/yuka/yuka.min.js"></script>` before your game script.
+Create `const manager=new YUKA.EntityManager(), npc=new YUKA.Vehicle(); npc.maxSpeed=3;`
+then `npc.steering.add(new YUKA.SeekBehavior(new YUKA.Vector3(10,0,0))); manager.add(npc);`.
+Call `manager.update(deltaSeconds)` and copy npc.position.x/z to your rendered sprite.
+For patrol, build `const path=new YUKA.Path(); path.loop=true;`, add Vector3 waypoints,
+and use `npc.steering.add(new YUKA.FollowPathBehavior(path,0.5))` instead of SeekBehavior.
+Yuka has no renderer, collision physics, art, voice, network or trained model.
+Preserve LICENSE when sharing. Runtime and API README are pinned beside this guide.
+""",
+}
+
+
+def _game_library_directory(root: Path, *parts: str) -> Path:
+    """Refuse symlink/junction redirection before creating a vendor/cache path."""
+    current = root.resolve(strict=True)
+    for part in parts:
+        current = current / part
+        if current.is_symlink() or getattr(current, "is_junction", lambda: False)():
+            raise ValueError("Game library paths cannot be symlinks or junctions")
+        if current.exists() and not current.is_dir():
+            raise ValueError("A game library directory is occupied by a file")
+        if not current.resolve().is_relative_to(root.resolve()):
+            raise ValueError("Game library path escaped its registered root")
+    return current
+
+
+def _game_library_read(path: Path, limit=2_000_000) -> bytes:
+    if path.is_symlink() or getattr(path, "is_junction", lambda: False)():
+        raise ValueError("Game library files cannot be links")
+    with path.open("rb") as stream:
+        value = stream.read(limit + 1)
+    if len(value) > limit:
+        raise ValueError("Game library file exceeds its bounded size")
+    return value
+
+
+def _game_library_download(url: str, expected_bytes: int) -> bytes:
+    """Fetch only a fixed upstream file; redirects and oversized bodies fail."""
+    import urllib.request
+    import pc_offline
+    if pc_offline.offline():
+        raise ValueError("Offline: this pinned game library is not in the verified cache yet")
+    class NoRedirect(urllib.request.HTTPRedirectHandler):
+        def redirect_request(self, req, fp, code, msg, headers, newurl):
+            raise ValueError("Pinned game library downloads cannot redirect")
+    request = urllib.request.Request(url, headers={"User-Agent": "CaleAI-GameLibraries/1", "Accept-Encoding": "identity"})
+    with urllib.request.build_opener(NoRedirect).open(request, timeout=20) as response:
+        return response.read(expected_bytes + 1)
+
+
+def _game_library_write_new(path: Path, value: bytes) -> bool:
+    """Exclusive publication never truncates an existing user/concurrent file.
+
+    Identical files are reusable. Conflicting files are preserved, with a
+    useful error. A later I/O failure can leave owned partial installation;
+    retry reuses intact files; conflicting partial files still fail closed,
+    rather than rolling back over somebody's edits.
+    """
+    try:
+        with path.open("xb") as stream:
+            stream.write(value)
+        return True
+    except FileExistsError:
+        if _game_library_read(path) != value:
+            raise ValueError("Existing game library file differs; preserved: " + str(path))
+        return False
+
+
+def _install_game_libraries(project_folder: str, libraries: list[str]) -> dict:
+    import hashlib
+    folder = registered_project(project_folder)
+    if (not isinstance(libraries, list) or not 1 <= len(libraries) <= 2
+            or any(not isinstance(name, str) or name not in GAME_LIBRARIES for name in libraries)
+            or len(set(libraries)) != len(libraries)):
+        raise ValueError("Choose phaser, yuka, or both, without duplicates")
+    for name in libraries:
+        _game_library_directory(folder, "vendor", "cale-game", name)
+    payloads = []
+    for name in libraries:
+        entry = GAME_LIBRARIES[name]
+        cache = _game_library_directory(ROOT, "Toolbox", "game-libraries", name, entry["commit"])
+        for item in entry["files"]:
+            basename = Path(item["source_path"]).name
+            cached = cache / basename
+            if cached.exists() or cached.is_symlink():
+                content = _game_library_read(cached)
+            else:
+                content = _game_library_download(item["url"], item["bytes"])
+            if len(content) != item["bytes"] or hashlib.sha256(content).hexdigest() != item["sha256"]:
+                raise ValueError("Pinned game library hash/size verification failed: " + name + "/" + basename)
+            # Cache publication has the same no-overwrite rule as project files.
+            _game_library_directory(ROOT, "Toolbox", "game-libraries", name, entry["commit"])
+            cache.mkdir(parents=True, exist_ok=True)
+            _game_library_write_new(cached, content)
+            payloads.append((name, basename, content))
+        payloads.append((name, "API.md", GAME_LIBRARY_GUIDES[name].encode("utf-8")))
+        provenance = {"name":name, "version":entry["version"], "license":"MIT", "repository":entry["repo"],
+                      "commit":entry["commit"], "files":entry["files"]}
+        payloads.append((name, "source.json", (json.dumps(provenance,indent=2)+"\n").encode("utf-8")))
+    if registered_project(project_folder) != folder:
+        raise ValueError("The registered task folder changed while preparing game libraries")
+    # Preflight every conflict before installing any new project file. An
+    # exclusive open still checks concurrent creators at actual publication.
+    for name, basename, content in payloads:
+        target = _game_library_directory(folder, "vendor", "cale-game", name) / basename
+        if target.exists() or target.is_symlink():
+            if _game_library_read(target) != content:
+                raise ValueError("Existing game library file differs; preserved: " + str(target))
+    written, reused, files = 0, 0, []
+    for name, basename, content in payloads:
+        if registered_project(project_folder) != folder:
+            raise ValueError("The registered task folder changed during game library installation")
+        directory = _game_library_directory(folder, "vendor", "cale-game", name)
+        directory.mkdir(parents=True, exist_ok=True)
+        directory = _game_library_directory(folder, "vendor", "cale-game", name)
+        target = directory / basename
+        created = _game_library_write_new(target, content)
+        written += int(created); reused += int(not created)
+        files.append({"path":target.relative_to(folder).as_posix(), "sha256":hashlib.sha256(content).hexdigest(), "bytes":len(content)})
+    return {"installed":True, "libraries":[{"name":name,"version":GAME_LIBRARIES[name]["version"],
+        "commit":GAME_LIBRARIES[name]["commit"],"license":"MIT",
+        "script":"vendor/cale-game/"+name+"/"+name+".min.js",
+        "api_guide":"vendor/cale-game/"+name+"/API.md"} for name in libraries],
+        "written":written,"reused":reused,"files":files,"executed":False,
+        "note":"Local runtime libraries installed; game code and behavior still need building and real verification."}
+
+
+@server.tool()
+async def install_game_libraries(project_folder: str, libraries: list[str] = ["phaser", "yuka"]) -> dict:
+    """Install pinned MIT Phaser rendering/gameplay and Yuka NPC steering JS locally.
+
+    Only registered task folders are allowed. Verified cache works offline;
+    missing files download exact reviewed commit hashes. Existing files are
+    preserved. Returns local script/API-guide paths; does not run game code.
+    """
+    return await asyncio.to_thread(_install_game_libraries, project_folder, libraries)
 
 
 if __name__ == "__main__":

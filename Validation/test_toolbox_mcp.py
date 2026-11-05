@@ -1191,3 +1191,197 @@ def test_classifier_subset_filters_each_official_split_before_fitting_and_hashes
     assert policy['retained_split_counts']=={'train':16,'validation':4,'test':6}
     assert result['subset_policy_sha256']==hashlib.sha256(json.dumps(policy,sort_keys=True).encode()).hexdigest()
     assert not result['activated']
+
+
+
+def game_library_fixture(tmp_path,monkeypatch):
+    """Tiny local fixture exercises publication; real engine smoke is separate."""
+    import hashlib
+    root=tmp_path/'runtime';root.mkdir();(root/'LongTasks').mkdir()
+    project=tmp_path/'registered-project';project.mkdir()
+    with sqlite3.connect(root/'LongTasks/projects.db') as db:
+        db.execute('CREATE TABLE projects(folder TEXT)');db.execute('INSERT INTO projects VALUES(?)',(str(project),))
+    payloads={};pins={}
+    for name in ('phaser','yuka'):
+        payloads[name+'/engine.js']=('/* fixture '+name+' */').encode()
+        payloads[name+'/LICENSE']=b'MIT fixture attribution'
+        files=[]
+        for filename,key in ((name+'.min.js',name+'/engine.js'),('LICENSE',name+'/LICENSE')):
+            body=payloads[key];url='https://raw.githubusercontent.com/fixture/'+name+'/'+'a'*40+'/'+filename
+            files.append({'source_path':filename,'url':url,'sha256':hashlib.sha256(body).hexdigest(),'bytes':len(body)})
+        pins[name]={'repo':'fixture/'+name,'commit':'a'*40,'version':'fixture','files':files}
+    monkeypatch.setattr(toolbox_mcp,'ROOT',root);monkeypatch.setattr(toolbox_mcp,'GAME_LIBRARIES',pins)
+    downloads=[]
+    def fetch(url,size):
+        downloads.append(url);name=url.split('/')[4]
+        return payloads[name+('/LICENSE' if url.endswith('/LICENSE') else '/engine.js')]
+    monkeypatch.setattr(toolbox_mcp,'_game_library_download',fetch)
+    return root,project,pins,downloads
+
+
+def test_install_game_libraries_is_discoverable_guarded_and_idempotently_offline(tmp_path,monkeypatch):
+    root,project,pins,downloads=game_library_fixture(tmp_path,monkeypatch)
+    result=asyncio.run(toolbox_mcp.toolbox_call('local.install_game_libraries',json.dumps({'project_folder':str(project)})))
+    assert result['installed'] and result['written']==8 and not result['executed']
+    assert len(downloads)==4
+    assert {row['name'] for row in result['libraries']}=={'phaser','yuka'}
+    assert (project/'vendor/cale-game/phaser/LICENSE').read_bytes()==b'MIT fixture attribution'
+    assert 'Phaser.CANVAS' in (project/'vendor/cale-game/phaser/API.md').read_text()
+    assert 'FollowPathBehavior' in (project/'vendor/cale-game/yuka/API.md').read_text()
+    monkeypatch.setattr(toolbox_mcp,'_game_library_download',lambda *_:pytest.fail('Verified cache must not download'))
+    again=asyncio.run(toolbox_mcp.install_game_libraries(str(project)))
+    assert again['written']==0 and again['reused']==8 and again['files']==result['files']
+    assert 'local.install_game_libraries' in toolbox_mcp.LOCAL_CATALOG
+
+
+@pytest.mark.parametrize('libraries',[[],['unknown'],['phaser','phaser'],['phaser','yuka','phaser'],'phaser',None,[True]])
+def test_game_libraries_reject_invalid_requests_without_download_or_project_writes(tmp_path,monkeypatch,libraries):
+    root,project,pins,downloads=game_library_fixture(tmp_path,monkeypatch)
+    with pytest.raises(ValueError):
+        asyncio.run(toolbox_mcp.install_game_libraries(str(project),libraries))
+    assert not downloads and list(project.iterdir())==[]
+
+
+def test_game_libraries_unregistered_folder_cannot_download_or_install(tmp_path,monkeypatch):
+    root,project,pins,downloads=game_library_fixture(tmp_path,monkeypatch)
+    other=tmp_path/'not-a-task';other.mkdir()
+    with pytest.raises(ValueError,match='exact folder'):
+        asyncio.run(toolbox_mcp.install_game_libraries(str(other)))
+    assert not downloads and list(other.iterdir())==[]
+
+
+@pytest.mark.parametrize('body',[b'wrong content',b'X'*2_000_001])
+def test_game_libraries_hash_size_failure_never_publishes_project_code(tmp_path,monkeypatch,body):
+    root,project,pins,downloads=game_library_fixture(tmp_path,monkeypatch)
+    monkeypatch.setattr(toolbox_mcp,'_game_library_download',lambda *_:body)
+    with pytest.raises(ValueError,match='hash/size'):
+        asyncio.run(toolbox_mcp.install_game_libraries(str(project)))
+    assert list(project.iterdir())==[]
+
+
+def test_game_libraries_preserve_every_existing_file_on_conflict(tmp_path,monkeypatch):
+    root,project,pins,downloads=game_library_fixture(tmp_path,monkeypatch)
+    directory=project/'vendor/cale-game/yuka';directory.mkdir(parents=True)
+    target=directory/'yuka.min.js';target.write_bytes(b'user authored library')
+    with pytest.raises(ValueError,match='preserved'):
+        asyncio.run(toolbox_mcp.install_game_libraries(str(project)))
+    assert target.read_bytes()==b'user authored library'
+    assert not (project/'vendor/cale-game/phaser').exists()  # Whole project preflight first.
+
+
+def test_game_libraries_concurrent_creator_is_never_overwritten_or_rolled_back(tmp_path,monkeypatch):
+    root,project,pins,downloads=game_library_fixture(tmp_path,monkeypatch)
+    original=toolbox_mcp._game_library_write_new
+    target=project/'vendor/cale-game/phaser/LICENSE'
+    def race(path,value):
+        if path==target:
+            path.write_bytes(b'concurrent user file')
+        return original(path,value)
+    monkeypatch.setattr(toolbox_mcp,'_game_library_write_new',race)
+    with pytest.raises(ValueError,match='preserved'):
+        asyncio.run(toolbox_mcp.install_game_libraries(str(project)))
+    assert target.read_bytes()==b'concurrent user file'
+    assert (target.parent/'phaser.min.js').read_bytes()==b'/* fixture phaser */'
+
+
+def test_game_libraries_corrupt_cache_fails_without_network_or_project_changes(tmp_path,monkeypatch):
+    root,project,pins,downloads=game_library_fixture(tmp_path,monkeypatch)
+    cache=root/'Toolbox/game-libraries/phaser'/('a'*40);cache.mkdir(parents=True)
+    (cache/'phaser.min.js').write_bytes(b'corrupt')
+    with pytest.raises(ValueError,match='hash/size'):
+        asyncio.run(toolbox_mcp.install_game_libraries(str(project)))
+    assert not downloads and list(project.iterdir())==[]
+
+
+def test_game_libraries_missing_offline_cache_has_clear_failure(tmp_path,monkeypatch):
+    import pc_offline
+    root,project,pins,downloads=game_library_fixture(tmp_path,monkeypatch)
+    monkeypatch.undo()
+    # Exercise real downloader's offline gate; no socket may be opened.
+    monkeypatch.setattr(pc_offline,'offline',lambda:True)
+    with pytest.raises(ValueError,match='Offline'):
+        toolbox_mcp._game_library_download('https://raw.githubusercontent.com/approved/pin/file',10)
+    assert list(project.iterdir())==[]
+
+
+def test_game_libraries_reject_redirected_vendor_directory(tmp_path,monkeypatch):
+    root,project,pins,downloads=game_library_fixture(tmp_path,monkeypatch)
+    outside=tmp_path/'outside';outside.mkdir()
+    try:
+        (project/'vendor').symlink_to(outside,target_is_directory=True)
+    except OSError as error:
+        pytest.skip('Symlinks unavailable: '+str(error))
+    with pytest.raises(ValueError,match='symlinks or junctions'):
+        asyncio.run(toolbox_mcp.install_game_libraries(str(project)))
+    assert list(outside.iterdir())==[]
+
+
+
+def test_game_library_install_keeps_async_event_loop_responsive(tmp_path,monkeypatch):
+    import threading
+    root,project,pins,downloads=game_library_fixture(tmp_path,monkeypatch)
+    original=toolbox_mcp._game_library_download;started=threading.Event();release=threading.Event()
+    def blocking_fetch(*args):
+        started.set()
+        assert release.wait(3),'Installer must yield to the caller while downloading'
+        return original(*args)
+    monkeypatch.setattr(toolbox_mcp,'_game_library_download',blocking_fetch)
+    async def scenario():
+        task=asyncio.create_task(toolbox_mcp.install_game_libraries(str(project)))
+        try:
+            assert await asyncio.to_thread(started.wait,2)
+            await asyncio.sleep(.01)
+            assert not task.done()
+        finally:
+            release.set()
+        assert (await task)['installed']
+    asyncio.run(scenario())
+
+
+def test_game_library_download_has_bounded_read_and_rejects_redirects(monkeypatch):
+    import urllib.request,pc_offline
+    monkeypatch.setattr(pc_offline,'offline',lambda:False)
+    handlers=[];sizes=[]
+    class Response:
+        def __enter__(self):return self
+        def __exit__(self,*_args):pass
+        def read(self,size):sizes.append(size);return b'fixture'
+    class Opener:
+        def open(self,request,timeout):assert timeout==20;return Response()
+    def opener(handler):handlers.append(handler() if isinstance(handler,type) else handler);return Opener()
+    monkeypatch.setattr(urllib.request,'build_opener',opener)
+    assert toolbox_mcp._game_library_download('https://raw.githubusercontent.com/approved/pin/library.js',100)==b'fixture'
+    assert sizes==[101]
+    with pytest.raises(ValueError,match='cannot redirect'):
+        handlers[0].redirect_request(None,None,302,'redirect',{},'https://unapproved.example/payload')
+
+
+def test_game_library_vendor_junction_is_rejected_before_download_on_windows(tmp_path,monkeypatch):
+    import os,subprocess
+    if os.name!='nt':pytest.skip('Windows junction-specific coverage')
+    root,project,pins,downloads=game_library_fixture(tmp_path,monkeypatch)
+    outside=tmp_path/'outside-junction';outside.mkdir();link=project/'vendor'
+    process=subprocess.run(['cmd','/d','/c','mklink','/J',str(link),str(outside)],capture_output=True,text=True,
+                           creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0))
+    assert process.returncode==0,process.stderr
+    try:
+        assert link.is_junction()
+        with pytest.raises(ValueError,match='symlinks or junctions'):
+            asyncio.run(toolbox_mcp.install_game_libraries(str(project)))
+        assert not downloads and list(outside.iterdir())==[]
+    finally:
+        os.rmdir(link)  # Remove the junction entry only, never its target tree.
+
+
+
+def test_game_library_removed_task_during_download_prevents_project_publication(tmp_path,monkeypatch):
+    root,project,pins,downloads=game_library_fixture(tmp_path,monkeypatch)
+    original=toolbox_mcp._game_library_download
+    def removed(*args):
+        with sqlite3.connect(root/'LongTasks/projects.db') as db:
+            db.execute('DELETE FROM projects')
+        return original(*args)
+    monkeypatch.setattr(toolbox_mcp,'_game_library_download',removed)
+    with pytest.raises(ValueError,match='exact folder'):
+        asyncio.run(toolbox_mcp.install_game_libraries(str(project)))
+    assert list(project.iterdir())==[]
