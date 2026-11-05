@@ -2,6 +2,8 @@
 
 **A Windows assistant that builds with tools, saves its progress, and runs local models.**
 
+Release 0.5.523 saves finished donation drafts across connection failures and restarts, avoids duplicate submissions after uncertain responses, and keeps token counters responsive. The donation panel can stay open during automatic updates once account connections finish. [Validation and limits](benchmarks/results/durable-donation-523-20261105.json).
+
 Release 0.5.522 explains donation failures by GitHub step/status or local worker category, shares GitHub cooldowns across lanes, and fixes installed self-check fixture dependencies. The installer and installed checks share the actual connection callbacks. [Validation and limits](benchmarks/results/reliability-donation-522-20261105.json).
 
 Release 0.5.521 preserves a live self-check through brief database contention, keeps incomplete runs from passing, and fixes valid Chrome manifest directives. Scoped checks passed 59 self-check tests and 28 Chrome tests, plus four independent pause/source-change checks. [Evidence and limits](benchmarks/results/selfcheck-chrome-521-20261105.json).
