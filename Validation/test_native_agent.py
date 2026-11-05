@@ -8197,3 +8197,19 @@ def test_helper_sql_callback_rechecks_after_update_and_rolls_back(tmp_path,monke
     queue=task_context.step_status(project['folder'])
     assert queue['done']==0 and queue['active']['attempts']==0
     assert native_agent.read_state(project)['status']==control and len(calls)==2
+
+
+@pytest.mark.parametrize('control',['stopped','paused','done'])
+def test_explicit_helper_completion_retains_control_without_external_callback(tmp_path,monkeypatch,control):
+    import quick_calculator
+    project,_,_,_=helper_workflow_fixture(tmp_path/'project',monkeypatch)
+    active=task_context.step_status(project['folder'])['active'];original=quick_calculator.run_helper
+    def controlled(*args):
+        value=original(*args)
+        state=native_agent.read_state(project);state['status']=control;native_agent.save_state(project,state)
+        return value
+    with project_memory.verification_context(project),patch.object(quick_calculator,'run_helper',side_effect=controlled):
+        result=native_agent.execute_tool(Path(project['folder']),'task_steps',{'action':'complete','step_id':active['id']})
+    assert result.startswith('Tool error:') and 'no step advanced' in result
+    assert task_context.step_status(project['folder'])['done']==0
+    assert native_agent.read_state(project)['status']==control

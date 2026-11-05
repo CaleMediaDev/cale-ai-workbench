@@ -879,7 +879,8 @@ def _execute_tool(folder: Path, name: str, arguments: dict, *, before_step_commi
                 if structured:
                     task_context.record_action(folder, kind, checked, check_args, request_hash=request_hash)
                 def helper_commit_allowed():
-                    return (project_memory._helper_request_identity(folder)==helper_basis
+                    return (read_state({'folder':str(folder)}).get('status') not in {'paused','stopped','done'}
+                            and project_memory._helper_request_identity(folder)==helper_basis
                             and (before_step_commit is None or before_step_commit()))
                 value = task_context.record_step_check(folder, active["id"], request_hash, status_result,
                     unchanged=step_source_fingerprint(folder, structured) == before, expected_check=expected_check,
@@ -5350,11 +5351,20 @@ def advance_checked_steps(project: dict, state: dict, messages: list) -> bool:
         automatic_game = active["check_tool"] == "run_verifier" and owned_game_verifier(folder)
         if not automatic_game and active["check_tool"] not in {"check_python_function", "check_javascript_function", "check_webapp", "check_expression_helper"}:
             break  # Arbitrary shell/integration commands remain explicit tools.
+        helper_request_before=None
         try:
+            if active['check_tool']=='check_expression_helper':
+                helper_request_before=project_memory._helper_request_identity(folder)
             if not automatic_game and active["check_tool"]!="check_expression_helper" and not project_path(folder, active["check_arguments"].get("path", "")).is_file():
                 break  # A preceding implementation action has yet to create it.
             basis = automatic_step_basis(folder, active)
         except (OSError, ValueError, RuntimeError):
+            if helper_request_before is not None:
+                try:changed=project_memory._helper_request_identity(folder)!=helper_request_before
+                except (OSError,ValueError,RuntimeError,sqlite3.Error):changed=True
+                if changed:
+                    state['_helper_reuse_superseded']=True
+                    return False  # Rebuilding helper provenance can itself observe new instructions.
             break  # Keep the ordinary tools available to investigate.
         if state.get("automatic_step_attempt") == basis:
             break
