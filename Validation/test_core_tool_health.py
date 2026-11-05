@@ -313,6 +313,51 @@ def test_long_repair_timeout_starts_cooldown_at_completion(tmp_path, monkeypatch
         missing.assert_called_once_with(tmp_path)
 
 
+def test_initial_status_failure_starts_cooldown_at_completion(tmp_path, monkeypatch):
+    (tmp_path / ".cale-ai-install").write_text("Cale AI Workbench 1")
+    monkeypatch.setattr(core_tool_health, "_last_repair", None)
+    monkeypatch.setattr(core_tool_health, "_repair_thread", None)
+    clock = [1000.0]
+    monkeypatch.setattr(core_tool_health.time, "monotonic", lambda: clock[0])
+    statuses = []
+
+    class ImmediateThread:
+        def __init__(self, target, **kwargs):
+            self.target = target
+
+        def start(self):
+            self.target()
+
+        def is_alive(self):
+            return False
+
+    def status(root, state, detail):
+        statuses.append(state)
+        if state == "working":
+            # A stalled filesystem write can consume the admission cooldown.
+            clock[0] += core_tool_health.CHECK_INTERVAL + 1
+            raise OSError("status storage unavailable")
+
+    monkeypatch.setattr(core_tool_health.threading, "Thread", ImmediateThread)
+    monkeypatch.setattr(core_tool_health, "_status", status)
+    with patch.object(core_tool_health.subprocess, "run",
+                      side_effect=AssertionError("must not execute repairs")):
+        with patch.object(core_tool_health, "missing", return_value=["GitHub CLI"]):
+            assert core_tool_health.start_background(tmp_path)
+        assert statuses == ["working", "failed"]
+        assert core_tool_health._last_repair == clock[0]
+        with patch.object(core_tool_health, "missing",
+                          side_effect=AssertionError("cooldown")):
+            assert not core_tool_health.start_background(tmp_path)
+            clock[0] += core_tool_health.CHECK_INTERVAL - 1
+            assert not core_tool_health.start_background(tmp_path)
+
+    clock[0] += 1
+    with patch.object(core_tool_health, "missing", return_value=[]) as missing:
+        assert not core_tool_health.start_background(tmp_path)
+        missing.assert_called_once_with(tmp_path)
+
+
 def test_overlapping_background_checks_launch_only_one_repair(tmp_path, monkeypatch):
     from threading import Event, Thread
 

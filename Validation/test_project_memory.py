@@ -297,6 +297,28 @@ class ProjectMemoryTests(unittest.TestCase):
         self.assertFalse(memory.index_document_text(
             self.folder, source, text, digest)["updated"])
 
+    def test_document_chunk_boundary_preserves_combining_mark_word(self):
+        source = self.folder / "accent.pdf"
+        source.write_bytes(b"document bytes")
+        digest = hashlib.sha256(source.read_bytes()).hexdigest()
+        word = "cafe\u0301marker"
+        # Place the fixed boundary immediately before, then after, the accent.
+        for offset in (4, 5):
+            with self.subTest(offset=offset):
+                text = " " * (memory.DOCUMENT_CHUNK_CHARS - offset) + word
+                result = memory.index_document_text(self.folder, source, text, digest)
+                self.assertEqual(result["parts"], 2)
+                found = memory.search(self.folder, word, kind="document")
+                self.assertEqual([row["id"] for row in found],
+                                 ["document:accent.pdf:2"])
+                with memory.connection(self.folder) as conn:
+                    bodies = [row[0] for row in conn.execute(
+                        "SELECT body FROM memories WHERE kind='document' ORDER BY id"
+                    )]
+                self.assertEqual("".join(bodies), text)
+                self.assertTrue(all(len(body) <= memory.DOCUMENT_CHUNK_CHARS
+                                    for body in bodies))
+
     def test_document_chunks_are_searchable_and_source_checked(self):
         source = self.folder / "manual.pdf"
         source.write_bytes(b"first document bytes")
@@ -1338,3 +1360,10 @@ def test_large_unknown_record_rejected_before_json_and_preserved(independent_hel
             memory._validated_expression_record(root, path)
     assert path.read_bytes() == raw
     assert not (root / ".local-ai/memory.sqlite3").exists()
+
+
+@pytest.mark.parametrize("word", ["cafe\u0301marker", "caf\u00e9marker", "x\u0301marker", "na\u00efvemarker"])
+def test_memory_query_preserves_combining_mark_words(tmp_path, word):
+    note = memory.save(tmp_path, "note", "Unicode source", word)
+    assert [row["id"] for row in memory.search(tmp_path, word, kind="note")] == [note["id"]]
+    assert memory._query_words("\u0301 " + word + " other_word") == [word, "other", "word"]

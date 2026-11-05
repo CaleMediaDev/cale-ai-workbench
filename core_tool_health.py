@@ -167,9 +167,9 @@ def _start_background(root: Path) -> bool:
 
     def repair() -> None:
         global _last_repair
-        _status(root, "working", "Repairing " + ", ".join(unavailable))
-        log_path = root / "LongTasks/core-tool-repair.log"
         try:
+            _status(root, "working", "Repairing " + ", ".join(unavailable))
+            log_path = root / "LongTasks/core-tool-repair.log"
             with log_path.open("ab") as log:
                 result = subprocess.run(
                     ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",

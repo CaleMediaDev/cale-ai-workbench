@@ -49,8 +49,13 @@ def _run(arguments: list[str], output: Path, timeout: int = 7200) -> dict:
         result = subprocess.run(command, capture_output=True, text=True,
                                 errors="replace", timeout=timeout, creationflags=HIDE)
     except (subprocess.TimeoutExpired, KeyboardInterrupt):
-        if not output_existed and output.is_file():
-            output.unlink(missing_ok=True)
+        try:
+            if not output_existed and output.is_file():
+                output.unlink(missing_ok=True)
+        except OSError:
+            # A locked file or changed permissions must not mask the original
+            # timeout or interruption when best-effort cleanup is impossible.
+            pass
         raise
     if result.returncode or not output.is_file() or not output.stat().st_size:
         overwrite_refused = f"File '{output}' already exists. Exiting." in result.stderr

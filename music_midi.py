@@ -153,7 +153,7 @@ def transcribe_to_midi(source_path: str, output_dir: str) -> dict:
         except BaseException:
             for owned, destination in reversed(published):
                 try:
-                    current = destination.stat()
+                    current = destination.lstat()
                     if (current.st_dev, current.st_ino) == (owned.st_dev, owned.st_ino):
                         destination.unlink()
                 except OSError:

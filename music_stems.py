@@ -6,8 +6,11 @@ the workbench's voice, vision, or ACE-Step runtimes. Model files stay local.
 
 from __future__ import annotations
 
+import errno
+import hashlib
 import os
 import shutil
+import stat
 import subprocess
 import sys
 from pathlib import Path
@@ -19,6 +22,76 @@ ROOT = Path(__file__).resolve().parent
 ENGINE = ROOT / "Media" / "music" / "audio-separator"
 VERSION = "0.48.0"
 HIDE = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+
+
+def _publication_signature(info):
+    # Windows path/fd ctime can disagree after linking; content hashes below
+    # also protect same-size in-place edits even when mtime is restored.
+    return (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns)
+
+
+def _stem_digest(path: Path):
+    """Hash one rendered stem with bounded memory before publishing it."""
+    digest, size = hashlib.sha256(), 0
+    with path.open("rb") as stream:
+        before = os.fstat(stream.fileno())
+        while chunk := stream.read(1024 * 1024):
+            digest.update(chunk)
+            size += len(chunk)
+        if _publication_signature(os.fstat(stream.fileno())) != _publication_signature(before) or size != before.st_size:
+            raise OSError("A rendered stem changed before publication")
+    return before, digest, size
+
+
+class _StemPublication:
+    """Track created bytes, including a failed copy's known written prefix.
+
+    Ownership alone is insufficient: a user may edit a file in place without
+    changing its inode. Rollback requires unchanged metadata AND content.
+    """
+    def __init__(self, path, info, digest, size, stream=None):
+        self.path, self.identity = path, (info.st_dev, info.st_ino)
+        self.digest, self.size, self.stream, self.signature = digest, size, stream, None
+
+    def __getattr__(self, name):
+        return getattr(self.stream, name)
+
+    def write(self, data):
+        written = self.stream.write(data)
+        if type(written) is not int or not 0 <= written <= len(data):
+            raise OSError("Stem copy did not report its written bytes")
+        self.digest.update(data[:written])
+        self.size += written
+        if written != len(data):
+            raise OSError("Stem copy could not write the full buffer")
+        return written
+
+    def mark(self):
+        try:
+            current = self.path.lstat()
+            if stat.S_ISREG(current.st_mode) and (current.st_dev, current.st_ino) == self.identity:
+                self.signature = _publication_signature(current)
+        except OSError:
+            pass  # A removed/replaced destination is no longer ours to clean.
+
+    def rollback(self):
+        try:
+            if self.signature is None or self.signature != _publication_signature(self.path.lstat()):
+                return
+            digest, size = hashlib.sha256(), 0
+            with self.path.open("rb") as stream:
+                if _publication_signature(os.fstat(stream.fileno())) != self.signature:
+                    return
+                while chunk := stream.read(1024 * 1024):
+                    digest.update(chunk)
+                    size += len(chunk)
+                if _publication_signature(os.fstat(stream.fileno())) != self.signature:
+                    return
+            if (size == self.size and digest.digest() == self.digest.digest()
+                    and self.signature == _publication_signature(self.path.lstat())):
+                self.path.unlink()
+        except OSError:
+            pass  # Never mask the original failure or delete an unverifiable file.
 
 
 def _python() -> Path:
@@ -86,13 +159,33 @@ def separate_stems(source_path: str, output_dir: str) -> dict:
             try:
                 for path in staged_files:
                     destination = target / path.name
-                    # Staging is inside target, so both paths share a filesystem.
-                    # Unlike rename on POSIX, link never replaces an existing file.
-                    os.link(path, destination)
-                    published.append(destination)
-            except OSError:
-                for path in reversed(published):
-                    path.unlink()
+                    original, expected_digest, expected_size = _stem_digest(path)
+                    # Prefer a no-replace hard link, but support filesystems
+                    # without hard links using an exclusive, rollback-safe copy.
+                    try:
+                        os.link(path, destination)
+                    except OSError as exc:
+                        if exc.errno not in {errno.ENOTSUP, errno.EXDEV}:
+                            raise
+                        publication = None
+                        try:
+                            with destination.open("xb") as output:
+                                publication = _StemPublication(destination, os.fstat(output.fileno()), hashlib.sha256(), 0, output)
+                                published.append(publication)
+                                with path.open("rb") as input_file:
+                                    shutil.copyfileobj(input_file, publication)
+                                if publication.size != expected_size or publication.digest.digest() != expected_digest.digest():
+                                    raise OSError("A rendered stem changed during publication")
+                        finally:
+                            if publication is not None:
+                                publication.mark()  # After close/flush, including copy failure.
+                    else:
+                        publication = _StemPublication(destination, original, expected_digest, expected_size)
+                        publication.mark()
+                        published.append(publication)
+            except BaseException:
+                for publication in reversed(published):
+                    publication.rollback()
                 raise
     return {"source": str(source), "output_dir": str(target),
             "files": [str(path) for path in files], "model": "Audio Separator"}

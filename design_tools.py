@@ -86,6 +86,8 @@ def add_astro_ai_ui(project_path: str) -> dict:
     Files go under src/vendor/ai-ui so the project's own components are untouched.
     Repeated calls are safe; changed files at that destination are never overwritten.
     """
+    import tempfile
+
     project = Path(project_path).resolve()
     package_file = project / "package.json"
     if not package_file.is_file():
@@ -123,9 +125,20 @@ def add_astro_ai_ui(project_path: str) -> dict:
     for original, target in files:
         if not target.exists():
             target.parent.mkdir(parents=True, exist_ok=True)
-            with original.open("rb") as input_stream, target.open("xb") as output:
-                shutil.copyfileobj(input_stream, output)
-            shutil.copystat(original, target)
+            # Copy and preserve metadata privately. A failed copy never owns
+            # the public target, so cleanup cannot delete a user's replacement.
+            with original.open("rb") as input_stream:
+                with tempfile.TemporaryDirectory(prefix=".cale-ai-ui-", dir=target.parent) as directory:
+                    staged = Path(directory) / "component"
+                    with staged.open("xb") as output:
+                        shutil.copyfileobj(input_stream, output)
+                    shutil.copystat(original, staged)
+                    if os.name == "nt":
+                        # Windows rename refuses an existing destination.
+                        staged.rename(target)
+                    else:
+                        # POSIX rename overwrites; link provides no-replace publication.
+                        os.link(staged, target)
             added.append(str(target))
     return {
         "kit": "michaelvereb/ai-ui 1.2.0 (MIT)",
