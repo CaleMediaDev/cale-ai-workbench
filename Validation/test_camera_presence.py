@@ -730,6 +730,88 @@ def test_avatar_worker_drops_inference_result_after_consent_ends(monkeypatch,tmp
     assert published==[0]  # Only the neutral avatar, never late render/raw input.
 
 
+def test_avatar_worker_skips_old_pending_input_after_engine_load(monkeypatch,tmp_path):
+    import camera_presence as camera,threading,time
+    loading=threading.Event();release=threading.Event();rendered=threading.Event();seen=[]
+    class Engine:
+        def __init__(self,*_args):pass
+        def probe(self):loading.set();assert release.wait(2);return {'ok':True,'gpu_allocation_bytes':1}
+        def render(self,frame,**_kwargs):
+            seen.append(int(frame[0,0,0]))
+            if seen[-1]==2:rendered.set()
+            return None
+        def close(self):pass
+    monkeypatch.setattr(camera,'ROOT',tmp_path)
+    monkeypatch.setattr(camera,'allowed',lambda:True);monkeypatch.setattr(camera,'owner_alive',lambda *_:True)
+    monkeypatch.setattr(camera,'avatar_heavy_work_active',lambda:False)
+    monkeypatch.setattr(avatar_video,'CaleAvatar',Engine)
+    monkeypatch.setattr(avatar_video,'neutral_camera_avatar',lambda:np.zeros((8,8,3),dtype=np.uint8))
+    monkeypatch.setattr(camera.AvatarFrameWorker,'_publish',lambda *_:None);monkeypatch.setattr(camera,'emit',Mock())
+    worker=camera.AvatarFrameWorker(tmp_path)
+    try:
+        assert loading.wait(2)
+        worker.pending.put_nowait((np.full((8,8,3),1,dtype=np.uint8),time.monotonic()-10))
+        release.set()
+        deadline=time.monotonic()+1
+        while not worker.pending.empty() and time.monotonic()<deadline:time.sleep(.005)
+        worker.submit(np.full((8,8,3),2,dtype=np.uint8));assert rendered.wait(2)
+    finally:release.set();worker.close()
+    assert seen==[2]
+
+
+def avatar_stale_output_case(monkeypatch,tmp_path,late_inference):
+    import camera_presence as camera,threading,time
+    entered=threading.Event();release=threading.Event();live=threading.Event();neutral=threading.Event();published=[]
+    class Clock:
+        offset=0
+        def monotonic(self):return time.monotonic()+self.offset
+        def __getattr__(self,name):return getattr(time,name)
+    clock=Clock()
+    class Engine:
+        def __init__(self,*_args):pass
+        def probe(self):return {'ok':True,'gpu_allocation_bytes':1}
+        def render(self,frame,**_kwargs):
+            entered.set()
+            if late_inference:assert release.wait(2)
+            return np.ones((8,8,3),dtype=np.uint8)
+        def close(self):pass
+    def publish(_self,rgb):
+        value=int(rgb[0,0,0]);published.append(value)
+        if value:live.set()
+        elif len(published)>1:neutral.set()
+    monkeypatch.setattr(camera,'ROOT',tmp_path);monkeypatch.setattr(camera,'time',clock)
+    monkeypatch.setattr(camera,'allowed',lambda:True);monkeypatch.setattr(camera,'owner_alive',lambda *_:True)
+    monkeypatch.setattr(camera,'avatar_heavy_work_active',lambda:False)
+    monkeypatch.setattr(avatar_video,'CaleAvatar',Engine)
+    monkeypatch.setattr(avatar_video,'neutral_camera_avatar',lambda:np.zeros((8,8,3),dtype=np.uint8))
+    monkeypatch.setattr(camera.AvatarFrameWorker,'_publish',publish);monkeypatch.setattr(camera,'emit',Mock())
+    worker=camera.AvatarFrameWorker(tmp_path)
+    try:
+        worker.submit(np.full((8,8,3),99,dtype=np.uint8));assert entered.wait(2)
+        if not late_inference:assert live.wait(2)
+        clock.offset=10;release.set()
+        assert neutral.wait(1),published
+    finally:release.set();worker.close()
+    assert published==([0,0] if late_inference else [0,1,0])
+
+
+def test_avatar_worker_neutralizes_stalled_capture(monkeypatch,tmp_path):
+    avatar_stale_output_case(monkeypatch,tmp_path,False)
+
+
+def test_avatar_worker_neutralizes_late_render(monkeypatch,tmp_path):
+    avatar_stale_output_case(monkeypatch,tmp_path,True)
+
+
+def test_avatar_frame_freshness_rejects_invalid_future_and_expired_times(monkeypatch):
+    import camera_presence as camera
+    monkeypatch.setattr(camera,'time',SimpleNamespace(monotonic=lambda:10.0))
+    assert camera.avatar_frame_fresh(10.0)
+    assert camera.avatar_frame_fresh(9.5)
+    for captured_at in (None,True,'10',float('nan'),float('inf'),10.1,9.0):
+        assert not camera.avatar_frame_fresh(captured_at)
+
+
 def test_camera_launcher_reaps_before_replacement_and_never_shares_raw():
     import subprocess,long_tasks
     process=Mock();process.poll.return_value=None

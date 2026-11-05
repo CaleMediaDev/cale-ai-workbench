@@ -400,6 +400,16 @@ def avatar_heavy_work_active():
     from readiness_checklist import _heavy_gpu_active
     return _heavy_gpu_active(ROOT)
 
+
+AVATAR_MAX_FRAME_AGE = 0.75
+
+
+def avatar_frame_fresh(captured_at):
+    """Bound age since the capture owner submitted it, not driver-buffer age."""
+    return (type(captured_at) in (int,float) and math.isfinite(captured_at)
+            and 0 <= time.monotonic()-captured_at <= AVATAR_MAX_FRAME_AGE)
+
+
 class AvatarFrameWorker:
     """Latest-only neural consumer. Its public output never contains raw frames.
 
@@ -442,6 +452,7 @@ class AvatarFrameWorker:
 
     def _run(self):
         engine=None;lease=None;sequence=0;last_neutral=0;last_error_notice=0;paused=False
+        last_frame_at=None;last_output_live=False
         try:
             import avatar_video
             neutral=avatar_video.neutral_camera_avatar()
@@ -456,7 +467,8 @@ class AvatarFrameWorker:
                     if lease is not None:lease.close();lease=None
                     if not paused:emit("notice","Animated Cale paused for local music/image GPU work. Your real camera stays hidden.")
                     paused=True
-                    if time.monotonic()-last_neutral>=.5:self._publish(neutral);last_neutral=time.monotonic()
+                    if time.monotonic()-last_neutral>=.5:
+                        self._publish(neutral);last_neutral=time.monotonic();last_output_live=False
                     self.stopped.wait(.1);continue
                 if engine is None:
                     lease=AvatarGpuLease()
@@ -465,7 +477,17 @@ class AvatarFrameWorker:
                     lease.measured(engine.probe())
                     paused=False
                 try:frame,captured_at=self.pending.get(timeout=.1)
-                except queue.Empty:continue
+                except queue.Empty:
+                    # A blocked camera read must not leave an old animated face
+                    # looking live indefinitely. Publish neutral once per lapse.
+                    if last_output_live and not avatar_frame_fresh(last_frame_at):
+                        self._publish(neutral);last_neutral=time.monotonic();last_output_live=False
+                    continue
+                last_frame_at=captured_at
+                if not avatar_frame_fresh(captured_at):
+                    if time.monotonic()-last_neutral>=.5:
+                        self._publish(neutral);last_neutral=time.monotonic();last_output_live=False
+                    continue  # Do not spend GPU work on an already old input.
                 sequence+=1
                 try:rendered=engine.render(frame,sequence=sequence,captured_at=captured_at)
                 except Exception:
@@ -474,9 +496,12 @@ class AvatarFrameWorker:
                         emit("notice","Animated Cale could not process this frame. Your real camera stays hidden.")
                         last_error_notice=time.monotonic()
                 if not self.authorized():break
-                if rendered is not None:self._publish(rendered)
+                if not avatar_frame_fresh(captured_at):
+                    self._publish(neutral);last_neutral=time.monotonic();last_output_live=False
+                elif rendered is not None:
+                    self._publish(rendered);last_output_live=True
                 elif time.monotonic()-last_neutral>=.5:
-                    self._publish(neutral);last_neutral=time.monotonic()
+                    self._publish(neutral);last_neutral=time.monotonic();last_output_live=False
         except Exception:
             emit("error","Animated Cale is unavailable. Your real camera stays hidden; switch to Raw camera only if you want to show it.")
         finally:
