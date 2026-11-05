@@ -3635,3 +3635,59 @@ def test_task_card_missing_legacy_time_never_looks_like_decades_of_work():
         item={'created':time.time()-130,'updated':time.time(),'status':'accepted','finished':time.time()}
         assert task_module.task_card_elapsed(item)=='2m 10s'
         actual.assert_called_once_with(item['created'],item['updated'],item['status'],finished=item['finished'])
+
+
+
+def update_dialog_poll_call(children, donation_popup, *, chat=False, cloud=False, github=None):
+    """Execute the exact production poll call, not a copied update predicate."""
+    import ast
+    from types import SimpleNamespace
+    tree = ast.parse((ROOT/"long_tasks.py").read_text(encoding="utf-8-sig"))
+    calls = [node for node in ast.walk(tree) if isinstance(node,ast.Call)
+             and isinstance(node.func,ast.Name) and node.func.id=="update_dialog_open"]
+    assert len(calls)==1
+    class Button:
+        def __init__(self, value): self.value=value
+        def instate(self, states):
+            assert states==["disabled"]
+            if isinstance(self.value,Exception): raise self.value
+            return self.value
+    window=SimpleNamespace(winfo_children=lambda:children,github_login_process=github)
+    expression=ast.Expression(body=calls[0]);ast.fix_missing_locations(expression)
+    return eval(compile(expression,"actual-update-poll-call","eval"),{
+        "update_dialog_open":task_module.update_dialog_open,"window":window,
+        "preview_window":None,"usage_window":None,"readiness_popup":[None],
+        "donation_controls":SimpleNamespace(popup=donation_popup),
+        "chat_button":Button(chat),"connect_button":Button(cloud)})
+
+
+class UpdatePanel:
+    def __init__(self,visible=True): self.visible=visible
+    def winfo_class(self): return "Toplevel"
+    def winfo_viewable(self): return self.visible
+
+
+def test_update_poll_ignores_visible_saved_donation_controls_but_not_input_dialog():
+    popup=UpdatePanel()
+    assert update_dialog_poll_call([popup],popup) is False
+    assert update_dialog_poll_call([popup,UpdatePanel()],popup) is True
+    hidden=UpdatePanel(False)
+    assert update_dialog_poll_call([hidden],hidden) is False
+
+
+def test_update_poll_preserves_browser_auth_even_without_visible_dialog():
+    from types import SimpleNamespace
+    popup=UpdatePanel(False)
+    assert update_dialog_poll_call([popup],popup,chat=True) is True
+    assert update_dialog_poll_call([popup],popup,cloud=True) is True
+    assert update_dialog_poll_call([popup],popup,github=SimpleNamespace(poll=lambda:None)) is True
+    assert update_dialog_poll_call([popup],popup,github=SimpleNamespace(poll=lambda:0)) is False
+
+
+def test_update_poll_unknown_auth_state_defers_instead_of_failing_open():
+    from types import SimpleNamespace
+    popup=UpdatePanel(False)
+    assert update_dialog_poll_call([popup],popup,chat=RuntimeError("unknown widget")) is True
+    def unavailable():raise OSError("unknown child status")
+    assert update_dialog_poll_call([popup],popup,github=SimpleNamespace(poll=unavailable)) is True
+    assert update_dialog_poll_call([popup],popup,cloud=None) is True

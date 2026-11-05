@@ -66,14 +66,32 @@ def take_ai_connection_request(state_folder: Path) -> str | None:
     return requested if requested in {"chatgpt", "claude", "grok", "openrouter"} else "setup"
 
 
-def update_dialog_open(children, ignored=()):
-    """Ignore read-only panels while protecting visible input dialogs."""
-    return any(
-        child not in ignored
-        and child.winfo_class() == "Toplevel"
-        and child.winfo_viewable()
-        for child in children
-    )
+def update_dialog_open(children, ignored=(), *, persisted_panel=None,
+                       connection_controls=(), connection_process=None):
+    """Saved donation choices do not block updates; pending sign-ins still do.
+
+    Connection buttons are disabled for their browser callback lifetime. GitHub
+    also owns a login process, even if its code window was closed. Unknown UI
+    or process state defers the update rather than interrupting an account flow.
+    """
+    try:
+        for control in connection_controls:
+            disabled = control.instate(["disabled"])
+            if type(disabled) is not bool or disabled:
+                return True
+        if connection_process is not None:
+            result = connection_process.poll()
+            if result is None or type(result) is not int:
+                return True
+        return any(
+            child not in ignored
+            and child is not persisted_panel
+            and child.winfo_class() == "Toplevel"
+            and child.winfo_viewable()
+            for child in children
+        )
+    except Exception:
+        return True
 INITIAL_PLAN = (
     "# Plan\n\nThe worker has not written milestones yet. Use the original request and "
     "user follow-ups, then replace this note with concrete acceptance checks.\n"
@@ -7839,6 +7857,9 @@ def gui():
             and not update_dialog_open(
                 window.winfo_children(),
                 (preview_window, usage_window, readiness_popup[0]),
+                persisted_panel=donation_controls.popup,
+                connection_controls=(chat_button, connect_button),
+                connection_process=getattr(window, "github_login_process", None),
             )
         ):
             setup_state = read_task_status(STATE / "install-progress.json")
