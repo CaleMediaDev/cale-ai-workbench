@@ -461,6 +461,7 @@ class CaleAvatar:
         self.mask = (
             cv2.resize(mask, (x2 - x1, y2 - y1)).astype(np.float32)[..., None] / 255
         )
+        self._cache_static_composite()
         self.detector = cv2.CascadeClassifier(
             str(Path(cv2.data.haarcascades) / "haarcascade_frontalface_default.xml")
         )
@@ -604,13 +605,23 @@ class CaleAvatar:
         self.last_inference_ms = (time.monotonic() - started) * 1000
         if self.closed:
             return None
+        return self._composite(pixels)
+
+    def _cache_static_composite(self):
+        """Cache only the verified, unchanged illustration/mask; never a driver frame."""
+        x1, y1, x2, y2 = self.crop_box
+        self.mask_inverse = 1 - self.mask
+        self.masked_background = self.portrait[y1:y2, x1:x2] * self.mask_inverse
+
+    def _composite(self, pixels):
+        """Preserve the old float32 operation order and Lanczos interpolation."""
         result = self.portrait.copy()
         x1, y1, x2, y2 = self.crop_box
         pixels = self.cv2.resize(
             pixels, (x2 - x1, y2 - y1), interpolation=self.cv2.INTER_LANCZOS4
         )
         result[y1:y2, x1:x2] = self.np.clip(
-            pixels * self.mask + result[y1:y2, x1:x2] * (1 - self.mask), 0, 255
+            pixels * self.mask + self.masked_background, 0, 255
         ).astype(self.np.uint8)
         return result
 
@@ -619,6 +630,7 @@ class CaleAvatar:
         self.closed = True
         self.binding = self.session = self.model = None
         self.features = self.source_keys = self.driving_keys = None
+        self.mask = self.mask_inverse = self.masked_background = None
         self.initial = self.initial_rotation = self.source_info = (
             self.source_rotation
         ) = None

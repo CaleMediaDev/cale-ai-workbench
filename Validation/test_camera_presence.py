@@ -28,6 +28,84 @@ from face_identity import FaceModel
 from visitor_memory import name_from_intro
 
 
+def static_avatar_cpu_fixture():
+    """Exercise the real render/composition path with no model/device calls."""
+    import time
+    products=[]
+    class StaticPortrait(np.ndarray):
+        def __array_ufunc__(self,ufunc,method,*inputs,**kwargs):
+            if ufunc is np.multiply:products.append(True)
+            values=[np.asarray(value) if isinstance(value,StaticPortrait) else value for value in inputs]
+            return getattr(ufunc,method)(*values,**kwargs)
+    class MotionTensor(np.ndarray):
+        def transpose(self,*axes):
+            return np.swapaxes(np.asarray(self),*axes) if len(axes)==2 else super().transpose(*axes)
+    random=np.random.default_rng(47)
+    engine=avatar_video.CaleAvatar.__new__(avatar_video.CaleAvatar)
+    engine.closed=False;engine.np=np
+    engine.portrait=random.integers(0,256,(16,40,3),dtype=np.uint8).view(StaticPortrait)
+    engine.crop_box=(10,0,26,16)
+    engine.mask=np.arange(256,dtype=np.float32).reshape(16,16,1)/255
+    pixels=random.integers(0,256,(16,16,3),dtype=np.uint8)
+    engine.cv2=SimpleNamespace(BORDER_REPLICATE=1,COLOR_BGR2RGB=2,INTER_LANCZOS4=4,
+        warpAffine=lambda image,*args,**kwargs:image,cvtColor=lambda image,*args:image,
+        resize=Mock(side_effect=lambda image,size,**kwargs:image.copy()))
+    engine.last_detection=engine.last_seen=time.monotonic();engine.last_box=(0,0,8)
+    info={'pitch':0,'yaw':0,'roll':0,'exp':np.zeros((1,1,3),dtype=np.float32)}
+    engine.model=SimpleNamespace(prepare_source=lambda image:image,get_kp_info=lambda _:info,
+                                stitching=lambda _source,target:target)
+    engine.rotation=lambda *_args:np.eye(3,dtype=np.float32)[None].view(MotionTensor)
+    engine.source_rotation=engine.rotation();engine.initial=engine.initial_rotation=None
+    engine.source_info={'exp':info['exp'],'scale':np.ones((1,1),dtype=np.float32),
+                        'kp':np.zeros((1,1,3),dtype=np.float32),'t':np.zeros((1,3),dtype=np.float32)}
+    engine.source_keys=SimpleNamespace(float=lambda:np.zeros((1,1,3),dtype=np.float32))
+    engine._decode=lambda _keys:pixels.copy()
+    engine.torch=SimpleNamespace(cuda=SimpleNamespace(empty_cache=Mock()))
+    return engine,pixels,products
+
+
+def test_avatar_static_composition_does_not_repeat_background_products():
+    engine,pixels,products=static_avatar_cpu_fixture()
+    portrait=np.asarray(engine.portrait).copy();mask=engine.mask.copy()
+    expected=portrait.copy()
+    expected[:,10:26]=np.clip(pixels*mask+portrait[:,10:26]*(1-mask),0,255).astype(np.uint8)
+    if hasattr(engine,'_cache_static_composite'):engine._cache_static_composite()
+    before=len(products)
+    first=engine.render(np.zeros((8,8,3),dtype=np.uint8))
+    second=engine.render(np.zeros((8,8,3),dtype=np.uint8))
+    assert np.array_equal(first,expected) and np.array_equal(second,expected)
+    assert len(products)==before,'static portrait weighting must not repeat per render'
+    assert not np.shares_memory(first,second) and not np.shares_memory(first,engine.portrait)
+    assert np.array_equal(engine.portrait,portrait) and np.array_equal(engine.mask,mask)
+    for call in engine.cv2.resize.call_args_list:
+        assert call.kwargs=={'interpolation':engine.cv2.INTER_LANCZOS4}
+
+
+def test_avatar_cached_blend_is_byte_equal_for_every_uint8_mask_pixel_background():
+    engine=avatar_video.CaleAvatar.__new__(avatar_video.CaleAvatar)
+    engine.np=np;engine.crop_box=(0,0,256,256)
+    # Channels are independent. Exhaust all256^3 combinations, including fully
+    # transparent/opaque mask boundaries, without any GPU or camera machinery.
+    pixels=np.broadcast_to(np.arange(256,dtype=np.uint8)[:,None,None],(256,256,1))
+    engine.portrait=np.broadcast_to(np.arange(256,dtype=np.uint8)[None,:,None],(256,256,1)).copy()
+    engine.cv2=SimpleNamespace(INTER_LANCZOS4=4,resize=lambda image,_size,**_kwargs:image)
+    for value in range(256):
+        engine.mask=np.full((256,256,1),value,dtype=np.float32)/255
+        expected=np.clip(pixels*engine.mask+engine.portrait*(1-engine.mask),0,255).astype(np.uint8)
+        engine._cache_static_composite()
+        actual=engine._composite(pixels)
+        assert np.array_equal(actual,expected),value
+        assert engine.mask_inverse.dtype==engine.masked_background.dtype==np.float32
+
+
+def test_avatar_static_blend_buffers_are_released_on_owned_close():
+    engine,_pixels,_products=static_avatar_cpu_fixture()
+    engine._cache_static_composite()
+    engine.close()
+    assert engine.closed and engine.mask is engine.mask_inverse is engine.masked_background is None
+    engine.torch.cuda.empty_cache.assert_called_once()
+
+
 class CameraPresenceTests(unittest.TestCase):
     def setUp(self):
         class InlineRecognition:
