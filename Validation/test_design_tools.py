@@ -943,3 +943,25 @@ def test_game_source_license_survives_operational_directory_filter():
     kept,excluded=tools._game_filtered({".github/LICENSE":b"author license", ".github/workflows/run.yml":b"not activated", "index.html":b"<script>game()</script>"})
     assert kept["UPSTREAM-LICENSES/.github__LICENSE"]==b"author license"
     assert ".github/LICENSE" in excluded and ".github/workflows/run.yml" not in kept
+
+
+def test_game_source_invalid_ref_422_falls_back_but_other_validation_errors_do_not(monkeypatch):
+    import io
+    from urllib.error import HTTPError
+    import design_tools as tools
+    calls=[]
+    def api(url):
+        calls.append(url)
+        if url.endswith("/commits/main%2Fmosswing"):
+            body=json.dumps({"message":"No commit found for SHA: main/mosswing"}).encode()
+            raise HTTPError(url,422,"invalid ref",{},io.BytesIO(body))
+        assert url.endswith("/commits/main")
+        return {"sha":"a"*40}
+    monkeypatch.setattr(tools,"_game_json",api)
+    info=tools._game_github_source("https://github.com/creator/game/blob/main/mosswing/game.html")
+    assert info["commit"]=="a"*40 and info["path"]=="mosswing/game.html" and len(calls)==2
+    def abused(url):
+        raise HTTPError(url,422,"validation failed",{},io.BytesIO(b'{"message":"Validation Failed"}'))
+    monkeypatch.setattr(tools,"_game_json",abused)
+    with pytest.raises(HTTPError):
+        tools._game_github_source("https://github.com/creator/game/blob/main/mosswing/game.html")

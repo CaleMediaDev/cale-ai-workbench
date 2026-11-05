@@ -1299,7 +1299,7 @@ def _game_download(url, limit=_GAME_MAX_DOWNLOAD):
                 raise ValueError("Unexpected game source download host.")
             value = response.read(limit+1)
     except HTTPError as error:
-        if error.code == 404:
+        if error.code in (404, 422):
             raise
         if error.code in (403, 429):
             raise RuntimeError("GitHub's public source/API quota or access limit was reached. No account is required; try later. Previously cached sources still work offline.") from error
@@ -1345,7 +1345,18 @@ def _game_github_source(url):
             try:
                 record = _game_json(f"https://api.github.com/repos/{repo}/commits/{quote(ref,safe='')}")
             except HTTPError as error:
-                if error.code == 404:
+                missing = error.code == 404
+                if error.code == 422:
+                    # GitHub also uses 422 for an unknown slash-containing ref.
+                    # Do not swallow validation/abuse errors or read unbounded
+                    # upstream diagnostics while finding the branch boundary.
+                    raw = error.read(2049)
+                    try:
+                        detail = json.loads(raw) if len(raw) <= 2048 else None
+                    except (ValueError, TypeError):
+                        detail = None
+                    missing = isinstance(detail, dict) and detail.get("message") == f"No commit found for SHA: {ref}"
+                if missing:
                     error.close()
                     continue
                 raise
