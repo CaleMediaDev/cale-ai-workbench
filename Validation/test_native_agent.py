@@ -3775,9 +3775,11 @@ def test_checker_memory_requires_explicit_pass_and_preserves_failed_file_identit
         assert "private report" not in summary
 
 
-def test_repeated_unchanged_read_batches_get_guidance_after_complete_tool_replies():
+def test_repeated_unchanged_read_batches_get_guidance_after_complete_tool_replies(monkeypatch):
     with tempfile.TemporaryDirectory() as temporary:
         item = project(Path(temporary) / "page")
+        # Repeated failures enter durable recovery, which requires a live task owner.
+        monkeypatch.setattr(long_tasks, "projects", lambda: [item])
         folder = Path(item["folder"])
         (folder / "game.js").write_text("// code\n" * 460, encoding="utf-8")
         seen = []
@@ -3829,9 +3831,11 @@ def test_read_cycle_ignores_new_content_and_resets_after_source_edit_or_user_cha
     assert "recent_read_hashes" not in state
 
 
-def test_repeated_identical_tool_failure_prompts_a_different_approach():
+def test_repeated_identical_tool_failure_prompts_a_different_approach(monkeypatch):
     with tempfile.TemporaryDirectory() as temporary:
         item = project(Path(temporary) / "page")
+        # Repeated failures enter durable recovery, which requires a live task owner.
+        monkeypatch.setattr(long_tasks, "projects", lambda: [item])
         folder = Path(item["folder"])
         (folder / ".local-ai/verify.ps1").write_text("exit 0")
         native_agent.save_state(item, {"status": "continue", "verify_passed": True})
@@ -3854,9 +3858,11 @@ def test_repeated_identical_tool_failure_prompts_a_different_approach():
         assert "read_file missing.txt: Failed" in task_context.snapshot(folder)
 
 
-def test_repeated_failed_browser_verdict_reaches_worker_repair_guidance():
+def test_repeated_failed_browser_verdict_reaches_worker_repair_guidance(monkeypatch):
     with tempfile.TemporaryDirectory() as temporary:
         item = project(Path(temporary) / "page")
+        # Repeated failures enter durable recovery, which requires a live task owner.
+        monkeypatch.setattr(long_tasks, "projects", lambda: [item])
         folder = Path(item["folder"])
         (folder / ".local-ai/verify.ps1").write_text("exit 0")
         native_agent.save_state(item, {"status": "continue", "verify_passed": True})
@@ -3897,9 +3903,11 @@ def test_failed_check_survives_restart_and_old_verifier_pass_until_same_file_pas
         assert not recovered["failed_checks"]
 
 
-def test_third_identical_failed_tool_call_is_not_executed_again():
+def test_third_identical_failed_tool_call_is_not_executed_again(monkeypatch):
     with tempfile.TemporaryDirectory() as temporary:
         item = project(Path(temporary) / "page")
+        # Repeated failures enter durable recovery, which requires a live task owner.
+        monkeypatch.setattr(long_tasks, "projects", lambda: [item])
         folder = Path(item["folder"])
         (folder / ".local-ai/verify.ps1").write_text("exit 0")
         native_agent.save_state(item, {"status": "continue", "verify_passed": True})
@@ -7220,3 +7228,41 @@ def test_subscription_handoff_rejects_explicit_original_or_later_no_delegation(t
         result = native_agent.execute_tool(folder, "delegate_subscription_task", {"provider": "grok", "prompt": "Build the UI"})
         assert "forbids delegation" in result
         run.assert_not_called()
+
+
+@pytest.mark.parametrize("ownership", ["live", "missing", "deleted", "changed"])
+def test_repeated_failure_guidance_requires_live_registry_before_next_action(tmp_path, monkeypatch, ownership):
+    item = project(tmp_path / "registry-guidance")
+    folder = Path(item["folder"])
+    owners = [] if ownership == "missing" else [item.copy()]
+    monkeypatch.setattr(long_tasks, "projects", lambda: list(owners))
+    monkeypatch.setattr(native_agent, "MAX_TURNS_PER_SLICE", 3)
+    seen = []
+
+    def complete(payload):
+        seen.append(copy.deepcopy(payload))
+        turn = len(seen)
+        if turn == 2 and ownership == "deleted":
+            owners.clear()
+        if turn == 2 and ownership == "changed":
+            owners[0]["brief"] = "A newer user request supersedes this worker"
+        name = "read_file" if turn <= 2 else "write_file"
+        arguments = ({"path": "missing.txt"} if turn <= 2 else
+                     {"path": "next-step.txt", "content": "Real next action"})
+        return {"choices": [{"message": {"role": "assistant", "tool_calls": [{
+            "id": f"registry-{turn}", "type": "function", "function": {
+                "name": name, "arguments": json.dumps(arguments)}}]}}]}
+
+    state = native_agent.run_slice(item, complete=complete)
+    episode = task_context.recovery_episode(folder, native_agent.capability_goal_hash(item), None)
+    assert state["status"] == "continue"
+    assert episode and episode["trigger"] == "repeated_failure"
+    assert "read_file missing.txt: Failed" in task_context.snapshot(folder)
+    if ownership == "live":
+        assert len(seen) == 3 and episode["turns"] == 1
+        assert "Do not retry it unchanged" in str(seen[2]["messages"])
+        assert (folder / "next-step.txt").read_text() == "Real next action"
+    else:
+        assert len(seen) == 2 and episode["turns"] == 0
+        assert "ownership or instructions changed" in state["current"]
+        assert not (folder / "next-step.txt").exists()
