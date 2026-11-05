@@ -1051,3 +1051,42 @@ def test_studio_vocals_is_radio_only_and_missing_song_launcher_keeps_prompt(tmp_
         assert controls.vocals.get() is False
     finally:
         window.destroy()
+
+
+def test_studio_song_acknowledgement_and_errors_survive_radio_polling(tmp_path):
+    import tkinter as tk
+    try:
+        window, controls, service, songs = studio_preview_fixture(tmp_path)
+    except tk.TclError as error:
+        pytest.skip("Tk desktop unavailable: "+str(error))
+    window.withdraw()
+    try:
+        controls.set_mode("song")
+        controls.prompt.insert(0, "An upbeat song with clear vocals")
+        controls.generate()
+        assert songs == ["An upbeat song with clear vocals"]
+        assert not controls.prompt.get()
+        acknowledgement = controls.song_notice.get()
+        assert acknowledgement == "Song started. Follow its progress in Home → My tasks."
+        controls.poll(); window.update()
+        assert controls.song_notice.get() == acknowledgement
+        assert controls.song_notice_label.winfo_manager() == "pack"
+        controls.on_make_song = lambda _prompt: False
+        controls.prompt.insert(0, "Retain this failed song request")
+        controls.generate(); failed = controls.song_notice.get()
+        controls.poll(); window.update()
+        assert controls.song_notice.get() == failed and "did not start" in failed
+        assert controls.prompt.get() == "Retain this failed song request"
+        def broken(_prompt):
+            raise RuntimeError("Readiness check failed")
+        controls.on_make_song = broken
+        controls.generate(); errored = controls.song_notice.get()
+        controls.poll(); window.update()
+        assert controls.song_notice.get() == errored and "Readiness check failed" in errored
+        assert controls.prompt.get() == "Retain this failed song request"
+        controls.set_mode("radio")
+        assert not controls.song_notice_label.winfo_manager()
+        controls.set_mode("song"); controls.poll(); window.update()
+        assert controls.song_notice.get() == errored
+    finally:
+        window.destroy()

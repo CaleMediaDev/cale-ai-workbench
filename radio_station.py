@@ -999,6 +999,11 @@ class Controls:
         self._show_prompt_hint()
         self.generate_button = self._button(prompt_row, "Start station", self.generate, accent=self.coral)
         self.generate_button.pack(side="left", fill="y", padx=(12, 0))
+        # Song acknowledgements belong to the song maker. The radio's periodic
+        # status updates must not erase a launch result or an actionable error.
+        self.song_notice = tk.StringVar(value="Describe your song, then choose Make song.")
+        self.song_notice_label = tk.Label(self.frame, textvariable=self.song_notice, bg=self.bg,
+            fg=self.cyan, anchor="w", justify="left", wraplength=900, font=("Segoe UI", 10))
         station_row = tk.Frame(self.frame, bg=self.bg)
         station_row.pack(fill="x", pady=(0, 8))
         self.choice = ttk.Combobox(station_row, state="readonly", width=22, style="Radio.TCombobox", font=("Segoe UI", 10, "bold"))
@@ -1159,8 +1164,10 @@ class Controls:
             state="disabled" if mode=="song" and self.on_make_song is None else "normal")
         if mode == "song":
             self.vocals_toggle.pack_forget()
+            self.song_notice_label.pack(fill="x", before=self.choice.master, pady=(0, 10))
         else:
             self.vocals_toggle.pack(side="right", before=self.badge)
+            self.song_notice_label.pack_forget()
         self._clear_prompt_hint()
         self.prompt.focus_set()
 
@@ -1180,22 +1187,28 @@ class Controls:
         prompt = "" if getattr(self, "hint_visible", False) else self.prompt.get().strip()
         if not prompt:
             self.text.set("Describe what you want to hear first.")
+            if self.mode == "song":
+                self.song_notice.set("Describe what you want to hear first.")
             self.prompt.focus_set()
             return
         if self.mode == "song":
             if self.on_make_song is None:
                 self.text.set("Song creation is not connected here. Your description is kept.")
+                self.song_notice.set(self.text.get())
                 return
             if self.on_make_song is not None:
                 try:
                     started = self.on_make_song(prompt)
                     if started is False:
                         self.text.set("Song did not start. Your description is still here so you can retry.")
+                        self.song_notice.set(self.text.get())
                         return
                 except Exception as error:
                     self.text.set("Song could not start: "+str(error)[:100])
+                    self.song_notice.set(self.text.get())
                     return
                 self.prompt.delete(0, "end")
+                self.song_notice.set("Song started. Follow its progress in Home → My tasks.")
         else:
             try:
                 self.service.station_prompt(prompt[:45], prompt, not self.vocals.get())
