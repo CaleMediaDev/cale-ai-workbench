@@ -855,6 +855,15 @@ def virtual_avatar_sender(stream=None, parent_pid=None, parent_started=None):
     from PIL import Image,ImageOps
     import pyvirtualcam  # Optional GPL2 dependency stays in this child process.
     stream=stream or sys.stdin.buffer
+    def read_exact(size):
+        chunks=[]
+        remaining=size
+        while remaining:
+            chunk=stream.read(remaining)
+            if not chunk:break
+            chunks.append(chunk)
+            remaining-=len(chunk)
+        return b"".join(chunks)
     if parent_pid is not None:
         import threading
         sys.path.insert(0,str(Path(__file__).resolve().parent))
@@ -864,12 +873,12 @@ def virtual_avatar_sender(stream=None, parent_pid=None, parent_started=None):
         threading.Thread(target=watch_owner,args=(parent_pid,parent_started),daemon=True).start()
     with pyvirtualcam.Camera(width=1920,height=1080,fps=15,backend="obs",fmt=pyvirtualcam.PixelFormat.RGB) as camera:
         while True:
-            header=stream.read(4)
+            header=read_exact(4)
             if not header:return 0
             if len(header)!=4:raise ValueError("Incomplete avatar frame header.")
             size=struct.unpack("!I",header)[0]
             if not 1<=size<=2*1024*1024:raise ValueError("Avatar virtual frame exceeds its bound.")
-            raw=stream.read(size)
+            raw=read_exact(size)
             if len(raw)!=size:raise ValueError("Incomplete avatar frame.")
             with Image.open(io.BytesIO(raw)) as image:
                 width,height=image.size
