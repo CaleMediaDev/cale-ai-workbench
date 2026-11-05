@@ -1178,6 +1178,41 @@ class CloudTests(unittest.TestCase):
                 self.assertEqual(upstream.call_args.args[1]["think"], effort)
                 self.assertEqual(result["choices"][0]["message"]["reasoning"], "kept")
 
+    def test_native_resumed_history_accepts_outer_tool_indices_without_remapping(self):
+        router = cloud.Router()
+        router.model_native_contexts = {cloud.LOCAL_MODEL: 262144}
+        router.native_version_ready = True
+        router.native_version_until = time.monotonic() + 60
+        payload = {**REQUEST, "max_tokens": 120, "reasoning_effort": "low", "messages": [
+            {"role": "user", "content": "Continue from the saved reads."},
+            {"role": "assistant", "content": None, "tool_calls": [{"id": "first", "type": "function",
+                "function": {"name": "read_file", "arguments": '{"path":"first.txt"}'}}]},
+            {"role": "tool", "tool_call_id": "first", "content": "first result"},
+            {"role": "assistant", "content": "", "reasoning": "Read both saved files.", "tool_calls": [
+                {"id": "second", "index": 0, "type": "function", "function": {
+                    "name": "read_file", "arguments": '{"path":"second.txt"}'}},
+                {"id": "third", "index": 1, "type": "function", "function": {
+                    "name": "read_file", "arguments": '{"path":"third.txt"}'}}]},
+            {"role": "tool", "tool_call_id": "second", "content": "second result"},
+            {"role": "tool", "tool_call_id": "third", "content": "third result"},
+            {"role": "user", "content": "Return the summary."}]}
+        original = json.loads(json.dumps(payload))
+        raw = {"model": cloud.LOCAL_MODEL, "done": True,
+               "message": {"role": "assistant", "content": "checked"}}
+        with patch.object(cloud, "post", side_effect=lambda url, *args, **kwargs:
+                          raw if url.endswith("/api/chat") else ANSWER) as upstream, patch("usage_history.record_completion"):
+            router.complete(payload)
+        self.assertTrue(upstream.call_args.args[0].endswith("/api/chat"))
+        body = upstream.call_args.args[1]
+        calls = [call for message in body["messages"] for call in message.get("tool_calls", [])]
+        self.assertEqual([call["id"] for call in calls], ["first", "second", "third"])
+        self.assertTrue(all("index" not in call and "index" not in call["function"] for call in calls))
+        self.assertEqual(calls[2]["function"]["arguments"], {"path": "third.txt"})
+        self.assertEqual(body["messages"][5]["tool_call_id"], "third")
+        self.assertEqual(body["messages"][5]["tool_name"], "read_file")
+        self.assertEqual(body["messages"][3]["thinking"], "Read both saved files.")
+        self.assertEqual(payload, original)
+
     def test_native_32k_candidate_only_serves_requests_that_fit(self):
         self.candidates.stop()
         alias = "cale-code7"
@@ -2705,3 +2740,11 @@ def test_native_context_bare_null_assistant_keeps_legacy_invalid_request_semanti
     assert cloud.native_chat_request(base, 65536) is None
     base["messages"][0]["tool_calls"] = []
     assert cloud.native_chat_request(base, 65536)["messages"][0]["content"] == ""
+
+
+def test_native_context_invalid_outer_tool_index_preserves_legacy_validation():
+    base = {"model": "local", "max_tokens": 20, "messages": [{"role": "assistant", "content": "",
+        "tool_calls": [{"id": "one", "type": "function", "function": {"name": "read_file", "arguments": "{}"}}]}]}
+    for invalid in (True, "0", None, -1, 1.5, 2**63):
+        base["messages"][0]["tool_calls"][0]["index"] = invalid
+        assert cloud.native_chat_request(base, 65536) is None

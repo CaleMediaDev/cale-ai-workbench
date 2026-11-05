@@ -979,9 +979,11 @@ def native_chat_request(payload, capacity, thinking=None):
                 return None
             native["tool_calls"] = []
             for call in message["tool_calls"]:
-                if (not isinstance(call, dict) or set(call) - {"id", "type", "function"}
+                if (not isinstance(call, dict) or set(call) - {"id", "index", "type", "function"}
                         or call.get("type") != "function" or not isinstance(call.get("id"), str)
-                        or not call["id"] or call["id"] in call_names):
+                        or not call["id"] or call["id"] in call_names
+                        or ("index" in call and (type(call["index"]) is not int
+                            or not 0 <= call["index"] < 2**63))):
                     return None
                 function = call.get("function")
                 if (not isinstance(function, dict) or set(function) != {"name", "arguments"}
@@ -993,6 +995,8 @@ def native_chat_request(payload, capacity, thinking=None):
                     return None
                 if not isinstance(arguments, dict):
                     return None
+                # OpenAI's optional outer stream index is parsed but not copied
+                # by v0.40.13 FromCompletionToolCall. Keep native index unset.
                 call_names[call["id"]] = function["name"]
                 native["tool_calls"].append({"id": call["id"], "function": {
                     "name": function["name"], "arguments": arguments}})
