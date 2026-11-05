@@ -117,6 +117,48 @@ def test_successful_separation_publishes_only_validated_stems(tmp_path):
     assert source.read_bytes() == b"music"
 
 
+def test_hard_link_rejects_stem_changed_after_hashing(tmp_path):
+    from contextlib import nullcontext
+    from types import SimpleNamespace
+
+    source = tmp_path / "song.mp3"
+    source.write_bytes(b"music")
+    output = tmp_path / "stems"
+    original_link = music_stems.os.link
+    linked = []
+
+    def render(args, **_kwargs):
+        staging = Path(args[-1])
+        (staging / "a.wav").write_bytes(b"first")
+        (staging / "b.wav").write_bytes(b"second")
+        return SimpleNamespace(returncode=0)
+
+    def change_before_link(staged, destination):
+        prior = staged.stat()
+        staged.write_bytes(b"U" * prior.st_size)
+        os.utime(staged, ns=(prior.st_atime_ns, prior.st_mtime_ns))
+        original_link(staged, destination)
+        linked.append(destination)
+
+    with patch.object(
+        music_stems.music_backend, "_setup_lock", side_effect=nullcontext
+    ), patch.object(
+        music_stems.music_backend, "_music_gpu_lease", side_effect=nullcontext
+    ), patch.object(
+        music_stems, "install", return_value=Path("python.exe")
+    ), patch.object(
+        music_stems.subprocess, "run", side_effect=render
+    ), patch.object(music_stems.os, "link", side_effect=change_before_link):
+        with pytest.raises(OSError, match="changed during publication"):
+            music_stems.separate_stems(str(source), str(output))
+
+    assert linked == [output / "a.wav"]
+    # Rollback must not delete content changed since the original digest.
+    assert linked[0].read_bytes() == b"UUUUU"
+    assert set(output.iterdir()) == set(linked)
+    assert source.read_bytes() == b"music"
+
+
 def test_output_rechecked_after_waiting_for_setup_lock(tmp_path):
     from contextlib import contextmanager, nullcontext
 
