@@ -464,6 +464,32 @@ def test_failed_initial_blend_volume_restores_current_deck_and_allows_retry(tmp_
     assert player.outgoing is current and current.busy()
 
 
+@pytest.mark.parametrize("level", [0, 40, 100])
+def test_failed_initial_blend_preserves_outgoing_deck_level(tmp_path, level):
+    player = radio.Player(lambda: Deck(lambda: 0), lambda: 0)
+    first, second = tmp_path/"first.wav", tmp_path/"second.wav"
+    player.play(first)
+    player.set_deck_volume(0, level)
+    current = player.active
+    expected_gain = player.volume*level/100
+    assert current.volume == pytest.approx(expected_gain)
+    player.prepare(second)
+    failed = player.prepared
+
+    with patch.object(failed, "set_volume", side_effect=RuntimeError("Cannot set volume")):
+        with pytest.raises(RuntimeError, match="Cannot set volume"):
+            player.blend(second)
+
+    assert player.active is current and current.busy()
+    assert current.volume == pytest.approx(expected_gain)
+    assert not player.mixing and player.prepared is None
+    assert not failed.opened
+    assert player.blend(second)
+    assert player.outgoing is current and current.busy()
+    assert current.volume == pytest.approx(expected_gain)
+    assert player.active.busy()
+
+
 def test_blend_while_paused_preserves_staged_audio_until_resume(tmp_path):
     moment = [0]
     player = radio.Player(lambda: Deck(lambda: moment[0]), lambda: moment[0])
