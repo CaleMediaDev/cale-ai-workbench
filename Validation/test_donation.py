@@ -2109,3 +2109,30 @@ def test_github_boundary_preserves_cancellation_and_non_github_ledger_errors(fai
             donation.gh_api("repos/PRIVATE/PRIVATE")
     assert raised.value is failure
     assert not isinstance(raised.value, donation.GitHubRequestError)
+
+
+@pytest.mark.parametrize("error,category", [
+    (sqlite3.OperationalError("PRIVATE_SQL_AND_PATH"), "database unavailable"),
+    (RuntimeError("PRIVATE_ACCOUNT_OR_TOKEN"), "worker temporarily unavailable"),
+    (OSError("PRIVATE_HELPER_PATH"), "local file or helper unavailable"),
+    (donation.subprocess.TimeoutExpired(["PRIVATE_COMMAND"], 1), "local file or helper unavailable"),
+    (ValueError("PRIVATE_DATA"), "data could not be validated"),
+    (KeyError("PRIVATE_KEY"), "data could not be validated"),
+])
+def test_non_github_service_errors_have_safe_static_category_without_account_cooldown(tmp_path, error, category):
+    donation.set_enabled(True, tmp_path, chatgpt_account=FINGERPRINT,
+        github_account="donor", sources=["chatgpt"], intensity="medium")
+    service = donation.Service(tmp_path)
+    with patch("pc_offline.offline", return_value=False), patch("github_account.account", return_value="donor"), \
+         patch("chatgpt_auth.status", return_value={"sharing": True}), \
+         patch("chatgpt_auth.account_fingerprint", return_value=FINGERPRINT), \
+         patch.object(donation, "gh_api", side_effect=error), \
+         patch.object(donation, "complete_donation") as inference:
+        service._run(threading.Event())
+    inference.assert_not_called()
+    assert category in service.status_message()
+    assert "PRIVATE" not in service.status_message()
+    assert donation.resource_cooldown(tmp_path, "github") == 0
+    assert donation.resource_cooldown(tmp_path, "chatgpt") == 0
+    assert donation.github_diagnostic(tmp_path) == {}
+    assert service.next_attempt > time.monotonic()

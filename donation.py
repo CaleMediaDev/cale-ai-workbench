@@ -578,6 +578,20 @@ def github_diagnostic(root, error=None):
     return {"stage": row[0], "status": row[1], "kind": row[2], "until": row[3]}
 
 
+
+def donation_worker_failure_message(error):
+    """Static categories only; never expose exception text, types or commands."""
+    if isinstance(error, sqlite3.Error):
+        category = "Contribution database unavailable"
+    elif isinstance(error, (OSError, subprocess.TimeoutExpired)):
+        category = "Contribution local file or helper unavailable"
+    elif isinstance(error, (ValueError, TypeError, KeyError)):
+        category = "Contribution data could not be validated"
+    else:
+        category = "Contribution worker temporarily unavailable"
+    return category + " · retrying automatically."
+
+
 def gh_api(endpoint: str, data: dict | None = None):
     """Use existing CLI credentials; errors expose only bounded typed metadata."""
     import github_account
@@ -1312,9 +1326,14 @@ class Service:
             self._emit_event("waiting", run_id, resource)
             self.message = "Account limit or connection delay · waiting before retrying."
         except Exception as error:
-            if run_id:
-                finish(self.root, run_id, "failed")
             self.failures += 1
             self.next_attempt = max(self.next_attempt, time.monotonic() + min(600, 30 * 2 ** min(self.failures, 5)))
+            self.message = donation_worker_failure_message(error)
+            if run_id:
+                try:
+                    finish(self.root, run_id, "failed")
+                except sqlite3.Error:
+                    # The ledger itself may be unavailable. Never fabricate a
+                    # failed/successful receipt or blame GitHub/provider quota.
+                    self.message = "Contribution database unavailable · retrying automatically."
             self._emit_event("error", run_id, resource)
-            self.message = "Connection or account temporarily unavailable · retrying automatically."
