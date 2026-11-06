@@ -224,6 +224,30 @@ def test_music_eta_uses_completed_local_songs_and_explains_overrun(tmp_path):
     assert task_eta.music_countdown({**current, "status": "complete"}, now=2100) == ""
 
 
+@pytest.mark.parametrize("length", [0, -180, float("nan"), float("inf"), float("-inf")])
+def test_music_eta_excludes_invalid_historical_song_lengths(tmp_path, length):
+    jobs = tmp_path / "music-jobs"
+    jobs.mkdir()
+    for index in range(3):
+        (jobs / f"invalid-{index}.json").write_text(json.dumps({
+            "status": "complete", "instrumental": False,
+            "duration_seconds": length, "created": 1000,
+            "finished": 1300,
+        }), encoding="utf-8")
+    # Invalid song lengths must not establish a countdown estimate.
+    assert task_eta.music_estimate_seconds(jobs, 180, False) is None
+
+    for index in range(3):
+        (jobs / f"valid-{index}.json").write_text(json.dumps({
+            "status": "complete", "instrumental": False,
+            "duration_seconds": 60, "created": 1000,
+            "finished": 1060,
+        }), encoding="utf-8")
+    # Only valid history should contribute to the scaled estimate:
+    # 15 seconds of setup plus 45 seconds scaled by 180 / 60.
+    assert task_eta.music_estimate_seconds(jobs, 180, False) == 150
+
+
 def test_music_eta_requires_a_valid_historical_start_timestamp(tmp_path):
     jobs = tmp_path / "music-jobs"
     jobs.mkdir()
