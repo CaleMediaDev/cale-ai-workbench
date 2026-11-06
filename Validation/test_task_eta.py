@@ -152,11 +152,13 @@ def test_pause_preserves_work_before_pause_and_excludes_paused_time(tmp_path):
     )
     # Ten seconds of work precede the pause; the following thirty are paused.
     assert task_eta.countdown(db, "task", 50, "paused", 1070) == "Paused"
+    # Resume after 30s pause. Total active time should be 30s. 1060->1100 is 40s elapsed, but only 10s active.
     assert task_eta.countdown(db, "task", 50, "working", 1100) == (
-        "About 57s to review"
+        "About 37s to review"
     )
+    # 1100->1110 is 10s elapsed. Total active time should be 40s.
     assert task_eta.countdown(db, "task", 50, "working", 1110) == (
-        "About 47s to review"
+        "About 27s to review"
     )
 
 

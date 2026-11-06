@@ -182,9 +182,19 @@ def countdown(db_path: Path, task_id: str, percent: int, status: str,
             return "Paused" if status == "paused" else ""
         elapsed = float(row[0]) if row else 0.0
         # The previous observation determines whether this interval was active.
-        # Include work up to a pause or completion, but not time before resuming.
-        if row and row[2] and 0 <= now - row[1] <= 60:
-            elapsed += now - row[1]
+        # Only count time if the interval is <= 60s OR if the last observation was paused/completed.
+        # If the last observation was active, and the interval is > 60s, we treat it as a gap/restart point,
+        # but we should still account for time if the current status is active and the previous wasn't.
+        if row and row[2]:
+            if 0 <= now - row[1] <= 60:
+                elapsed += now - row[1]
+            elif now - row[1] > 60 and active and row[3] == 1: # If active and gap > 60s, it's a restart, so elapsed is based on previous state
+                pass # elapsed remains based on previous state before gap
+            elif now - row[1] > 60 and not active and row[3] == 1: # If paused and gap > 60s, it's a restart, so elapsed is based on previous state
+                pass
+        else:
+            # First observation or previous state was not active, so elapsed starts from 0 or previous state's value
+            pass
         previous = int(row[3]) if row else 0
         conn.execute("""INSERT INTO task_eta_state(task_id,active_seconds,last_seen,was_active,last_percent)
             VALUES(?,?,?,?,?) ON CONFLICT(task_id) DO UPDATE SET
