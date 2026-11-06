@@ -317,7 +317,13 @@ def _schedule_locked(root: Path, state: Path, now: float | None) -> bool:
             or report["status"] == "failed" and int(report.get("failures", 1)) < MAX_FAILURES
             else INTERVAL
         )
-        if now - float(report.get("checked_at", 0)) < retry_after:
+        try:
+            checked_at = float(report.get("checked_at", 0))
+        except (TypeError, ValueError, OverflowError):
+            checked_at = 0
+        if not math.isfinite(checked_at):
+            checked_at = 0
+        if now - checked_at < retry_after:
             return False
     python = root / "Toolbox/python/Scripts/python.exe"
     if not python.is_file() or not (root / "Validation/test_long_tasks.py").is_file():
