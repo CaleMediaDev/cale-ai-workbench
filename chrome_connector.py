@@ -101,7 +101,15 @@ def installed_version() -> str:
         and not re.fullmatch(r"%YAML[ \t]+1\.[12](?:[ \t]+#[^\r\n]*)?[ \t]*", line)
         and not re.fullmatch(r"(?:---|\.\.\.)(?:[ \t]+#[^\r\n]*)?[ \t]*", line)
     )
-    match = re.search(r"^(?:version|'version'|\"version\")[ \t]*:[ \t]+(['\"]?)([\w.\-]+)\1(?:[ \t]+#[^\r\n]*)?[ \t]*\r?$", dedent(mapping_lines), re.M)
+    mapping_lines = dedent(mapping_lines)
+    # Duplicate root keys are ambiguous; do not advertise the first value as
+    # installed when another version entry may override it in the YAML loader.
+    version_keys = re.findall(
+        r"^(?:version|'version'|\"version\")[ \t]*:", mapping_lines, re.M
+    )
+    if len(version_keys) != 1:
+        return ""
+    match = re.search(r"^(?:version|'version'|\"version\")[ \t]*:[ \t]+(['\"]?)([\w.\-]+)\1(?:[ \t]+#[^\r\n]*)?[ \t]*\r?$", mapping_lines, re.M)
     return match.group(2) if match else ""
 
 
