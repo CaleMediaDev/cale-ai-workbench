@@ -241,6 +241,26 @@ def test_negated_generic_singer_preserves_vocal_texture():
     assert music_style.requires_sustained_vocals(positive)
 
 
+def test_negated_sung_verses_preserve_vocal_texture():
+    for negation in ("no", "without any", "avoid", "don't want"):
+        for sound in ("sung verse", "sung verses"):
+            exclusion = negation + " " + sound
+            request = "Heavy dubstep with vocal chops, " + exclusion
+            assert not music_style.explicit_lead_vocals(request)
+            assert not music_style.unambiguous_vocal_song(request)
+            assert not music_style.requires_sustained_vocals(request)
+            caption = music_style.enhance(request)
+            assert "Sparse chopped vocal syllables" in caption
+            assert exclusion not in caption
+            assert not music_style.requires_sustained_vocals(caption)
+            assert music_style.enhance(caption) == caption
+
+    positive = "Heavy dubstep with vocal chops and sung verses"
+    assert music_style.explicit_lead_vocals(positive)
+    assert music_style.unambiguous_vocal_song(positive)
+    assert music_style.requires_sustained_vocals(positive)
+
+
 def test_positive_rap_aliases_override_chops_but_negations_do_not():
     for alias in ("rap", "rapping", "rapper", "rapped verses"):
         assert music_style.requires_sustained_vocals("Vocal chops and " + alias)
