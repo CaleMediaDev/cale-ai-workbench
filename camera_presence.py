@@ -593,11 +593,13 @@ class AvatarFrameWorker:
             except (OSError,ValueError):pass
             emit("error","Animated Cale is unavailable. Your real camera stays hidden; switch to Raw camera only if you want to show it.")
         finally:
-            if self.sender_worker:self.sender_worker.close()
             try:
-                if engine is not None:engine.close()
+                if self.sender_worker:self.sender_worker.close()
             finally:
-                if lease is not None:lease.close()
+                try:
+                    if engine is not None:engine.close()
+                finally:
+                    if lease is not None:lease.close()
 
     def close(self):
         self.stopped.set()
