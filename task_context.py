@@ -199,7 +199,9 @@ def _next_step(plan: str, progress: str) -> str:
         matches = list(re.finditer(
             r"(?:^|[.!?]\s+)(?:next(?: step)?|up next)\s*[:\-]\s*", line, re.I))
         if matches:
-            return line[matches[-1].end():].strip()[:500]
+            step = line[matches[-1].end():].strip()
+            if step:
+                return step[:500]
     return ""
 
 

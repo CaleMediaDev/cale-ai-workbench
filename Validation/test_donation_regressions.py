@@ -19,6 +19,16 @@ from task_eta import total_time
 
 
 class CheckpointFreshnessRegressionTests(unittest.TestCase):
+    def test_empty_progress_marker_does_not_hide_previous_action(self):
+        for marker in ("Next step:", "Up next -   ", "Finished review. Next:   "):
+            with self.subTest(marker=marker):
+                self.assertEqual(
+                    task_context._next_step(
+                        "",
+                        "Next step: Verify the current milestone\n" + marker + "\n"),
+                    "Verify the current milestone")
+                self.assertEqual(task_context._next_step("", marker + "\n"), "")
+
     def test_empty_plan_checkbox_does_not_hide_next_step(self):
         with self.subTest(source="later plan item"):
             self.assertEqual(
