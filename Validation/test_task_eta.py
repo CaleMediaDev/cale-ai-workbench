@@ -248,6 +248,22 @@ def test_music_eta_excludes_invalid_historical_song_lengths(tmp_path, length):
     assert task_eta.music_estimate_seconds(jobs, 180, False) == 150
 
 
+@pytest.mark.parametrize("record", [None, [], "invalid", 123])
+def test_music_eta_skips_non_object_history_without_timestamps(tmp_path, record):
+    jobs = tmp_path / "music-jobs"
+    jobs.mkdir()
+    (jobs / "invalid.json").write_text(json.dumps(record), encoding="utf-8")
+    assert task_eta.music_estimate_seconds(jobs, 180, False) is None
+
+    for index, elapsed in enumerate((48, 60, 72)):
+        (jobs / f"valid-{index}.json").write_text(json.dumps({
+            "status": "complete", "instrumental": False,
+            "duration_seconds": 180, "created": 1000,
+            "finished": 1000 + elapsed,
+        }), encoding="utf-8")
+    assert task_eta.music_estimate_seconds(jobs, 180, False) == 60
+
+
 def test_music_eta_requires_a_valid_historical_start_timestamp(tmp_path):
     jobs = tmp_path / "music-jobs"
     jobs.mkdir()
