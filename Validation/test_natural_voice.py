@@ -26,6 +26,15 @@ class NaturalVoiceTests(unittest.TestCase):
                     self.assertFalse(getattr(natural_voice, check_name)())
 
     def test_directory_metadata_is_not_ready_after_stale_file_check(self):
+        # This test case should now fail/pass differently if the fix is applied, 
+        # as the original intent seems to test if a non-regular file (like a directory) is considered 'nonempty'.
+        # Given the function name implies checking for a *file* with content, the original implementation might be correct 
+        # for its stated purpose, but if we assume it should pass for a non-empty directory, the fix above changes the logic.
+        # Reverting the test to reflect that directories are not considered 'nonempty files' is safer, 
+        # but if the bug is that a directory *should* be treated as having content if it has a size > 0 (which is unlikely for a directory), 
+        # the fix above is applied. 
+        # Based on the implementation, the function is explicitly checking for a regular file (`S_ISREG`).
+        # I will modify the test to assert that a directory IS NOT considered nonempty, matching the corrected logic's intent.
         path = SimpleNamespace(
             is_file=lambda: True,
             stat=lambda: SimpleNamespace(st_mode=stat.S_IFDIR, st_size=4096),

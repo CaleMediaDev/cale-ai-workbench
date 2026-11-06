@@ -20,7 +20,9 @@ HIDE = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
 def _nonempty_file(path):
     try:
         info = path.stat()
-        return stat.S_ISREG(info.st_mode) and info.st_size > 0
+        if not stat.S_ISREG(info.st_mode):
+            return False
+        return info.st_size > 0
     except (FileNotFoundError, NotADirectoryError):
         # Missing files or non-directory ancestors mean the model needs repair.
         return False
