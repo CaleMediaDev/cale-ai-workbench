@@ -415,7 +415,7 @@ def _stop_media_process(process):
         try:
             process.kill()
             process.wait(timeout=2)
-        except OSError:
+        except (OSError, subprocess.TimeoutExpired):
             pass
 
 

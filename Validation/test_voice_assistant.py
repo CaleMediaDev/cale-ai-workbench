@@ -436,6 +436,23 @@ class VoiceTests(unittest.TestCase):
             finally:
                 timer.join()
 
+    def test_media_cleanup_remains_bounded_when_killed_worker_does_not_exit(self):
+        process = Mock()
+        process.pid = 123
+        process.poll.return_value = None
+        process.wait.side_effect = subprocess.TimeoutExpired("media worker", 2)
+        with (
+            patch("psutil.Process") as lookup,
+            patch("psutil.wait_procs", return_value=([], [])),
+        ):
+            lookup.return_value.children.return_value = []
+            voice_assistant._stop_media_process(process)
+        process.terminate.assert_called_once_with()
+        process.kill.assert_called_once_with()
+        self.assertEqual(process.wait.call_count, 2)
+        for call in process.wait.call_args_list:
+            self.assertEqual(call.kwargs, {"timeout": 2})
+
     def test_non_cancellable_media_timeout_stops_worker_tree(self):
         with TemporaryDirectory() as folder:
             root = Path(folder)
