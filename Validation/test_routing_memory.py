@@ -137,6 +137,40 @@ class ProjectMemoryContributionTests(unittest.TestCase):
         self.assertEqual(memory.search(self.folder, "quasar", kind="file"), [])
 
 
+    def test_full_scan_retires_file_identity_replaced_by_symlink(self):
+        source = self.folder / "app.py"
+        target = self.folder / "replacement.py"
+        source.write_text("obsoletequasar", encoding="utf-8")
+        target.write_text("currentnebula", encoding="utf-8")
+        memory.index(self.folder, include_code=True)
+        source.unlink()
+        try:
+            source.symlink_to(target)
+        except (OSError, NotImplementedError):
+            self.skipTest("Creating symlinks is unavailable on this platform.")
+
+        result = memory.index(self.folder, include_code=True)
+
+        self.assertFalse(result["truncated"])
+        self.assertEqual(result["removed"], 1)
+        # Check storage before search/get can lazily repair stale records.
+        with memory.connection(self.folder) as conn:
+            self.assertIsNone(conn.execute(
+                "SELECT id FROM memories WHERE id=?", ("file:app.py",)
+            ).fetchone())
+            self.assertIsNone(conn.execute(
+                "SELECT id FROM memory_fts WHERE id=?", ("file:app.py",)
+            ).fetchone())
+            self.assertEqual(conn.execute(
+                "SELECT body FROM memories WHERE id=?", ("file:replacement.py",)
+            ).fetchone()["body"], "currentnebula")
+        self.assertEqual(memory.search(self.folder, "obsoletequasar", kind="file"), [])
+        self.assertEqual(
+            [row["id"] for row in memory.search(self.folder, "currentnebula", kind="file")],
+            ["file:replacement.py"],
+        )
+
+
     def test_recalled_code_file_refreshes_after_edit_and_deletion(self):
         source = self.folder / "app.py"
         source.write_text("def old_recipe(): return 1", encoding="utf-8")
