@@ -464,6 +464,11 @@ def _live_progress_db(state):
 
 def _write_live_progress(connection, context, data, result, initialize):
     """Update the header and node result together under the same ownership check."""
+    # SELECT alone does not start a transaction on the sqlite3 connection.
+    # Reserve the writer before reading ownership so a replacement session
+    # cannot slip between the ownership check and the header update.
+    if not connection.in_transaction:
+        connection.execute("BEGIN IMMEDIATE")
     if initialize:
         connection.execute("DELETE FROM live_results")
     else:
