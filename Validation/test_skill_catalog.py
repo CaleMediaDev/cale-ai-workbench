@@ -53,6 +53,35 @@ class SkillCatalogTests(unittest.TestCase):
             self.assertTrue(destination.is_file())
             self.assertEqual(destination.read_text(encoding="utf-8"), "My local notes")
 
+    def test_preserves_symlinked_skills_root_without_probing_target(self):
+        destination = self.root / "data/skills"
+        destination.parent.mkdir()
+        external = self.root / "external-skills"
+        external.mkdir()
+        try:
+            destination.symlink_to(external, target_is_directory=True)
+        except (OSError, NotImplementedError) as exc:
+            self.skipTest(f"Symlinks unavailable: {exc}")
+
+        original_exists = Path.exists
+
+        def guarded_exists(path):
+            if path == destination:
+                raise PermissionError("Symlink target is inaccessible")
+            return original_exists(path)
+
+        with mock.patch.object(Path, "exists", guarded_exists):
+            result = skill_catalog.sync(self.root)
+
+        self.assertEqual(result, {
+            "installed": 0,
+            "updated": 0,
+            "preserved": len(skill_catalog.SKILLS) + len(skill_catalog.SHARED_REFERENCES),
+        })
+        self.assertTrue(destination.is_symlink())
+        self.assertEqual(destination.readlink(), external)
+        self.assertEqual(list(external.iterdir()), [])
+
     def test_preserves_local_dangling_skill_symlink(self):
         skill_catalog.sync(self.root)
         installed = self.root / "data/skills/creative/frontend-ui-engineering/SKILL.md"
