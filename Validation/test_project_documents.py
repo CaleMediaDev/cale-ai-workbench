@@ -361,6 +361,36 @@ def test_inspector_rebuilds_invalid_or_oversized_cache(tmp_path):
     assert not list(cache.parent.glob("*.tmp"))
 
 
+def test_inspector_retries_empty_extraction_and_legacy_empty_cache(tmp_path):
+    source = tmp_path / "notes.pdf"
+    original = b"unchanged PDF source"
+    source.write_bytes(original)
+    digest = project_documents._digest(source)
+    cache = tmp_path / ".local-ai/document-cache" / (
+        f"{project_documents.CACHE_VERSION}-{digest}-pdf-0.txt"
+    )
+
+    with patch.object(file_chat, "ROOT", tmp_path), patch.object(
+        file_chat, "document_text", side_effect=["", "recovered document text"],
+    ) as extract, patch.object(project_memory, "index_document_text"):
+        empty = project_documents.inspect(tmp_path, "notes.pdf")
+        assert empty["text"] == "" and not empty["cached"]
+        assert not cache.exists()
+
+        # Empty entries written by earlier versions must also be retried.
+        cache.parent.mkdir(parents=True, exist_ok=True)
+        cache.write_bytes(b"")
+        recovered = project_documents.inspect(tmp_path, "notes.pdf")
+        reused = project_documents.inspect(tmp_path, "notes.pdf")
+
+    assert recovered["text"] == reused["text"] == "recovered document text"
+    assert not recovered["cached"] and reused["cached"]
+    assert extract.call_count == 2
+    assert cache.read_bytes() == b"recovered document text"
+    assert source.read_bytes() == original
+    assert not list(cache.parent.glob("*.tmp"))
+
+
 def test_inspector_rebuilds_cache_removed_before_open(tmp_path):
     source = tmp_path / "notes.pdf"
     original = b"unchanged PDF source"
