@@ -47,7 +47,10 @@ def _srt_time(seconds: float) -> str:
 def save(source: Path, vocal: Path, target: Path, transcription: dict) -> dict:
     """Write plain text, SRT captions and raw timings without changing audio."""
     rows = []
-    for segment in transcription.get("segments", []):
+    segments = transcription.get("segments", [])
+    if not isinstance(segments, (list, tuple)):
+        segments = []
+    for segment in segments:
         if not isinstance(segment, dict):
             continue
         text_value = segment.get("text", "")

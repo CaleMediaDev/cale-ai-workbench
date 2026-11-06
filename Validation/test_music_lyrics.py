@@ -148,6 +148,22 @@ def test_save_skips_boolean_timestamps(tmp_path, invalid, field, include_valid):
     assert vocal.read_bytes() == b"isolated"
 
 
+@pytest.mark.parametrize("segments", [None, False, True, 123, "invalid", {}])
+def test_save_rejects_malformed_segment_collections_without_writing(tmp_path, segments):
+    source = tmp_path / "song.wav"
+    source.write_bytes(b"original")
+    vocal = tmp_path / "vocals.wav"
+    vocal.write_bytes(b"isolated")
+    target = tmp_path / "lyrics"
+
+    with pytest.raises(RuntimeError, match="No clear lyrics"):
+        music_lyrics.save(source, vocal, target, {"segments": segments})
+
+    assert not target.exists()
+    assert source.read_bytes() == b"original"
+    assert vocal.read_bytes() == b"isolated"
+
+
 def test_save_skips_overlapping_and_backward_captions(tmp_path):
     source = tmp_path / "song.wav"
     source.write_bytes(b"original")
