@@ -10,10 +10,12 @@ Created by [Cale Media](https://calemedia.com).
 2. Click **Install** and watch the progress bar. Accounts are optional; you can connect them while models download.
 3. Click **Open Cale AI** and describe what you want in chat.
 
-Release 0.5.554 improves durable task continuation, fresh browser-check replay, local context handling and automatic retries when task instructions cannot be read. Verification timeouts use the owned Windows Job for cleanup. [Validation and limits](benchmarks/results/agent-core-554-20261106.json).
+Release 0.5.555 checks Windows developer tools during visual setup and requests permission to enable symbolic links when needed. Already working PCs skip the prompt; managed or declined settings do not stop installation. [Validation and limits](benchmarks/results/windows-symbolic-links-555-20261106.json).
 
 <details>
 <summary>Feature history and validation</summary>
+
+Release 0.5.554 improves durable task continuation, fresh browser-check replay, local context handling and automatic retries when task instructions cannot be read. Verification timeouts use the owned Windows Job for cleanup. [Validation and limits](benchmarks/results/agent-core-554-20261106.json).
 
 Release 0.5.553 fixes stale camera workers keeping webcams busy, preserves useful camera errors, and adds local official-CVE lookup, supplied-source inspection, dependency evidence and bounded Ghidra analysis through the existing AI tools. Matches remain unconfirmed candidates until tested. [How it works](packages/cale-security/README.md) · [Validation and limits](benchmarks/results/local-security-tools-553-20261106.json).
 

@@ -1,0 +1,37 @@
+{
+  "release": "0.5.555",
+  "base": "38a8e710954ee641d5b3d9f0bbc117d737af842f",
+  "change": "Visible installer checks actual symbolic-link capability and requests one Windows Developer Mode approval only when needed; no background repair/update permission prompts.",
+  "validation": {
+    "passed": 59,
+    "skipped": 0,
+    "subtests_passed": 10,
+    "seconds": 49.24,
+    "files": [
+      "Validation/test_install_environment.py",
+      "Validation/test_install_retry.py",
+      "Validation/test_setup_recovery.py"
+    ],
+    "real_probe_on_current_nonadmin_PC": true,
+    "actual_install_click_handler_exercised": true,
+    "preview_and_retry_handlers_exercised": true,
+    "source_bytes_unchanged": true,
+    "boundary_denials": 0,
+    "owned_job_empty": true
+  },
+  "qualified_changed_files": {
+    "Install-Environment.ps1": "504a7bb8df433086b8345bfe1711d6bb29013b9b51987ae07ffc73f21a9b17e7",
+    "Setup.ps1": "c5d5d3e3536ccdf2451d1731978b5e1a2c2bfb6c66480b181f016c29e2b806b5",
+    "Validation/test_install_environment.py": "fb47b5d586603f44ffd605be12dc848f3b6a80be877422925ede8ae9ca72c0c4"
+  },
+  "limits": [
+    "Elevation and registry mutations are mocked in installer fixtures; not a clean-PC end-to-end installation.",
+    "Current PC Developer Mode was separately enabled after explicit user authorization and four previously skipped link tests passed.",
+    "Managed PCs and declined Windows approval keep their existing policy; capability can remain unavailable.",
+    "No unfinished agent-team prototype changes included."
+  ],
+  "official_sources": [
+    "https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-createsymboliclinkw",
+    "https://learn.microsoft.com/en-us/windows/apps/get-started/developer-mode-features-and-debugging"
+  ]
+}

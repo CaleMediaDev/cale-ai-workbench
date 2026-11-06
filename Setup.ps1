@@ -51,12 +51,16 @@ $footer=New-Object Windows.Forms.Label
 $footer.Text='Cale Media  /  calemedia.com'; $footer.ForeColor=$muted
 $footer.SetBounds(26,516,708,22); $form.Controls.Add($footer)
 $notice = New-Object Windows.Forms.Label
-$notice.Text = 'Click Install to get started. Keep your internet connected during setup. Downloads can take a while.'
+$notice.Text = 'Click Install to get started. Windows may ask permission to enable developer tools for building apps. Keep your internet connected during setup.'
 $notice.ForeColor=$muted
 $notice.SetBounds(26,270,708,48); $form.Controls.Add($notice)
 $stage=New-Object Windows.Forms.Label
 $stage.Text='Ready to install'; $stage.Font=New-Object Drawing.Font('Segoe UI',14,[Drawing.FontStyle]::Bold)
 $stage.SetBounds(26,167,650,50); $form.Controls.Add($stage)
+$windowsTools=New-Object Windows.Forms.Label
+$windowsTools.Text='Windows developer tools are checked automatically.'
+$windowsTools.ForeColor=$muted; $windowsTools.Font=New-Object Drawing.Font('Segoe UI',9)
+$windowsTools.SetBounds(26,210,708,20); $form.Controls.Add($windowsTools)
 $percent=New-Object Windows.Forms.Label
 $percent.Text=''; $percent.TextAlign='MiddleRight'
 $percent.SetBounds(668,167,66,32); $form.Controls.Add($percent)
@@ -109,6 +113,8 @@ $details.Add_Click({
     else { $form.ClientSize=New-Object Drawing.Size(760,560); $details.Text='Details' }
 })
 $script:taskProcess=$null
+$script:symbolicLinkSetup=$null
+$script:symbolicLinkSetupAttempted=$false
 $script:taskLog=Join-Path $env:TEMP ('cale-ai-install-'+[guid]::NewGuid().ToString('N')+'.log')
 $script:taskError=$script:taskLog+'.errors'
 $script:setupStarted=0
@@ -119,6 +125,14 @@ function Update-SetupDetails {
 }
 $timer=New-Object Windows.Forms.Timer; $timer.Interval=1000
 $timer.Add_Tick({
+    if ($script:symbolicLinkSetup -and $script:symbolicLinkSetup.process -and $script:symbolicLinkSetup.process.HasExited) {
+        if (Test-CaleSymbolicLinkCapability) { $script:symbolicLinkSetup.status='ready' }
+        else { $script:symbolicLinkSetup.status='not_enabled' }
+        $script:symbolicLinkSetup.process=$null
+        $script:symbolicLinkSetupMessage=if($script:symbolicLinkSetup.status -eq 'ready'){'Windows developer tools are ready.'}else{'Windows developer tools were not enabled. The rest of setup will continue.'}
+        $windowsTools.Text=$script:symbolicLinkSetupMessage
+        $log.AppendText("`r`n"+$script:symbolicLinkSetupMessage)
+    }
     if ($log.Visible) { Update-SetupDetails }
     $statusPath=Join-Path $path.Text 'LongTasks/install-progress.json'
     if(Test-Path -LiteralPath $statusPath){
@@ -154,6 +168,18 @@ $install.Add_Click({
         $stage.Text='Downloading your AI models';$percent.Text='42%';$bar.Value=42
         Update-CaleAiConnectionReadiness 42
         return
+    }
+    if (-not $script:symbolicLinkSetupAttempted) {
+        $script:symbolicLinkSetupAttempted=$true
+        $notice.Text='Getting Windows developer tools ready. Approve the Windows permission prompt if it appears; downloads will continue afterwards.'
+        $form.Refresh()
+        $script:symbolicLinkSetup=Start-CaleSymbolicLinkSetup
+        $windowsTools.Text=switch($script:symbolicLinkSetup.status) {
+            'ready' {'Windows developer tools are ready.'}
+            'managed' {'This PC is managed. Its administrator controls Windows developer tools.'}
+            'approval_requested' {'Enabling Windows developer tools...'}
+            default {'Windows developer tools were not enabled. The rest of setup will continue.'}
+        }
     }
     $install.Enabled=$false; $open.Enabled=$false
     $script:setupStarted=[DateTimeOffset]::UtcNow.ToUnixTimeSeconds()

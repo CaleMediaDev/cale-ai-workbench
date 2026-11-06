@@ -13,6 +13,79 @@ function Initialize-CalePowerShellEnvironment {
         Select-Object -Unique) -join ';'
 }
 
+# Probe the real capability instead of treating a registry flag as success.
+# The only files created are three entries in a new, private temporary folder.
+function Test-CaleSymbolicLinkCapability {
+    $probeRoot=$null; $probeLink=$null; $probeTarget=$null
+    try {
+        if (-not ('CaleInstallerSymbolicLinks' -as [type])) {
+            Add-Type -TypeDefinition @'
+using System.Runtime.InteropServices;
+public static class CaleInstallerSymbolicLinks {
+    [DllImport("kernel32.dll", CharSet=CharSet.Unicode, SetLastError=true)]
+    [return: MarshalAs(UnmanagedType.U1)]
+    public static extern bool CreateSymbolicLinkW(string link, string target, int flags);
+}
+'@
+        }
+        $probeRoot=Join-Path ([IO.Path]::GetTempPath()) ('CaleLinkCheck-'+[guid]::NewGuid().ToString('N'))
+        [IO.Directory]::CreateDirectory($probeRoot) | Out-Null
+        $probeTarget=Join-Path $probeRoot 'target.txt'; $probeLink=Join-Path $probeRoot 'link.txt'
+        [IO.File]::WriteAllText($probeTarget,'Cale owned symbolic-link capability check')
+        $created=[CaleInstallerSymbolicLinks]::CreateSymbolicLinkW($probeLink,$probeTarget,2)
+        if (-not $created) { return $false }
+        return [IO.File]::ReadAllText($probeLink) -eq 'Cale owned symbolic-link capability check'
+    } catch { return $false }
+    finally {
+        # Nonrecursive deletion cannot follow a directory junction or remove
+        # unrelated files, even when an interrupted probe leaves extra entries.
+        if ($probeLink) { try { [IO.File]::Delete($probeLink) } catch {} }
+        if ($probeTarget) { try { [IO.File]::Delete($probeTarget) } catch {} }
+        if ($probeRoot) { try { [IO.Directory]::Delete($probeRoot,$false) } catch {} }
+    }
+}
+
+function Get-CaleDeveloperModePolicy {
+    $key=$null
+    try {
+        $key=[Microsoft.Win32.Registry]::LocalMachine.OpenSubKey('SOFTWARE\Policies\Microsoft\Windows\Appx')
+        if ($null -eq $key) { return $null }
+        return $key.GetValue('AllowDevelopmentWithoutDevLicense',$null)
+    } catch { return 'unknown' }
+    finally { if ($key) { $key.Dispose() } }
+}
+
+# Called once by the visible install action, never by background repairs or
+# updates. The elevated command is fixed and accepts no project paths/code.
+function Start-CaleSymbolicLinkSetup {
+    if (Test-CaleSymbolicLinkCapability) { return @{status='ready';process=$null} }
+    $policy=Get-CaleDeveloperModePolicy
+    if ($policy -eq 0 -or $policy -eq 'unknown') { return @{status='managed';process=$null} }
+    $command=@'
+$ErrorActionPreference='Stop'
+$key=$null
+try {
+    $policy=[Microsoft.Win32.Registry]::LocalMachine.OpenSubKey('SOFTWARE\Policies\Microsoft\Windows\Appx')
+    try { if ($policy -and $policy.GetValue('AllowDevelopmentWithoutDevLicense',$null) -eq 0) { exit 2 } }
+    finally { if ($policy) { $policy.Dispose() } }
+    $key=[Microsoft.Win32.Registry]::LocalMachine.CreateSubKey('SOFTWARE\Microsoft\Windows\CurrentVersion\AppModelUnlock',$true)
+    $key.SetValue('AllowDevelopmentWithoutDevLicense',1,[Microsoft.Win32.RegistryValueKind]::DWord)
+    $key.Flush()
+    if ($key.GetValue('AllowDevelopmentWithoutDevLicense',$null) -ne 1) { exit 3 }
+} catch { exit 1 }
+finally { if ($key) { $key.Dispose() } }
+'@
+    $encoded=[Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($command))
+    try {
+        $powershell=Join-Path ([Environment]::SystemDirectory) 'WindowsPowerShell\v1.0\powershell.exe'
+        $process=Start-Process -FilePath $powershell -ArgumentList ('-NoProfile -NonInteractive -EncodedCommand '+$encoded) -Verb RunAs -WindowStyle Hidden -PassThru -ErrorAction Stop
+        return @{status='approval_requested';process=$process}
+    } catch {
+        # Refusing UAC or a managed-PC restriction must not break model setup.
+        return @{status='not_enabled';process=$null}
+    }
+}
+
 # A half-extracted archive can leave its expected .exe behind. Run a cheap
 # version command before treating any managed runtime as installed.
 function Test-CaleRunnable([string]$File, [string[]]$Arguments = @('--version')) {

@@ -534,5 +534,113 @@ $request=[IO.File]::ReadAllText((Join-Path $path.Text 'LongTasks/open-supercharg
             self.assertEqual(got, {"retained": True, "retried": True, "request": "grok"})
 
 
+@unittest.skipUnless(os.name == 'nt', 'Windows capability setup only')
+class SymbolicLinkSetupTests(unittest.TestCase):
+    def run_ps(self, body):
+        with tempfile.TemporaryDirectory() as folder:
+            script = Path(folder) / 'capability.ps1'
+            script.write_text("$ErrorActionPreference='Stop'\n. $env:CALE_INSTALL_HELPER\nInitialize-CalePowerShellEnvironment\n" + body, encoding='utf-8')
+            env = os.environ.copy()
+            env.update(CALE_INSTALL_HELPER=str(ROOT / 'Install-Environment.ps1'),
+                       CALE_SETUP_SOURCE=str(ROOT / 'Setup.ps1'), TEMP=folder, TMP=folder)
+            result = subprocess.run(['powershell.exe', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', str(script)],
+                env=env, capture_output=True, text=True, timeout=30)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            return json.loads(result.stdout)
+
+    def test_real_unprivileged_capability_probe_cleans_its_owned_files(self):
+        got = self.run_ps("$ready=Test-CaleSymbolicLinkCapability\n@{ready=$ready;remaining=@(Get-ChildItem -LiteralPath $env:TEMP -Filter 'CaleLinkCheck-*').Count}|ConvertTo-Json -Compress")
+        # This test verifies the probe's output/cleanup, not a promise that every
+        # Windows test host already has Developer Mode. Permission is optional.
+        self.assertIsInstance(got['ready'], bool)
+        self.assertEqual(got['remaining'], 0)
+
+    def test_already_working_pc_never_reads_policy_or_requests_elevation(self):
+        got = self.run_ps("""
+function Test-CaleSymbolicLinkCapability { return $true }
+function Get-CaleDeveloperModePolicy { throw 'Policy lookup not needed' }
+function Start-Process { throw 'Unexpected UAC request' }
+(Start-CaleSymbolicLinkSetup).status|ConvertTo-Json -Compress
+""")
+        self.assertEqual(got, 'ready')
+
+    def test_managed_or_unreadable_policy_never_requests_elevation(self):
+        for policy in ('0', "'unknown'"):
+            with self.subTest(policy=policy):
+                got = self.run_ps("function Test-CaleSymbolicLinkCapability { return $false }\n"
+                    + "function Get-CaleDeveloperModePolicy { return " + policy + " }\n"
+                    + "function Start-Process { throw 'Managed policy must not prompt' }\n"
+                    + "(Start-CaleSymbolicLinkSetup).status|ConvertTo-Json -Compress")
+                self.assertEqual(got, 'managed')
+
+    def test_permission_request_is_hidden_fixed_local_command_not_project_code(self):
+        got = self.run_ps("""
+function Test-CaleSymbolicLinkCapability { return $false }
+function Get-CaleDeveloperModePolicy { return $null }
+function Start-Process {
+    param($FilePath,$ArgumentList,$Verb,$WindowStyle,[switch]$PassThru,$ErrorAction)
+    $script:request=@{path=$FilePath;arguments=$ArgumentList;verb=$Verb;style=$WindowStyle}
+    return @{Id=123;HasExited=$false}
+}
+$result=Start-CaleSymbolicLinkSetup
+$encoded=($script:request.arguments -split ' ')[-1]
+$command=[Text.Encoding]::Unicode.GetString([Convert]::FromBase64String($encoded))
+$tokens=$null;$errors=$null
+[System.Management.Automation.Language.Parser]::ParseInput($command,[ref]$tokens,[ref]$errors)|Out-Null
+@{status=$result.status;request=$script:request;command=$command;parseErrors=@($errors).Count}|ConvertTo-Json -Compress -Depth 5
+""")
+        self.assertEqual(got['status'], 'approval_requested')
+        self.assertEqual(got['request']['verb'], 'RunAs')
+        self.assertEqual(got['request']['style'], 'Hidden')
+        self.assertTrue(got['request']['path'].lower().endswith(r'windows\system32\windowspowershell\v1.0\powershell.exe'))
+        self.assertEqual(got['parseErrors'], 0)
+        self.assertIn("SetValue('AllowDevelopmentWithoutDevLicense',1", got['command'])
+        self.assertIn('SOFTWARE\\Policies\\Microsoft\\Windows\\Appx', got['command'])
+        for forbidden in ('AllowAllTrustedApps', 'http:', 'https:', 'Set-ExecutionPolicy', 'Destination', 'Invoke-Expression'):
+            self.assertNotIn(forbidden, got['command'])
+
+    def test_declined_permission_is_nonfatal(self):
+        got = self.run_ps("""
+function Test-CaleSymbolicLinkCapability { return $false }
+function Get-CaleDeveloperModePolicy { return $null }
+function Start-Process { throw [ComponentModel.Win32Exception]::new(1223) }
+(Start-CaleSymbolicLinkSetup).status|ConvertTo-Json -Compress
+""")
+        self.assertEqual(got, 'not_enabled')
+
+    def install_event(self):
+        return """
+$tokens=$null;$errors=$null
+$ast=[System.Management.Automation.Language.Parser]::ParseFile($env:CALE_SETUP_SOURCE,[ref]$tokens,[ref]$errors)
+if($errors){throw $errors[0].Message}
+$handler=$ast.Find({param($n) $n -is [System.Management.Automation.Language.InvokeMemberExpressionAst] -and $n.Expression -is [System.Management.Automation.Language.VariableExpressionAst] -and $n.Expression.VariablePath.UserPath -eq 'install' -and $n.Member.Value -eq 'Add_Click'},$true).Arguments[0].ScriptBlock.GetScriptBlock()
+$install=[pscustomobject]@{Text='Install';Enabled=$true};$open=[pscustomobject]@{Enabled=$false}
+$stage=[pscustomobject]@{Text=''};$percent=[pscustomobject]@{Text=''}
+$bar=[pscustomobject]@{Value=0;Style='Continuous'};$notice=[pscustomobject]@{Text=''}
+$windowsTools=[pscustomobject]@{Text=''};$path=[pscustomobject]@{Text=$env:TEMP}
+$form=New-Object PSObject;$form|Add-Member ScriptMethod Refresh {}
+$timer=New-Object PSObject;$timer|Add-Member ScriptMethod Start {}
+$log=[pscustomobject]@{Text=''}
+$script:symbolicLinkSetupAttempted=$false;$script:requests=0;$script:launches=0
+function Update-CaleAiConnectionReadiness {param($Percent)}
+function Start-CaleSymbolicLinkSetup {$script:requests++;return @{status='ready';process=$null}}
+function Start-Process {$script:launches++;return @{HasExited=$false}}
+"""
+
+    def test_actual_preview_install_event_never_requests_windows_changes(self):
+        got = self.run_ps(self.install_event() + "\n$Preview=$true;& $handler\n@{requests=$script:requests;launches=$script:launches;progress=$bar.Value}|ConvertTo-Json -Compress")
+        self.assertEqual(got, {'requests': 0, 'launches': 0, 'progress': 42})
+
+    def test_actual_install_event_checks_once_and_retries_backend_without_new_uac(self):
+        got = self.run_ps(self.install_event() + "\n$Preview=$false;& $handler;& $handler\n@{requests=$script:requests;launches=$script:launches;message=$windowsTools.Text}|ConvertTo-Json -Compress")
+        self.assertEqual(got['requests'], 1)
+        self.assertEqual(got['launches'], 2)
+        self.assertEqual(got['message'], 'Windows developer tools are ready.')
+
+    def test_background_repair_paths_never_request_windows_setting_changes(self):
+        for name in ('Install-Backend.ps1', 'Install-Retry.ps1', 'self_update.py', 'setup_recovery.py'):
+            self.assertNotIn('Start-CaleSymbolicLinkSetup', (ROOT / name).read_text(encoding='utf-8'))
+
+
 if __name__ == "__main__":
     unittest.main()
