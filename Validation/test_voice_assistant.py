@@ -228,6 +228,29 @@ class VoiceTests(unittest.TestCase):
                     )
         self.assertEqual(fake.post.call_count, len(responses))
 
+    def test_status_rephrasing_rejects_non_text_content(self):
+        fake = ModuleType("cloud_ai")
+        fake.FAST_MODEL = "cale-fast"
+        fake.post = Mock()
+        valid = "Recipe app: Checking files carefully."
+        with (
+            patch.dict(sys.modules, {"cloud_ai": fake}),
+            patch.object(voice_assistant, "_heavy_gpu_active", return_value=False),
+            patch.object(voice_assistant, "_fast_model_loaded", return_value=True),
+        ):
+            for content in ([valid], {"text": valid}, 42, True, None, valid):
+                with self.subTest(content=content):
+                    fake.post.return_value = {
+                        "choices": [{"message": {"content": content}}]
+                    }
+                    self.assertEqual(
+                        voice_assistant.rephrase_status(
+                            "Recipe app. Checking files.",
+                            required=("Recipe app", "Checking files"),
+                        ),
+                        valid if isinstance(content, str) else "Recipe app: Checking files.",
+                    )
+
     def test_status_rephrasing_rejects_missing_fact(self):
         fake = ModuleType("cloud_ai")
         fake.FAST_MODEL = "cale-fast"
