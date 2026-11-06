@@ -312,10 +312,13 @@ class Player:
 
     def pause(self):
         if self.paused_at is None:
-            self.paused_at = self.now()
+            paused_at = self.now()
+            # Publish the pause only after every idempotent deck command
+            # succeeds, so a partial failure can retry the same intent.
             for deck in (self.active, self.outgoing):
                 if deck is not None:
                     deck.pause()
+            self.paused_at = paused_at
 
     def resume(self):
         if self.paused_at is not None:

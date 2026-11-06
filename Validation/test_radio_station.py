@@ -1201,3 +1201,35 @@ def test_studio_song_acknowledgement_and_errors_survive_radio_polling(tmp_path):
         assert controls.song_notice.get() == errored
     finally:
         window.destroy()
+
+
+@pytest.mark.parametrize("operation", ["pause", "resume"])
+@pytest.mark.parametrize("deck_name,mixing", [("active", False), ("active", True), ("outgoing", True)])
+def test_service_pause_resume_retries_each_failed_deck_without_losing_intent(tmp_path, operation, deck_name, mixing):
+    moment = [0]
+    player = radio.Player(lambda: Deck(lambda: moment[0]), lambda: moment[0])
+    service = radio.Service(tmp_path, player)
+    service.enabled = True
+    player.play(tmp_path / "first.wav")
+    if mixing:
+        player.blend(tmp_path / "second.wav", 8)
+    moment[0] = 2
+    if operation == "resume":
+        service._toggle()
+        assert service.paused
+        moment[0] = 52
+    original_paused = service.paused
+    deck = getattr(player, deck_name)
+    with patch.object(deck, operation, side_effect=RuntimeError("Owned fake deck failure")):
+        with pytest.raises(RuntimeError, match="Owned fake deck failure"):
+            service._toggle()
+    assert service.paused is original_paused
+    assert (player.paused_at is not None) is original_paused
+    moment[0] = 62
+    service._toggle()
+    expected = operation == "pause"
+    assert service.paused is expected
+    assert (player.paused_at is not None) is expected
+    assert all(item.paused is expected for item in (player.active, player.outgoing) if item is not None)
+    service._publish()
+    assert service.snapshot()["paused"] is expected
