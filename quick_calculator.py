@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import ast
 import re
-from decimal import Decimal, localcontext
+from decimal import Context, Decimal, localcontext
 from fractions import Fraction
 
 NUMBER = r"[+-]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?"
@@ -63,7 +63,8 @@ def _display(value: Fraction) -> str:
             denominator //= factor
             exponent += 1
         decimal_places = max(decimal_places, exponent)
-    with localcontext() as context:
+    # Formatting must not inherit a caller's rounding mode or decimal traps.
+    with localcontext(Context()) as context:
         # Scaling to a power-of-ten denominator adds at most this many digits.
         context.prec = (
             len(str(abs(value.numerator))) + decimal_places
