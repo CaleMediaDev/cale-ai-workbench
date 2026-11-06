@@ -217,6 +217,25 @@ def test_file_index_requires_a_match_for_the_existing_files_own_row(tmp_path):
     assert readiness_checklist._file_index_responds(state)
 
 
+@pytest.mark.parametrize("folder_name", ["install#one", "install?one", "install%23one"])
+def test_file_index_health_handles_uri_special_characters(tmp_path, folder_name):
+    state = tmp_path / folder_name / "LongTasks"
+    state.mkdir(parents=True)
+    known = tmp_path / "known.txt"
+    known.touch()
+    database = state / "computer-files.sqlite3"
+    with sqlite3.connect(database) as connection:
+        connection.execute("CREATE TABLE entries (name TEXT, path TEXT, kind TEXT)")
+        connection.execute("CREATE VIRTUAL TABLE entry_fts USING fts5(name)")
+        connection.execute(
+            "INSERT INTO entries(rowid,name,path,kind) VALUES (1,?,?, 'file')",
+            (known.name, str(known)))
+        connection.execute(
+            "INSERT INTO entry_fts(rowid,name) VALUES (1, ?)", (known.name,))
+
+    assert readiness_checklist._file_index_responds(state)
+
+
 def test_completed_scan_marker_does_not_hide_a_missing_search_database(tmp_path):
     state = tmp_path / "LongTasks"
     state.mkdir()
