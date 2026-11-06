@@ -181,6 +181,29 @@ def state_matches(actual, expected) -> bool:
     return type(actual) is type(expected) and actual == expected
 
 
+def observe_accessibility(page, expected: dict) -> dict:
+    """Match a unique ID and the browser's accessible role/name on the same node.
+
+    Role locators use accessible semantics, including associated labels. A
+    correctly named control elsewhere cannot satisfy this target, and input
+    values or arbitrary application exports are never used as label evidence.
+    """
+    if not expected:
+        return {}
+    from playwright.sync_api import Error as PlaywrightError
+    observations = {}
+    for identity, contract in expected.items():
+        try:
+            target = page.locator('#' + identity)
+            matched = (target.count() == 1 and page.get_by_role(
+                contract['role'], name=contract['name'], exact=True).and_(target).count() == 1)
+            observations[identity] = {'matched': matched}
+        except PlaywrightError:
+            observations[identity] = {'matched': False, 'error': 'accessible role/name lookup failed'}
+    return observations
+
+
+
 def observe_state(page, paths: list[str]) -> dict:
     """Read only own data descriptors: no getters, function calls or assignments."""
     if not paths:
@@ -219,7 +242,7 @@ def normalize_spec(spec: dict) -> dict:
         merged = []
         index = 0
         actions = {"reload", "set", "click", "keys", "wait_ms"}
-        assertions = {"expect", "visible", "hidden", "mobile_fit", "state", "row_counts"}
+        assertions = {"expect", "visible", "hidden", "mobile_fit", "state", "row_counts", "accessibility"}
         while index < len(cases):
             current = cases[index]
             following = cases[index + 1] if index + 1 < len(cases) else None
@@ -385,11 +408,20 @@ def validate_spec_data(spec: dict) -> None:
         raise ValueError("mobile_fit must be true or false")
     total_wait = 0
     for case_index, case in enumerate(cases):
-        if not isinstance(case, dict) or not set(case).issubset({"reload", "set", "click", "keys", "wait_ms", "expect", "visible", "hidden", "mobile_fit", "state", "row_counts"}):
-            raise ValueError("Use reload, set, click, keys, wait_ms, expect, visible, hidden, mobile_fit, state and row_counts in each case")
+        if not isinstance(case, dict) or not set(case).issubset({"reload", "set", "click", "keys", "wait_ms", "expect", "visible", "hidden", "mobile_fit", "state", "row_counts", "accessibility"}):
+            raise ValueError("Use reload, set, click, keys, wait_ms, expect, visible, hidden, mobile_fit, state, row_counts and accessibility in each case")
         if "reload" in case and type(case["reload"]) is not bool:
             raise ValueError("reload must be a boolean; it only reloads the current local page")
         validate_state_assertions(case.get("state", {}))
+        accessible = case.get('accessibility', {})
+        if not isinstance(accessible, dict) or len(accessible) > 20:
+            raise ValueError('accessibility must map at most 20 exact IDs to role/name objects')
+        for name, contract in accessible.items():
+            _case_element_id(name, case_index, 'accessibility')
+            if (not isinstance(contract, dict) or set(contract) != {'role', 'name'}
+                    or not isinstance(contract['role'], str) or not re.fullmatch(r'[a-z][a-z-]{0,31}', contract['role'])
+                    or not isinstance(contract['name'], str) or len(contract['name']) > 200):
+                raise ValueError('Each accessibility expectation needs a lowercase role and an exact name string of at most 200 characters')
         row_counts = case.get("row_counts", {})
         if not isinstance(row_counts, dict) or len(row_counts) > 20:
             raise ValueError("row_counts must map at most 20 exact HTML IDs to row counts")
@@ -448,7 +480,7 @@ def validate_spec_data(spec: dict) -> None:
                              "Correct the test specification before changing the app.")
         if "mobile_fit" in case and not isinstance(case["mobile_fit"], bool):
             raise ValueError("mobile_fit must be true or false")
-        if not expected and not case.get("visible") and not case.get("hidden") and not case.get("mobile_fit") and not case.get("state") and not row_counts:
+        if not expected and not case.get("visible") and not case.get("hidden") and not case.get("mobile_fit") and not case.get("state") and not row_counts and not accessible:
             raise ValueError("Each browser case needs an observable assertion. Put set/click/keys and "
                              "expect/visible/hidden/state/row_counts in the same case; correct these test arguments, not the app.")
 
@@ -889,6 +921,12 @@ def check(folder: Path, spec: dict, screenshot: bool = False, *, _browser=None, 
                         failures.append(f"State {path}: {observed['error']}")
                     elif not state_matches(observed["value"], expected):
                         failures.append(f"State {path} was {observed['value']!r}; expected {expected!r}")
+                accessibility_observations = observe_accessibility(page, case.get('accessibility', {}))
+                for identity, contract in case.get('accessibility', {}).items():
+                    matched = accessibility_observations[identity]['matched']
+                    if not matched:
+                        failures.append(f"Accessibility #{identity} did not match role {contract['role']!r} and exact accessible name {contract['name']!r}")
+                        target_failed = True
                 row_observations = {}
                 for element_id, expected in case.get("row_counts", {}).items():
                     observed = after["rows:" + element_id]
@@ -958,6 +996,8 @@ def check(folder: Path, spec: dict, screenshot: bool = False, *, _browser=None, 
                         failures.insert(1, "Native invalid controls: " + json.dumps(invalid, separators=(",", ":"))[:700]
                                         + ". Constraints may block submit before its handler; inspect form/invalid handling.")
                 outcome = {"case": number, "passed": not failures, "failures": failures}
+                if accessibility_observations:
+                    outcome['accessibility'] = accessibility_observations
                 if row_observations:
                     outcome["row_counts"] = row_observations
                 if failures:
@@ -1115,6 +1155,9 @@ def saved_suite(folder: Path, spec: dict, previous: dict | None = None, *,
             expected = {**previous_case.get("expect", {}), **new_case.get("expect", {})}
             states = {**previous_case.get("state", {}), **new_case.get("state", {})}
             counts = {**previous_case.get("row_counts", {}), **new_case.get("row_counts", {})}
+            accessibility = {**previous_case.get('accessibility', {}), **new_case.get('accessibility', {})}
+            if accessibility:
+                case['accessibility'] = accessibility
             if counts:
                 case["row_counts"] = counts
             if states:
@@ -1165,7 +1208,8 @@ def assertion_targets(spec: dict) -> set[str]:
         ["text:" + name for name in case.get("expect", {})]
         + ["visibility:" + name for field in ("visible", "hidden") for name in case.get(field, [])]
         + ["state:" + name for name in case.get("state", {})]
-        + ["rows:" + name for name in case.get("row_counts", {})])}
+        + ["rows:" + name for name in case.get("row_counts", {})]
+        + ["accessibility:" + name for name in case.get("accessibility", {})])}
 
 
 def _select_persistence_witnesses(results, *, max_items=32, max_bytes=24000):
@@ -1385,7 +1429,7 @@ def prepare_assertion_revision(folder: Path, arguments: dict) -> tuple[dict, dic
         raise ValueError("Use the saved case index from the failed checker result")
     supplied = normalize_spec(arguments).get("cases")
     if (not isinstance(supplied, list) or len(supplied) != 1 or not isinstance(supplied[0], dict)
-            or set(supplied[0]) - {"expect", "visible", "hidden", "mobile_fit", "state", "reload", "set", "click", "keys", "wait_ms", "row_counts"}):
+            or set(supplied[0]) - {"expect", "visible", "hidden", "mobile_fit", "state", "reload", "set", "click", "keys", "wait_ms", "row_counts", "accessibility"}):
         raise ValueError("A saved-case repair needs exactly one corrected case, not the full case list. "
                          "Input actions stay fixed unless you explicitly use revise_inputs:true.")
     old = batch["cases"][number - 1]
@@ -1403,7 +1447,7 @@ def prepare_assertion_revision(folder: Path, arguments: dict) -> tuple[dict, dic
                          "preserving the original requirements and unrelated cases.")
     correction = copy.deepcopy(supplied[0])
     repaired = {**copy.deepcopy(old), **correction}
-    for field in ("expect", "state", "row_counts"):
+    for field in ("expect", "state", "row_counts", "accessibility"):
         if field in old or field in correction:
             repaired[field] = {**old.get(field, {}), **correction.get(field, {})}
     # Explicit visibility lists can correct mistaken IDs. Other assertion

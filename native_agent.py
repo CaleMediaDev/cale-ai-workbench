@@ -133,18 +133,11 @@ TOOLS = [
     {"type": "function", "function": {"name": "list_files", "description": "List project files and folders, optionally below a relative directory.", "parameters": {"type": "object", "properties": {"path": {"type": "string"}}, "additionalProperties": False}}},
     {"type": "function", "function": {"name": "read_file", "description": "Read a UTF-8 project file. Use start_line and max_lines for large files. Editable files include the current raw-byte sha256; use that exact hash for the next edit_file call.", "parameters": {"type": "object", "properties": {"path": {"type": "string"}, "start_line": {"type": "integer"}, "max_lines": {"type": "integer"}}, "required": ["path"], "additionalProperties": False}}},
     {"type": "function", "function": {"name": "inspect_project_file", "description": "Read a local PDF, DOCX, XLSX, PPTX, image, or text file in this task folder, including browser downloads. Ask a question for relevant excerpts, or paginate with start_char. Extracted text is cached locally by file contents.", "parameters": {"type": "object", "properties": {"path": {"type": "string"}, "question": {"type": "string"}, "start_char": {"type": "integer"}, "max_chars": {"type": "integer"}}, "required": ["path"], "additionalProperties": False}}},
-    {"type": "function", "function": {"name": "check_document_report", "description": "Check a report against exact excerpts from a local source document and optional add/subtract money arithmetic. Each fact maps source_text to report_text; calculations use two source_texts and one report_text. On success saves a read-only verifier bound to the source bytes. Example: facts=[{source_text:'Payment due: November 15, 2026',report_text:'Final due date: November 15, 2026'}], calculations=[{operation:'subtract',source_texts:['Base fee: $1,280','Setup credit: $180'],report_text:'Net payable: $1,100'}]. facts and calculations may be JSON arrays or JSON-encoded strings.", "parameters": {"type": "object", "properties": {"source_path": {"type": "string"}, "report_path": {"type": "string"}, "facts": {"anyOf": [{"type": "array", "items": {"type": "object", "properties": {"source_text": {"type": "string"}, "report_text": {"type": "string"}}, "required": ["source_text", "report_text"], "additionalProperties": False}}, {"type": "string"}]}, "calculations": {"anyOf": [{"type": "array", "items": {"type": "object", "properties": {"operation": {"type": "string", "enum": ["add", "subtract"]}, "source_texts": {"type": "array", "items": {"type": "string"}}, "report_text": {"type": "string"}}, "required": ["operation", "source_texts", "report_text"], "additionalProperties": False}}, {"type": "string"}]}}, "required": ["source_path", "report_path"], "additionalProperties": False}}},
+    {"type": "function", "function": {"name": "check_document_report", "description": "Verify report excerpts against a local document and optional money add/subtract. facts:[{source_text:'Due Nov 15',report_text:'Final due Nov 15'}]. calculations:[{operation:'subtract',source_texts:['Fee $1280','Credit $180'],report_text:'Net $1100'}]. Both accept arrays or JSON strings. Saves a read-only verifier bound to source bytes.", "parameters": {"type": "object", "properties": {"source_path": {"type": "string"}, "report_path": {"type": "string"}, "facts": {"anyOf": [{"type": "array", "items": {"type": "object", "properties": {"source_text": {"type": "string"}, "report_text": {"type": "string"}}, "required": ["source_text", "report_text"], "additionalProperties": False}}, {"type": "string"}]}, "calculations": {"anyOf": [{"type": "array", "items": {"type": "object", "properties": {"operation": {"type": "string", "enum": ["add", "subtract"]}, "source_texts": {"type": "array", "items": {"type": "string"}}, "report_text": {"type": "string"}}, "required": ["operation", "source_texts", "report_text"], "additionalProperties": False}}, {"type": "string"}]}}, "required": ["source_path", "report_path"], "additionalProperties": False}}},
     {"type": "function", "function": {"name": "transform_csv", "description": "Clean a project CSV with a real CSV parser. Use transforms such as title for names/cities and digits for phones, exact_lengths to discard invalid values, and unique_by to keep the first matching row. Example: transforms={name:title,phone:digits,city:title}, exact_lengths={phone:10}, unique_by=[phone]. Creates a separate output file; does not change the source.", "parameters": {"type": "object", "properties": {"input_path": {"type": "string"}, "output_path": {"type": "string"}, "transforms": {"type": "object", "additionalProperties": {"type": "string", "enum": ["keep", "trim", "title", "upper", "lower", "digits"]}}, "exact_lengths": {"type": "object", "additionalProperties": {"type": "integer"}}, "unique_by": {"type": "array", "items": {"type": "string"}}}, "required": ["input_path", "output_path"], "additionalProperties": False}}},
     {'type': 'function',
      'function': {'name': 'check_webapp',
-                  'description': 'Offline HTML checks. set fills IDs/select value or label, not submit. click submits; '
-                                 "target ID/button name or {button:'Delete',row_text:'Paper'}. keys:[{key:'ArrowRight',hold_ms:200}]. "
-                                 'expect literal text; visible/hidden IDs/text. '
-                                 'row_counts:{tbodyId:2}: table includes headers; tbody data only. state reads plain paths, '
-                                 'no calls/getters; reload retains storage. Saved refs+one case repair assertions; '
-                                 'revise_inputs:true changes actions. retarget_assertion:{from:\'text:badId\',to:\'rows:items\'} '
-                                 'with cases:[{row_counts:{items:1}}] replaces one target, never inputs; no revise_inputs combo. '
-                                 'Selected case must pass; other cases/requirements stay. Saves verifier; repair never completes task.',
+                  'description': "Offline HTML: set fills ID/select value or label; click submits (ID/button name or {button:'Delete',row_text:'Paper'}). keys:[{key:'ArrowRight',hold_ms:200}]. expect literal text; visible/hidden IDs/text. row_counts:{tbodyId:2}; table includes headers; tbody data only. accessibility:{id:{role:'textbox',name:'Description'}} checks that element's role/name. state: plain paths, no calls/getters. reload preserves storage. Saved refs+one case repair assertions; revise_inputs:true repairs actions. retarget_assertion:{from:'text:badId',to:'rows:items'} replaces one target, never inputs; cannot combine revise_inputs. Other cases/requirements stay; selected case must pass. Saves verifier; repair never completes task.",
                   'parameters': {'type': 'object',
                                  'properties': {'path': {'type': 'string'},
                                                 'viewport_width': {'type': 'integer'},
@@ -176,6 +169,12 @@ TOOLS = [
                                                                                               'row_counts': {'type': 'object', 'maxProperties': 20,
                                                                                                              'propertyNames': {'pattern': '^[A-Za-z][A-Za-z0-9_-]{0,63}$', 'not': {'pattern': '[^A-Za-z0-9_-]'}},
                                                                                                              'additionalProperties': {'type': 'integer', 'minimum': 0, 'maximum': 10000}},
+                                                                                              'accessibility': {'type': 'object', 'maxProperties': 20,
+                                                                                                                'propertyNames': {'pattern': '^[A-Za-z][A-Za-z0-9_-]{0,63}$', 'not': {'pattern': '[^A-Za-z0-9_-]'}},
+                                                                                                                'additionalProperties': {'type': 'object', 'properties': {
+                                                                                                                    'role': {'type': 'string', 'pattern': '^[a-z][a-z-]{0,31}$', 'not': {'pattern': '[^a-z-]'}},
+                                                                                                                    'name': {'type': 'string', 'maxLength': 200}},
+                                                                                                                    'required': ['role', 'name'], 'additionalProperties': False}},
                                                                                               'state': {'type': 'object'},
                                                                                               'visible': {'type': 'array',
                                                                                                           'items': {'type': 'string'}},
@@ -2107,6 +2106,7 @@ def prompt(project: dict) -> str:
         "accumulate and each starts from a fresh page; reuse a sequence to correct its expectations. "
         "An empty expect value asserts cleared DOM text; hidden asserts invisibility even if text remains. "
         "Use row_counts:{tbodyId:2} for DOM rows, not expect or JS expressions; table includes headers, tbody data only. "
+        "Use accessibility:{controlId:{role:'textbox',name:'Description'}} for accessible labels/roles; empty input DOM text does not prove them. "
         "Choose the outcome required by the user. "
         "For canvas/game data not shown as DOM text, export the actual live state and assert it "
         "with state={'game.player.x':{'gt':300}} after a Right key action, or "
@@ -3399,7 +3399,7 @@ def focused_step_repair_request(project: dict, state: dict, available: list, not
                 parameters["properties"]["cases"] = cases
             cases.update(minItems=1, maxItems=1)
             properties = cases["items"]["properties"]
-            for field in ("set", "click", "keys", "reload", "wait_ms"):
+            for field in ("set", "click", "keys", "reload", "wait_ms", "accessibility"):
                 properties.pop(field, None)
             check_tool["function"]["description"] = "Repair only the pinned saved assertion case. Inputs and other cases are retained; the selected case must actually pass before saving. No completion claim."
             if sources:
@@ -3447,6 +3447,13 @@ def focused_step_repair_request(project: dict, state: dict, available: list, not
             else:
                 properties["click"] = {"type": "array", "const": copy.deepcopy(original_case.get("click", []))}
                 case_schema["required"] = ["set"]
+            # This specialist repairs input actions, not accessible semantics.
+            # An additive checker capability must not silently widen its scope.
+            if 'accessibility' in original_case:
+                properties['accessibility'] = {'const': copy.deepcopy(original_case['accessibility'])}
+                case_schema['required'].append('accessibility')
+            else:
+                properties.pop('accessibility', None)
             instruction = (
                 "You are Cale's native project worker. This turn only decides whether the active failed "
                 "test forgot to submit a form. Read the original requirements and observed control IDs. "

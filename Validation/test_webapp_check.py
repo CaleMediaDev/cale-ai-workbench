@@ -1,6 +1,7 @@
 """Browser checks must exercise visible behavior and remain repeatable."""
 
 import json
+import hashlib
 import subprocess
 import tempfile
 from decimal import Decimal
@@ -2668,3 +2669,115 @@ def test_persistence_witness_metadata_cannot_turn_real_browser_pass_into_output_
     assert preview['persistence_witnesses_limited'] is True
     assert preview['persistence_witness_count']==32
     assert result==original  # Full host evidence/receipts are never truncated.
+
+
+def accessible_page(tmp_path):
+    page = tmp_path/'index.html'
+    page.write_text('''<label for="desc">Description</label><input id="desc">
+<label for="amt">Amount</label><input id="amt" type="number">
+<label for="cat">Category</label><select id="cat"><option>Supplies</option></select>
+<button id="add">Add expense</button>''', encoding='utf-8')
+    return page
+
+
+def test_accessibility_assertions_check_real_roles_and_exact_names(tmp_path):
+    page = accessible_page(tmp_path)
+    raw = page.read_bytes()
+    spec = {'path': 'index.html', 'cases': [{'accessibility': {
+        'desc': {'role': 'textbox', 'name': 'Description'},
+        'amt': {'role': 'spinbutton', 'name': 'Amount'},
+        'cat': {'role': 'combobox', 'name': 'Category'},
+        'add': {'role': 'button', 'name': 'Add expense'}}}]}
+    assert webapp_check.check(tmp_path, spec)['passed']
+    assert page.read_bytes() == raw
+
+
+@pytest.mark.parametrize('change', ['wrong-name', 'wrong-role', 'other-element', 'duplicate-id', 'hidden'])
+def test_accessibility_cannot_pass_from_unrelated_or_inaccessible_controls(tmp_path, change):
+    page = accessible_page(tmp_path)
+    if change == 'wrong-name':
+        page.write_text(page.read_text().replace('Description</label>', 'Wrong description</label>'))
+    elif change == 'wrong-role':
+        page.write_text(page.read_text().replace('<input id="desc">', '<input id="desc" type="number">'))
+    elif change == 'other-element':
+        page.write_text('<input id="desc" aria-label="Wrong"><input id="other" aria-label="Description">')
+    elif change == 'duplicate-id':
+        page.write_text(page.read_text()+'<input id="desc" aria-label="Description">')
+    else:
+        page.write_text(page.read_text().replace('<input id="desc">', '<input id="desc" hidden>'))
+    verdict = webapp_check.check(tmp_path, {'path': 'index.html', 'cases': [
+        {'accessibility': {'desc': {'role': 'textbox', 'name': 'Description'}}}]})
+    assert not verdict['passed']
+    assert verdict['cases'][0]['accessibility']['desc']['matched'] is False
+
+
+def test_saved_accessibility_checks_preserve_other_targets_and_replay_real_dom(tmp_path):
+    page = accessible_page(tmp_path)
+    first = {'path': 'index.html', 'cases': [{'accessibility': {'desc': {'role': 'textbox', 'name': 'Description'}}}]}
+    second = {'path': 'index.html', 'cases': [{'accessibility': {'add': {'role': 'button', 'name': 'Add expense'}}}]}
+    assert webapp_check.check(tmp_path, first)['passed']
+    webapp_check.save_verifier(tmp_path, first, accumulate=True)
+    assert webapp_check.check(tmp_path, second)['passed']
+    webapp_check.save_verifier(tmp_path, second, accumulate=True)
+    saved = tmp_path/'.local-ai/webapp-check.json'
+    suite = json.loads(saved.read_bytes())
+    assert set(suite['checks'][0]['cases'][0]['accessibility']) == {'desc', 'add'}
+    assert webapp_check.run_saved_checks(tmp_path, saved)['passed']
+    page.write_text(page.read_text().replace('Description</label>', 'Unlabelled correctly?</label>'))
+    assert not webapp_check.run_saved_checks(tmp_path, saved)['passed']
+
+
+@pytest.mark.parametrize('bad', [[], {'#desc': {'role': 'textbox', 'name': 'Description'}},
+    {'desc': {'role': 'textbox'}}, {'desc': {'role': 'textbox', 'name': True}},
+    {'desc': {'role': 'button[secret]', 'name': 'Description'}},
+    {'desc': {'role': 'textbox', 'name': 'x'*201}},
+    {'desc': {'role': 'textbox', 'name': 'Description', 'script': 'bad'}}])
+def test_accessibility_spec_rejects_unbounded_or_executable_shapes(bad):
+    with pytest.raises(ValueError):
+        webapp_check.validate_spec_data({'path': 'index.html', 'cases': [{'accessibility': bad}]})
+
+
+def test_accessibility_case_runs_through_native_schema_and_sql_step(tmp_path):
+    from jsonschema import validate, ValidationError
+    page = accessible_page(tmp_path)
+    original = page.read_bytes()
+    arguments = {'path': 'index.html', 'cases': [
+        {'accessibility': {'desc': {'role': 'textbox', 'name': 'Description'}}}]}
+    schema = next(tool['function']['parameters'] for tool in native_agent.TOOLS
+                  if tool['function']['name'] == 'check_webapp')
+    validate(arguments, schema)
+    with pytest.raises(ValidationError):
+        validate({'path': 'index.html', 'cases': [
+            {'accessibility': {'desc': {'role': 'textbox', 'name': True}}}]}, schema)
+    active = task_context.plan_steps(tmp_path, [{'phase': 'Accessibility', 'title': 'Check the requested Description label',
+        'check_tool': 'check_webapp', 'check_arguments': arguments}])['active']
+    result = native_agent.execute_tool(tmp_path, 'task_steps', {'action': 'complete', 'step_id': active['id']})
+    assert result.startswith('{'), result
+    verdict = json.loads(result)
+    assert verdict['done'] == 1 and verdict['remaining'] == 0
+    assert page.read_bytes() == original
+
+
+def test_accessibility_revision_preserves_inputs_and_unrelated_accessible_targets(tmp_path):
+    page = accessible_page(tmp_path)
+    spec = {'path': 'index.html', 'cases': [{'set': {'amt': '13.50'}, 'expect': {'add': 'Add expense'},
+        'accessibility': {'desc': {'role': 'textbox', 'name': 'Description'},
+                          'amt': {'role': 'textbox', 'name': 'Amount'}}}]}
+    assert not webapp_check.check(tmp_path, spec)['passed']
+    webapp_check.save_verifier(tmp_path, spec, accumulate=True)
+    saved = tmp_path/'.local-ai/webapp-check.json'
+    arguments = {'path': 'index.html', 'saved_sequence': 1, 'saved_case': 1,
+        'suite_sha256': hashlib.sha256(saved.read_bytes()).hexdigest(),
+        'cases': [{'accessibility': {'amt': {'role': 'spinbutton', 'name': 'Amount'}}}]}
+    repaired, revision = webapp_check.prepare_assertion_revision(tmp_path, arguments)
+    assert repaired['cases'][0]['set'] == spec['cases'][0]['set']
+    assert repaired['cases'][0]['expect'] == spec['cases'][0]['expect']
+    assert repaired['cases'][0]['accessibility']['desc'] == spec['cases'][0]['accessibility']['desc']
+    candidate = webapp_check.check(tmp_path, repaired)
+    assert candidate['passed']
+    webapp_check.save_verifier(tmp_path, repaired, accumulate=True,
+        expected_sha=revision['previous_sha256'], replace_sequence=revision['replace_sequence'],
+        expected_page_sha=candidate['page_sha256'])
+    assert webapp_check.run_saved_checks(tmp_path, saved)['passed']
+    page.write_text(page.read_text().replace('Description</label>', 'Wrong</label>'))
+    assert not webapp_check.run_saved_checks(tmp_path, saved)['passed']

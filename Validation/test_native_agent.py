@@ -5100,7 +5100,7 @@ def test_scoped_invalid_definition_explicit_id_cannot_overwrite_newer_check_duri
     assert (folder / "index.html").read_text() == source
 
 
-def retained_input_revision_native_fixture(tmp_path, name, *, multiple_cases=False, nonfillable_later=False):
+def retained_input_revision_native_fixture(tmp_path, name, *, multiple_cases=False, nonfillable_later=False, accessibility=False):
     """Keep a bad no-submit case alongside a real future validation failure."""
     import webapp_check
     item = project(tmp_path / name)
@@ -5122,6 +5122,8 @@ def retained_input_revision_native_fixture(tmp_path, name, *, multiple_cases=Fal
     page.write_text(source)
     bad = {"path": "index.html", "cases": [{"set": {"description": "Coffee", "amount": "2"},
                                                 "expect": {"rows": "1 row"}}]}
+    if accessibility:
+        bad['cases'][0]['accessibility'] = {'add': {'role': 'button', 'name': 'Add expense'}}
     if multiple_cases:
         bad["cases"].append({"set": {"description-label" if nonfillable_later else "description": "Tea", "amount": "3"},
                              "expect": {"rows": "2 rows"}})
@@ -8521,3 +8523,31 @@ def test_recovery_projection_blob_queue_cell_returns_unknown_and_preserves_notes
     assert "5/8 component checks recorded passed" not in content
     assert "SQLite step 6" not in content
     assert database.read_bytes() == before
+
+
+@pytest.mark.parametrize('with_accessibility', [False, True])
+def test_submission_repair_cannot_add_or_weaken_accessibility_assertions(tmp_path, with_accessibility):
+    from jsonschema import validate, ValidationError
+    item, folder, source, bad, future, active, revision, runtime = retained_input_revision_native_fixture(
+        tmp_path, 'submission-a11y', accessibility=with_accessibility)
+    state = {'step_focus_turns': 1}
+    notice = native_agent.active_step_repair_notice(item, state)
+    assert notice
+    request = native_agent.focused_step_repair_request(item, state, native_agent.TOOLS, notice, 65536)
+    assert request
+    schema = request['tools'][0]['function']['parameters']
+    case = schema['properties']['cases']['items']
+    if with_accessibility:
+        original = bad['cases'][0]['accessibility']
+        assert case['properties']['accessibility'] == {'const': original}
+        assert 'accessibility' in case['required']
+        revision['cases'][0]['accessibility'] = original
+        validate(revision, schema)
+        changed = copy.deepcopy(revision)
+        changed['cases'][0]['accessibility']['add']['name'] = 'Wrong'
+        with pytest.raises(ValidationError):
+            validate(changed, schema)
+    else:
+        assert 'accessibility' not in case['properties']
+        validate(revision, schema)
+    assert (folder/'index.html').read_bytes() == source

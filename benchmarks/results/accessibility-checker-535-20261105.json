@@ -1,0 +1,77 @@
+{
+  "release": "0.5.535",
+  "base": "b32c81f36ebb0c5bf4570088d0af77d1c486160c",
+  "sha256": {
+    "webapp_check.py": "f74c09be67b0ad4622ec73733a6ea07bcffd017513cac20eb97a04d24bf854b4",
+    "native_agent.py": "310d0d95395287597771c91b7d9d6e3d14bfb36c20a1702a0eb8c4303ea18ed1",
+    "Validation/test_webapp_check.py": "178386cf28fd0e51f1c18c1547168c3381a6369da6e880f6dff66d11b12312a0",
+    "Validation/test_native_agent.py": "011b3d3d468cc617526eef45d5c3abd8e168cef65a26f3d63b76cd928f0cc0a9"
+  },
+  "validation": {
+    "affected_modules": {
+      "exit_code": 0,
+      "seconds": 14.842528999957722,
+      "sha256": {
+        "webapp_check.py": "f74c09be67b0ad4622ec73733a6ea07bcffd017513cac20eb97a04d24bf854b4",
+        "native_agent.py": "310d0d95395287597771c91b7d9d6e3d14bfb36c20a1702a0eb8c4303ea18ed1",
+        "Validation/test_webapp_check.py": "178386cf28fd0e51f1c18c1547168c3381a6369da6e880f6dff66d11b12312a0",
+        "Validation/test_native_agent.py": "011b3d3d468cc617526eef45d5c3abd8e168cef65a26f3d63b76cd928f0cc0a9"
+      },
+      "source_bytes_unchanged": true,
+      "log_tail": "......................                                                   [100%]\n22 passed, 834 deselected in 14.05s\n",
+      "broad_before_description_fix": {
+        "exit_code": 1,
+        "seconds": 803.3991926000454,
+        "sha256": {
+          "webapp_check.py": "f74c09be67b0ad4622ec73733a6ea07bcffd017513cac20eb97a04d24bf854b4",
+          "native_agent.py": "e0c764b7e51404ffe78a4c652e9e59822a8fab4532b7a0754492b015938e530c",
+          "Validation/test_webapp_check.py": "178386cf28fd0e51f1c18c1547168c3381a6369da6e880f6dff66d11b12312a0",
+          "Validation/test_native_agent.py": "011b3d3d468cc617526eef45d5c3abd8e168cef65a26f3d63b76cd928f0cc0a9"
+        },
+        "source_bytes_unchanged": true,
+        "log_tail": "........................................................................ [  8%]\n........................................................................ [ 16%]\n........................................................................ [ 25%]\n..............................................................s......... [ 33%]\n........................................................................ [ 42%]\n........................................................................ [ 50%]\n........................................................................ [ 58%]\n........................................................................ [ 67%]\n........................................................................ [ 75%]\n........................................F............................... [ 84%]\n........................................................................ [ 92%]\n................................................................         [100%]\n================================== FAILURES ===================================\n___ test_row_counts_host_schema_supports_public_planning_and_repair_counts ____\nValidation\\test_native_agent.py:6393: in test_row_counts_host_schema_supports_public_planning_and_repair_counts\n    assert \"row_counts:{tbodyId:2}\" in description and \"table includes headers\" in description\nE   assert ('row_counts:{tbodyId:2}' in \"Offline HTML: set fills ID/select value or label; click submits (ID/button name or {button:'Delete',row_text:'Paper'}...ne revise_inputs. Other cases/requirements stay; selected case must pass. Saves verifier; repair never completes task.\")\n=========================== short test summary info ===========================\nFAILED Validation/test_native_agent.py::test_row_counts_host_schema_supports_public_planning_and_repair_counts\n1 failed, 854 passed, 1 skipped in 802.57s (0:13:22)\n",
+        "modules": [
+          "Validation/test_webapp_check.py",
+          "Validation/test_native_agent.py"
+        ],
+        "limits": [
+          "Both affected modules only; not the full installed suite or a real protected-app model continuation."
+        ]
+      },
+      "selector": "accessibility or native_context_rebuilds_from_durable_plan or oversized_latest_tool_exchange_is_trimmed_not_dropped or helper_offer_schema_does_not_mutate_global_catalog or row_counts_host_schema_supports_public_planning_and_repair_counts",
+      "limits": [
+        "Final bytes tested in 22 targeted cases. The broader immediately preceding run passed854, skipped1 and failed the restored description example; it was not rerun in full after that literal-only change."
+      ]
+    }
+  },
+  "tool_catalog": {
+    "all_existing_argument_schemas_unchanged": true,
+    "old_estimated_tool_tokens": 4282,
+    "candidate_estimated_tool_tokens": 4279,
+    "source_sha256": "310d0d95395287597771c91b7d9d6e3d14bfb36c20a1702a0eb8c4303ea18ed1",
+    "method": "Original pinned source definitions loaded only in an isolated Python process; compare all tool contracts after stripping the additive accessibility field and descriptions.",
+    "description_example_restored": {
+      "before_source_sha256": "e0c764b7e51404ffe78a4c652e9e59822a8fab4532b7a0754492b015938e530c",
+      "exact_replacement": {
+        "row_counts counts headers on tables, only data on tbody.": "row_counts:{tbodyId:2}; table includes headers; tbody data only."
+      },
+      "only_source_change": true
+    }
+  },
+  "changes": [
+    "Check an exact unique element ID against the browser-computed accessible role and exact name.",
+    "Retain accessibility assertions in saved suites and pin them during input-only repairs.",
+    "Shorter tool descriptions preserve small-context plan and tool-exchange capacity without loosening schemas."
+  ],
+  "regressions": {
+    "original_534_new_accessibility_tests": "9 failed, 7 passed; old source loaded only in the isolated baseline child process.",
+    "initial_candidate_combined": "3 failed, 852 passed, 1 skipped; catalog growth squeezed plan/tool context and exceeded one offered-schema budget.",
+    "second_broad_run": "1 failed, 854 passed, 1 skipped; sole failure was a required row-count description example, restored without other source changes.",
+    "corrected": "Tool descriptions shortened; existing validation rules and test budgets unchanged."
+  },
+  "limits": [
+    "Final bytes:22 targeted tests only. Immediately preceding broader run:854 passed,1 skipped,1 description-example failure; broad run not repeated after its literal-only correction.",
+    "No proof of autonomous app completion or delivery of another PC's unconfirmed PR.",
+    "No private assertion-facade or model-routing experiment included."
+  ]
+}
