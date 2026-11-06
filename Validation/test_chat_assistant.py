@@ -469,6 +469,20 @@ def test_decimal_song_durations_are_not_parsed_as_the_fractional_digits(prompt, 
     assert chat_assistant.music_request(prompt)["duration_seconds"] == seconds
 
 
+@pytest.mark.parametrize("prompt, seconds", [
+    ("Make a .5-minute song", 30),
+    ("Make a .25 minute and 30 second song", 45),
+    ("Make a 1 minute and .5 second song", 60),
+])
+def test_leading_decimal_song_durations_keep_the_fraction(prompt, seconds):
+    assert chat_assistant.music_request(prompt)["duration_seconds"] == seconds
+
+
+def test_leading_decimal_song_duration_enforces_minimum():
+    with pytest.raises(ValueError, match="10 seconds to 10 minutes"):
+        chat_assistant.music_request("Make a .5-second jingle")
+
+
 def test_decimal_song_duration_still_enforces_render_limit():
     with pytest.raises(ValueError, match="10 seconds to 10 minutes"):
         chat_assistant.music_request("Make a 10.5-minute song")
