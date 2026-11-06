@@ -356,6 +356,25 @@ def test_vocal_exclusions_use_the_shared_negation_vocabulary():
     assert "Sparse chopped vocal syllables" in music_style.enhance(texture)
 
 
+def test_negated_lead_singer_preserves_vocal_texture():
+    for exclusion in ("no lead singer", "without a lead singer",
+                      "avoid any lead singer", "don't want a lead singer"):
+        request = "Heavy dubstep with vocal chops, " + exclusion
+        assert not music_style.explicit_lead_vocals(request)
+        assert not music_style.unambiguous_vocal_song(request)
+        assert not music_style.requires_sustained_vocals(request)
+        caption = music_style.enhance(request)
+        assert "Sparse chopped vocal syllables" in caption
+        assert exclusion not in caption
+        assert not music_style.requires_sustained_vocals(caption)
+        assert music_style.enhance(caption) == caption
+
+    positive = "Heavy dubstep with vocal chops and a lead singer"
+    assert music_style.explicit_lead_vocals(positive)
+    assert music_style.unambiguous_vocal_song(positive)
+    assert music_style.requires_sustained_vocals(positive)
+
+
 def test_explicit_bpm_is_parsed_for_music_engine():
     assert music_style.requested_bpm("Heavy dubstep at 150 BPM") == 150
     assert music_style.requested_bpm("80-bpm synth groove") == 80
