@@ -218,6 +218,22 @@ class AutoRouteTests(unittest.TestCase):
                 self.assertEqual(task_size([{"role": "user", "content": request}]),
                                  "balanced")
 
+    def test_artifact_explanations_use_middle_tier_but_procedural_questions_stay_quick(self):
+        for request in (
+            "Explain this screenshot.",
+            "Explain the attached PDF.",
+            "Describe this image.",
+        ):
+            with self.subTest(request=request):
+                self.assertEqual(
+                    task_size([{"role": "user", "content": request}]),
+                    "balanced",
+                )
+        self.assertEqual(
+            task_size([{"role": "user", "content": "Explain how to create a folder."}]),
+            "quick",
+        )
+
     def test_media_part_and_short_project_request_escalate(self):
         self.assertEqual(task_size([{"role": "user", "content": [
             {"type": "text", "text": "What is in this?"},
