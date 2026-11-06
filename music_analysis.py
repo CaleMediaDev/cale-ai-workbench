@@ -31,7 +31,12 @@ def _best_chord(chroma):
         for quality, intervals in (("major", MAJOR), ("minor", MINOR)):
             selected = sum(strength[(root + interval) % 12] for interval in intervals)
             scores.append((float(selected / strength.sum()), f"{NOTES[root]} {quality}"))
-    score, name = max(scores)
+    scores.sort(reverse=True)
+    score, name = scores[0]
+    # Equal pitch evidence for different triads cannot identify a chord;
+    # do not let alphabetical ordering of chord names decide the result.
+    if score == scores[1][0]:
+        return None
     return name if score >= 0.35 else None
 
 
