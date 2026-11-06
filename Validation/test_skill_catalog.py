@@ -411,6 +411,34 @@ class SkillCatalogTests(unittest.TestCase):
             installed.read_text(encoding="utf-8"), "My unreadable local notes"
         )
 
+    def test_preserves_inaccessible_parent_and_continues_sync(self):
+        skill_catalog.sync(self.root)
+        installed = self.root / "data/skills/creative/frontend-ui-engineering/SKILL.md"
+        installed.write_text("My local notes", encoding="utf-8")
+        source = self.root / "vendor/agent-skills/frontend-ui-engineering/SKILL.md"
+        source.write_text("Updated frontend guidance", encoding="utf-8")
+        other_source = self.root / "vendor/agent-skills/observability-and-instrumentation/SKILL.md"
+        other_source.write_text("Updated upstream", encoding="utf-8")
+        original_is_symlink = Path.is_symlink
+
+        def guarded_is_symlink(path):
+            if path == installed.parent:
+                raise PermissionError("Parent metadata is inaccessible")
+            return original_is_symlink(path)
+
+        with mock.patch.object(Path, "is_symlink", guarded_is_symlink):
+            result = skill_catalog.sync(self.root)
+
+        self.assertEqual(result, {"installed": 0, "updated": 1, "preserved": 1})
+        self.assertEqual(installed.read_text(encoding="utf-8"), "My local notes")
+        updated = self.root / "data/skills/software-development/observability-and-instrumentation/SKILL.md"
+        self.assertEqual(updated.read_text(encoding="utf-8"), "Updated upstream")
+        self.assertEqual(
+            skill_catalog.sync(self.root),
+            {"installed": 0, "updated": 0, "preserved": 1},
+        )
+        self.assertEqual(installed.read_text(encoding="utf-8"), "My local notes")
+
     def test_preserves_local_skill_edits(self):
         skill_catalog.sync(self.root)
         installed = self.root / "data/skills/creative/frontend-ui-engineering/SKILL.md"
