@@ -24,6 +24,11 @@ def _nonempty_file(path):
     except (FileNotFoundError, NotADirectoryError):
         # Missing files or non-directory ancestors mean the model needs repair.
         return False
+    except OSError as exc:
+        if exc.errno == errno.ELOOP:
+            # A symlink loop cannot resolve to a usable model file.
+            return False
+        raise
 
 
 def ready():
