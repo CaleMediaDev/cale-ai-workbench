@@ -270,7 +270,10 @@ def test_failed_publication_leaves_output_empty_for_retry(tmp_path):
 
 
 @pytest.mark.parametrize("interrupt_copy", [False, True])
-def test_publication_without_hard_links_is_retryable(tmp_path, interrupt_copy):
+@pytest.mark.parametrize("link_errno", [
+    music_stems.errno.ENOTSUP, music_stems.errno.EXDEV, music_stems.errno.EPERM,
+])
+def test_publication_without_hard_links_is_retryable(tmp_path, interrupt_copy, link_errno):
     import errno
     from contextlib import nullcontext
     from types import SimpleNamespace
@@ -304,7 +307,7 @@ def test_publication_without_hard_links_is_retryable(tmp_path, interrupt_copy):
     ), patch.object(
         music_stems.subprocess, "run", side_effect=render
     ), patch.object(
-        music_stems.os, "link", side_effect=OSError(errno.ENOTSUP, "Hard links unsupported")
+        music_stems.os, "link", side_effect=OSError(link_errno, "Hard links unsupported")
     ), patch.object(
         music_stems.shutil, "copyfileobj", side_effect=copy_with_interruption
     ):

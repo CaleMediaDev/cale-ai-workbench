@@ -165,7 +165,7 @@ def separate_stems(source_path: str, output_dir: str) -> dict:
                     try:
                         os.link(path, destination)
                     except OSError as exc:
-                        if exc.errno not in {errno.ENOTSUP, errno.EXDEV}:
+                        if exc.errno not in {errno.ENOTSUP, errno.EXDEV, errno.EPERM}:
                             raise
                         publication = None
                         try:
