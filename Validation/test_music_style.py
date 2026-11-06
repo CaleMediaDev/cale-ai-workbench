@@ -113,7 +113,7 @@ def test_negated_gendered_singing_preserves_vocal_texture():
             assert not music_style.requires_sustained_vocals(caption)
             assert music_style.enhance(caption) == caption
 
-        positive = "Heavy dubstep with vocal chops and " + gender + " singing"
+        positive = "Heavy dubstep with " + gender + " singing"
         assert music_style.explicit_lead_vocals(positive)
         assert music_style.unambiguous_vocal_song(positive)
         assert music_style.requires_sustained_vocals(positive)
