@@ -73,6 +73,36 @@ class BusinessContactTests(unittest.TestCase):
         )
         self.assertEqual(result["sources"][0]["email_addresses"], ["hello@puremichiganlawncare.com"])
 
+    def test_fetch_disables_curl_globbing_for_literal_query_brackets(self):
+        import json
+        from pathlib import Path
+        from types import SimpleNamespace
+
+        url = "https://example.org/search?filter[status]=active"
+
+        def download(command, **kwargs):
+            self.assertIn("--globoff", command)
+            self.assertEqual(command[command.index("--url") + 1], url)
+            Path(command[command.index("--output") + 1]).write_bytes(b"Results")
+            return SimpleNamespace(
+                returncode=0,
+                stderr=b"",
+                stdout=json.dumps({
+                    "http_code": 200,
+                    "content_type": "text/plain",
+                }).encode("utf-8"),
+            )
+
+        with (
+            patch.object(web_tools, "check_url", return_value=(
+                web_tools.urlsplit(url), ["93.184.216.34"],
+            )),
+            patch.object(web_tools, "curl_executable", return_value="curl"),
+            patch.object(web_tools.subprocess, "run", side_effect=download),
+        ):
+            result = web_tools.fetch(url)
+        self.assertEqual(result, (url, "Results", "text/plain", 200))
+
     def test_fetch_decodes_charset_with_optional_whitespace(self):
         import json
         from pathlib import Path

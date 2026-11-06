@@ -69,6 +69,7 @@ def fetch(url):
             command = [
                 curl_executable(),
                 "--disable",
+                "--globoff",
                 "--silent",
                 "--show-error",
                 "--noproxy",
