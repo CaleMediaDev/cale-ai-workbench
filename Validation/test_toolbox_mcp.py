@@ -397,6 +397,34 @@ def test_media_worker_response_must_be_a_json_object(tmp_path, response):
                 asyncio.run(toolbox_mcp.media_run("generate_image"))
 
 
+def test_oversized_backend_result_creates_missing_results_parent(tmp_path):
+    from pathlib import Path
+
+    original = {"isError": False, "content": [{"type": "text", "text": "x" * 25000}]}
+    calls = []
+
+    class FakeSession:
+        async def call_tool(self, name, arguments):
+            calls.append((name, arguments))
+            return SimpleNamespace(model_dump=lambda **_kwargs: original)
+
+    box = tmp_path / "Toolbox"
+    assert not box.exists()
+    with (patch.object(toolbox_mcp, "BOX", box),
+          patch.dict(toolbox_mcp.CATALOG, {"rea.inspect": {}}, clear=True),
+          patch.dict(toolbox_mcp.SESSIONS, {"rea": FakeSession()}, clear=True)):
+        result = asyncio.run(toolbox_mcp.toolbox_call("rea.inspect", '{"value": 7}'))
+
+    output = Path(result["full_result_file"])
+    raw = json.dumps(original, ensure_ascii=False)
+    assert calls == [("inspect", {"value": 7})]
+    assert output.parent == box / "Results"
+    assert output.read_text(encoding="utf-8") == raw
+    assert result["isError"] is False
+    assert result["truncated"] is True
+    assert result["preview"] == raw[:24000]
+
+
 def test_document_to_text_creates_missing_results_parent(tmp_path, monkeypatch):
     from pathlib import Path
     import file_chat

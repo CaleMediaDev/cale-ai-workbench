@@ -519,7 +519,7 @@ async def toolbox_call(tool: str, arguments_json: str = "{}", project_folder: st
     raw = json.dumps(value, ensure_ascii=False)
     if len(raw) > 24000:
         output = BOX / "Results" / (uuid.uuid4().hex + ".json")
-        output.parent.mkdir(exist_ok=True)
+        output.parent.mkdir(parents=True, exist_ok=True)
         output.write_text(raw, encoding="utf-8")
         return {
             "isError": value.get("isError", False),
