@@ -152,6 +152,16 @@ def _eligible(root: Path, path: Path) -> bool:
         return False
 
 
+def _indexed_file_identity_matches(root: Path, relative: str) -> bool:
+    """Keep a derived identity only while its current eligible path is provable."""
+    path = root / relative
+    try:
+        return (_eligible(root, path)
+                and path.resolve(strict=True).relative_to(root).as_posix() == relative)
+    except (OSError, RuntimeError, ValueError):
+        return False
+
+
 def index_file(folder: str | Path, path: str | Path) -> dict:
     """Index one generated research file without scanning a whole codebase."""
     root = Path(folder).resolve(strict=True)
@@ -310,9 +320,7 @@ def index(folder: str | Path, include_code: bool = False, max_files: int = 800) 
             # Retire vanished or ineligible sources outside the inspected set,
             # without discarding valid records from excluded directories.
             stale_ids.update(identifier for identifier in existing_files - seen
-                             if (not _eligible(root, root / identifier[len("file:"):])
-                                 or (root / identifier[len("file:"):]).resolve().relative_to(root).as_posix()
-                                 != identifier[len("file:"):]))
+                             if not _indexed_file_identity_matches(root, identifier[len("file:"):]))
         stale = list(stale_ids)
         for identifier in stale:
             conn.execute("DELETE FROM memories WHERE id=?", (identifier,))
