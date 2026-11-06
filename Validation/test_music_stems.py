@@ -324,6 +324,52 @@ def test_publication_without_hard_links_is_retryable(tmp_path, interrupt_copy, l
     assert source.read_bytes() == b"music"
 
 
+def test_fallback_rejects_destination_edited_during_copy(tmp_path):
+    from contextlib import nullcontext
+    from types import SimpleNamespace
+
+    source = tmp_path / "song.mp3"
+    source.write_bytes(b"music")
+    output = tmp_path / "stems"
+    original_copy = music_stems.shutil.copyfileobj
+    edited = output / "a.wav"
+
+    def render(args, **_kwargs):
+        staging = Path(args[-1])
+        (staging / "a.wav").write_bytes(b"first")
+        (staging / "b.wav").write_bytes(b"second")
+        return SimpleNamespace(returncode=0)
+
+    def copy_then_edit(input_file, output_file):
+        original_copy(input_file, output_file)
+        destination = Path(output_file.name)
+        prior = destination.stat()
+        destination.write_bytes(b"U" * prior.st_size)
+        os.utime(destination, ns=(prior.st_atime_ns, prior.st_mtime_ns))
+        assert destination.stat().st_ino == prior.st_ino
+
+    with patch.object(
+        music_stems.music_backend, "_setup_lock", side_effect=nullcontext
+    ), patch.object(
+        music_stems.music_backend, "_music_gpu_lease", side_effect=nullcontext
+    ), patch.object(
+        music_stems, "install", return_value=Path("python.exe")
+    ), patch.object(
+        music_stems.subprocess, "run", side_effect=render
+    ), patch.object(
+        music_stems.os, "link",
+        side_effect=OSError(music_stems.errno.ENOTSUP, "unsupported")
+    ), patch.object(
+        music_stems.shutil, "copyfileobj", side_effect=copy_then_edit
+    ):
+        with pytest.raises(OSError, match="changed during publication"):
+            music_stems.separate_stems(str(source), str(output))
+
+    assert set(output.iterdir()) == {edited}
+    assert edited.read_bytes() == b"UUUUU"
+    assert source.read_bytes() == b"music"
+
+
 def test_fallback_short_disk_write_removes_partial_output(tmp_path):
     import errno
     import io
