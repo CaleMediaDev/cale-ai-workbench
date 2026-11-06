@@ -3912,3 +3912,128 @@ def test_model404_old_journal_without_url_reconciles_same_pr_on_authenticated_re
     assert host.publish().endswith('/pull/1')
     assert len(host.remote.prs) == 1
     assert sum(endpoint.endswith('/pulls') and body is not None for endpoint,body in host.remote.calls) == 1
+
+
+@pytest.mark.parametrize('production,test,expected', [
+    (SOURCE.replace('return 1','return    1'), TEST + 'def test_new_case():\n    assert True\n', 'no_production_ast_delta'),
+    (SOURCE.replace('return 1','return 2'), TEST + '\n\n', 'no_regression_ast_delta'),
+    (SOURCE.replace('return 1','return 2'), TEST + 'def test_new_case():\n    assert False\n', 'structural_delta_only'),
+])
+def test_quality_preflight_structural_triage_is_not_test_acceptance(production,test,expected):
+    result = donation.proposal_quality_preflight(SOURCES, {'example.py':production,'Validation/test_example.py':test}, automatic_correctness=True)
+    assert result['reason'] == expected
+    # Even a deliberately wrong changed assertion is NOT executed or certified.
+    assert result['status'] == ('keep' if expected == 'structural_delta_only' else 'withhold')
+
+
+@pytest.mark.parametrize('directive', ['#!/usr/bin/python', '# coding: latin-1', '# type: ignore',
+    '# noqa', '# fmt: off', '# pyright: ignore', '# unknown_tool: disable', '# disable_next_rule'])
+def test_quality_preflight_changed_machine_comments_are_unknown(directive):
+    result = donation.proposal_quality_preflight(SOURCES, {'example.py':directive+'\n'+SOURCE}, automatic_correctness=True)
+    assert result == {'status':'unknown','reason':'comment_token_changed'}
+
+
+def test_quality_preflight_directed_docs_tests_and_tooling_are_exempt():
+    for edited in ({'README.md':'Documentation'}, {'Validation/test_example.py':TEST+'# noqa\n'}, {'example.py':'# coding: utf-8\n'+SOURCE}):
+        assert donation.proposal_quality_preflight(SOURCES,edited)['status'] == 'exempt'
+
+
+def test_quality_preflight_bounds_uncertainty_and_cancellation(monkeypatch):
+    assert donation.proposal_quality_preflight(SOURCES, {'example.py':' '*200001}, automatic_correctness=True)['status'] == 'unknown'
+    assert donation.proposal_quality_preflight({'example.py':'def ('}, {'example.py':SOURCE}, automatic_correctness=True)['status'] == 'unknown'
+    monkeypatch.setattr(donation, '_QUALITY_AST_NODES', 2)
+    assert donation.proposal_quality_preflight(SOURCES, {'example.py':SOURCE}, automatic_correctness=True)['reason'] == 'syntax_bound'
+    def cancelled():raise InterruptedError('owned test cancellation')
+    with pytest.raises(InterruptedError):donation.proposal_quality_preflight(SOURCES, {'example.py':SOURCE}, automatic_correctness=True,check_cancel=cancelled)
+
+
+def test_quality_marker_only_host_generated_pairs_and_scope_identity_unchanged(monkeypatch):
+    jobs=[{'id':'docs-task','title':'Docs','instructions':'Improve documentation','paths':['README.md'],'_automatic_correctness':True}]
+    tree={'tree':[{'type':'blob','path':name,'size':100,'sha':char*40} for name,char in
+        [('README.md','a'),('worker.py','b'),('Validation/test_worker.py','c')]]}
+    monkeypatch.setattr(donation,'gh_api',lambda endpoint:tree)
+    result=donation.continuous_jobs(jobs,'d'*40)
+    curated=next(job for job in result if job['id']=='docs-task')
+    generated=next(job for job in result if job['id']!='docs-task')
+    assert '_automatic_correctness' not in curated
+    assert generated['_automatic_correctness'] is True
+    blobs={row['path']:row['sha'] for row in tree['tree']}
+    assert donation.scope_fingerprint(generated,blobs)==donation.scope_fingerprint(
+        {key:value for key,value in generated.items() if key!='_automatic_correctness'},blobs)
+
+
+@pytest.mark.parametrize('kind', ['formatting_only','test_only'])
+def test_quality_service_withholds_structural_noop_without_losing_usage(outbox_host,monkeypatch,kind):
+    host=outbox_host
+    monkeypatch.setattr(donation,'_QUALITY_PREFLIGHT_ENABLED',True)
+    monkeypatch.setattr(donation,'continuous_jobs',lambda jobs,revision,**kw:[{**job,'_automatic_correctness':True} for job in jobs])
+    proposal=json.loads(json.dumps(PROPOSAL))
+    if kind == 'test_only':proposal['changes']=proposal['changes'][1:]
+    else:proposal['changes'][0]['after']='return    1'
+    monkeypatch.setitem(RESULT['choices'][0]['message'],'content',json.dumps(proposal))
+    host.tick()
+    with closing(donation.connection(host.root)) as db:
+        assert db.execute('SELECT status FROM runs').fetchone()[0]=='no_change'
+    assert donation.total_tokens(host.root)==50 and len(host.calls)==1
+    assert not host.remote.prs
+    assert not any(endpoint.endswith('/pulls') and body is not None for endpoint,body in host.remote.calls)
+    assert all(body is None for endpoint,body in host.remote.calls)
+
+
+def test_quality_service_strips_manifest_marker_and_preserves_publication_contract(outbox_host,monkeypatch):
+    host=outbox_host
+    monkeypatch.setattr(donation,'_QUALITY_PREFLIGHT_ENABLED',True)
+    original_file=host.remote.public
+    def public_file(path,revision):
+        value=original_file(path,revision)
+        if path=='donation-tasks.json':
+            value=json.dumps([{**job,'_automatic_correctness':True} for job in json.loads(value)])
+        return value
+    monkeypatch.setattr(donation,'public_file',public_file)
+    seen=[];actual=donation.proposal_quality_preflight
+    def observe(*args,**kwargs):
+        seen.append(kwargs['automatic_correctness'])
+        return actual(*args,**kwargs)
+    monkeypatch.setattr(donation,'proposal_quality_preflight',observe)
+    prepared=[];prepare=donation.DurablePublication.prepare
+    def record_prepare(self,*args,**kwargs):
+        result=prepare(self,*args,**kwargs)
+        prepared.append(dict(self.data['job']))
+        return result
+    monkeypatch.setattr(donation.DurablePublication,'prepare',record_prepare)
+    host.tick()
+    assert seen==[False] and len(host.remote.prs)==1 and donation.total_tokens(host.root)==50
+    assert prepared and all('_automatic_correctness' not in job for job in prepared)
+
+
+@pytest.mark.parametrize('comment', ['# This comment documents an ordinary sentence.', '# noqa', '# coding: utf-8'])
+def test_quality_preflight_plain_prose_and_moved_comments_remain_unknown(comment):
+    added = donation.proposal_quality_preflight(SOURCES, {'example.py':comment+'\n'+SOURCE}, automatic_correctness=True)
+    moved = donation.proposal_quality_preflight({'example.py':comment+'\n'+SOURCE}, {'example.py':'\n'+comment+'\n'+SOURCE}, automatic_correctness=True)
+    assert added == moved == {'status':'unknown','reason':'comment_token_changed'}
+
+
+def test_quality_preflight_test_only_automatic_response_has_no_production_delta():
+    result = donation.proposal_quality_preflight(SOURCES, {'Validation/test_example.py':TEST+'def test_extra():\n    assert True\n'}, automatic_correctness=True)
+    assert result == {'status':'withhold','reason':'no_production_ast_delta'}
+
+
+
+def test_quality_preflight_nonpython_and_depth_are_unknown(monkeypatch):
+    assert donation.proposal_quality_preflight({'README.md':'old'}, {'README.md':'new'}, automatic_correctness=True) == {'status':'unknown','reason':'input_bound'}
+    monkeypatch.setattr(donation,'_QUALITY_AST_DEPTH',3)
+    body='value = '+('1 + '*20)+'1\n'
+    assert donation.proposal_quality_preflight({'example.py':'value = 1\n'}, {'example.py':body}, automatic_correctness=True) == {'status':'unknown','reason':'syntax_bound'}
+
+
+def test_quality_new_response_filter_never_rechecks_existing_pending_outbox(outbox_host,monkeypatch):
+    host=outbox_host
+    host.remote.fork_failures=1
+    first=host.tick()
+    assert 'HTTP 404' in first.status_message() and len(host.calls)==1
+    monkeypatch.setattr(donation,'_QUALITY_PREFLIGHT_ENABLED',True)
+    monkeypatch.setattr(donation,'proposal_quality_preflight',lambda *a,**kw:pytest.fail('pending outbox must not run new-response heuristic'))
+    with patch.object(donation.time,'time',return_value=outbox_expire(host.root)):
+        resumed=host.tick()
+    assert 'confirmed' in resumed.status_message()
+    assert len(host.calls)==1 and len(host.remote.prs)==1 and donation.total_tokens(host.root)==50

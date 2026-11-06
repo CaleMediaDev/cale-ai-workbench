@@ -825,6 +825,83 @@ def validate_proposal(text: str, sources: dict[str, str]) -> tuple[dict, dict[st
     return proposal, edited
 
 
+# New-response structural triage only; saved publication contracts stay unchanged.
+_QUALITY_PREFLIGHT_ENABLED = True
+_QUALITY_AST_NODES = 50000
+_QUALITY_AST_DEPTH = 128
+
+
+def proposal_quality_preflight(sources, edited, *, automatic_correctness=False, check_cancel=lambda: None):
+    """Cheap structural triage of new automatic bug-fix responses, NOT test proof.
+
+    No source is imported or executed. Unknown syntax/directives/bounds preserve
+    existing behavior. Curated documentation, test and tooling tasks are exempt.
+    """
+    import io
+    import tokenize
+
+    def answer(status, reason):
+        return {'status': status, 'reason': reason}
+    check_cancel()
+    if automatic_correctness is not True:
+        return answer('exempt', 'not_automatic_correctness')
+    if (not isinstance(sources, dict) or not isinstance(edited, dict)
+            or not 1 <= len(edited) <= 4):
+        return answer('unknown', 'input_bound')
+    parsed = {}
+    try:
+        for path, body in edited.items():
+            check_cancel()
+            original = sources.get(path)
+            if (not isinstance(path, str) or not path.endswith('.py')
+                    or not isinstance(body, str) or not isinstance(original, str)
+                    or max(len(body.encode('utf-8')), len(original.encode('utf-8'))) > 200000):
+                return answer('unknown', 'input_bound')
+            pair = []
+            comments = []
+            for text in (original, body):
+                check_cancel()
+                tokens = tokenize.generate_tokens(io.StringIO(text).readline)
+                observed = Counter()
+                for index, token in enumerate(tokens):
+                    if index % 256 == 0:
+                        check_cancel()
+                    if index > 100000:
+                        return answer('unknown', 'syntax_bound')
+                    if token.type == tokenize.COMMENT:
+                        # Position matters: moving a pragma can change its scope.
+                        observed[(token.start, token.string)] += 1
+                comments.append(observed)
+                tree = ast.parse(text, filename=path, type_comments=True)
+                pending = [(tree, 0)]
+                nodes = 0
+                while pending:
+                    node, depth = pending.pop()
+                    nodes += 1
+                    if nodes % 256 == 0:
+                        check_cancel()
+                    if nodes > _QUALITY_AST_NODES or depth > _QUALITY_AST_DEPTH:
+                        return answer('unknown', 'syntax_bound')
+                    pending.extend((child, depth+1) for child in ast.iter_child_nodes(node))
+                pair.append(ast.dump(tree, include_attributes=False))
+            changed_comments = ((comments[0]-comments[1]) + (comments[1]-comments[0]))
+            if changed_comments:
+                # Comments may be interpreted by tooling, regardless of prose.
+                # Never classify changed or moved comment tokens as irrelevant.
+                return answer('unknown', 'comment_token_changed')
+            parsed[path] = pair[0] != pair[1]
+    except (SyntaxError, tokenize.TokenError, UnicodeError, RecursionError, MemoryError, ValueError):
+        return answer('unknown', 'syntax_unknown')
+    check_cancel()
+    production = [changed for path, changed in parsed.items() if not path.startswith('Validation/')]
+    tests = [changed for path, changed in parsed.items() if path.startswith('Validation/test_')]
+    if not any(production):
+        return answer('withhold', 'no_production_ast_delta')
+    if not any(tests):
+        return answer('withhold', 'no_regression_ast_delta')
+    return answer('keep', 'structural_delta_only')
+
+
 def _proposal_target(login, check_cancel, api=None):
     api = gh_api if api is None else api
     check_cancel()
@@ -1993,6 +2070,8 @@ def continuous_jobs(jobs: list, revision: str, *, source_budget=35_000) -> list:
     for that area while other areas can still receive useful review. Discovery
     never reads the donor's files or expands the approved edit surface.
     """
+    jobs = [{key: value for key, value in job.items() if key != "_automatic_correctness"}
+            if isinstance(job, dict) else job for job in jobs]
     tree = gh_api(f"repos/{UPSTREAM}/git/trees/{revision}?recursive=1")
     if tree.get("truncated"):
         raise RuntimeError("Public source listing is incomplete; retry later.")
@@ -2019,7 +2098,7 @@ def continuous_jobs(jobs: list, revision: str, *, source_budget=35_000) -> list:
         result.append({"id": identity, "title": "Review " + path,
                        "instructions": "Find one demonstrated correctness or recovery bug and a focused regression test. "
                        "Preserve public interfaces and do not change authentication, consent, accounting or update policy.",
-                       "paths": [path, test]})
+                       "paths": [path, test], "_automatic_correctness": True})
     blobs = _tree_blobs(tree)
     return [{**job, "_scope_blobs": {path: blobs[path] for path in job["paths"]}}
             if scope_fingerprint(job, blobs) else job for job in result]
@@ -2314,7 +2393,7 @@ class Service:
                 raise ValueError("Invalid public maintainer task list")
             # Only authenticated tree discovery below may supply this cache;
             # never accept a task manifest's claimed source fingerprint.
-            jobs = [{key: value for key, value in job.items() if key != "_scope_blobs"}
+            jobs = [{key: value for key, value in job.items() if key not in {"_scope_blobs", "_automatic_correctness"}}
                     if isinstance(job, dict) else job for job in jobs]
             source_budget = 160_000 if consent["intensity"] == "full_blast" and resource == "chatgpt" else 40_000
             if consent["intensity"] in {"medium", "full_blast"}:
@@ -2445,10 +2524,19 @@ class Service:
                     self.next_attempt = 0
                 self.message = "Proposed edits failed validation · trying another public review area."
                 return
+            quality_withheld = False
+            if _QUALITY_PREFLIGHT_ENABLED and edited:
+                quality = proposal_quality_preflight(sources, edited,
+                    automatic_correctness=job.get("_automatic_correctness") is True,
+                    check_cancel=check_cancel)
+                quality_withheld = quality['status'] == 'withhold'
+                if quality_withheld:
+                    edited = {}  # Reuse the existing no-change outcome; usage is already recorded.
             if not edited:
                 finish(self.root, run_id, "no_change")
                 self._emit_event("no_change", run_id, resource, job_title=job.get("title", ""))
-                self.message = "Review complete · no reliable code change proposed this time."
+                self.message = ("Review complete · no code fix to submit from this review."
+                                if quality_withheld else "Review complete · no reliable code change proposed this time.")
                 self.failures = 0
                 if consent["intensity"] in {"medium", "full_blast"}:
                     self.next_attempt = 0

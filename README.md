@@ -10,11 +10,12 @@ Created by [Cale Media](https://calemedia.com).
 2. Click **Install** and watch the progress bar. Accounts are optional; you can connect them while models download.
 3. Click **Open Cale AI** and describe what you want in chat.
 
-Release 0.5.547 preserves authenticated model-contribution links when public confirmation is pending, including after restart. Unconfirmed submissions remain unconfirmed and do not earn delivery credit. [Validation and limits](benchmarks/results/model-publication-547-20261106.json).
+Release 0.5.548 adds a conservative check that can skip formatting-only and test-only drafts from automatic code-bug reviews. Uncertain changes still require maintainer review; existing drafts and usage accounting are preserved. [Validation and limits](benchmarks/results/structural-donation-preflight-548-20261106.json).
 
 <details>
 <summary>Feature history and validation</summary>
 
+Release 0.5.547 preserves authenticated model-contribution links when public confirmation is pending, including after restart. Unconfirmed submissions remain unconfirmed and do not earn delivery credit. [Validation and limits](benchmarks/results/model-publication-547-20261106.json).
 Release 0.5.546 aligns vocal guidance with requested singers, rappers and short hooks; rejects negative song durations; and improves FFmpeg discovery, readiness checks, webpage reading and game routing. [Validation and limits](benchmarks/results/reviewed-music-and-runtime-546-20261106.json).
 Release 0.5.545 adds eight reviewed fixes for document freshness, model memory budgets, setup recovery, image-job recovery, website crawling, skill search, calculator formatting and catalog downloads. [Validation and limits](benchmarks/results/reviewed-document-and-recovery-545-20261106.json).
 Release 0.5.544 adds nine reviewed fixes for document evidence, audio validation, browser metadata, file-index cleanup, tool discovery, voice controls and small-model training. [Validation and limits](benchmarks/results/reviewed-reliability-and-memory-544-20261106.json).

@@ -1,0 +1,220 @@
+{
+  "release": "0.5.548",
+  "base": "ee596d5e25177847ef3bc7665c20981511a45683",
+  "qualification": {
+    "status": "ACTIVATED ISOLATED CANDIDATE QUALIFIED; NOT shared/public/installed",
+    "base": "ee596d5e25177847ef3bc7665c20981511a45683",
+    "source": "C:\\Users\\tahoe\\Documents\\Codex\\2026-10-31\\can\\outputs\\review-quality-preflight-547\\activated-candidate",
+    "raw_bindings_before_after": {
+      "donation.py": "a1de4a7a0774caee0d7d2ab9b5d1105edd5d9aa19cc5cf092780569a34e974db",
+      "Validation/test_donation.py": "16567bde6003716c5b03701d4f90766eec67b5bb7afbfb093428676c61e87d53"
+    },
+    "all_other_tracked_files_unchanged": 420,
+    "patch": "activated-qualified.patch",
+    "patch_sha256": "60274d10be0cc4ed48a8060310d7c126b828869df2f5f21cee9bce2adfb18bab",
+    "default_flag": true,
+    "only_approved_delta_from_disabled": "Enable flag, new-response-only comment and plain user-facing withheldmessage",
+    "protected_AST_identical": [
+      "validate_proposal",
+      "_publication_policy",
+      "scope_fingerprint",
+      "complete_donation",
+      "DurablePublication.prepare",
+      "DurablePublication.fresh",
+      "DurablePublication.guard",
+      "DurablePublication.publish",
+      "DurablePublication._confirm_result"
+    ],
+    "result": "466PASS117subtests109.59s exit0,0fail/skip",
+    "counting": "Unique fullrun466; priorfocused32+2overlapnot added.",
+    "command": {
+      "python": "C:\\Users\\tahoe\\Documents\\Codex\\2026-10-31\\can\\outputs\\Hermes-Agent\\Toolbox\\python\\Scripts\\python.exe",
+      "cwd": "C:\\Users\\tahoe\\Documents\\Codex\\2026-10-31\\can\\outputs\\review-quality-preflight-547\\activated-candidate",
+      "args": [
+        "-m",
+        "pytest",
+        "Validation/test_donation.py",
+        "Validation/test_donation_regressions.py",
+        "Validation/test_github_account.py",
+        "Validation/test_chatgpt_auth.py",
+        "-q",
+        "-x",
+        "-rs",
+        "--showlocals"
+      ],
+      "env": "Inheriteddeveloper env, no changes or secret/account values exported; realprovider/GitHub/training boundaries mocked by fixtures."
+    },
+    "log": "activated-full.log",
+    "log_sha256": "ffdf1e296c3bb8c3a59cad7dfcc2f9c35dbc64f2e2fc883db650d75ac06fb523",
+    "continuous_catalog_scope": "All Validation references continuous_jobs found onlyin test_donation.py, included full.",
+    "disabled_candidate_preserved": {
+      "path": "outputs\\review-quality-preflight-547\\candidate",
+      "runtime_sha256": "0f693768ca20f08f3252c1fea2a17226758298ffc03e1fcca838fbe9efcd8283",
+      "receipt": "focused-qualification.json"
+    },
+    "limits": [
+      "Filters only structurally formatting/test-only automaticcorrectness responses with unchangedcommenttokens; not semantic equivalence or regression-efficacy proof.",
+      "ANY changed/movedcomments UNKNOWN;942/937andsemanticwrongpatches stillrequiremaintainer review.",
+      "Wrong changedassertion intentionally allowedstructuralonly, no proposedcode executed/imported.",
+      "No extra inference/dependencies/runtimefiles/schema; oldno_change/token/quota/consent/public404/outbox/credit contracts retained.",
+      "No sharedroot/private/Original/installed source changes, actualservices/accounts/audio/models/deviceactions, remote mutation/commit/push/release."
+    ]
+  },
+  "independent_review": {
+    "status": "INDEPENDENT STATIC REVIEW: no concrete blocker found",
+    "base": "ee596d5e25177847ef3bc7665c20981511a45683",
+    "patch_sha256": "60274d10be0cc4ed48a8060310d7c126b828869df2f5f21cee9bce2adfb18bab",
+    "qualification_receipt_sha256": "d5233598be7f691369204f9de9fa585f9d2e8dc0d28360cedc0183da62e5950c",
+    "source_sha256": "a1de4a7a0774caee0d7d2ab9b5d1105edd5d9aa19cc5cf092780569a34e974db",
+    "test_sha256": "16567bde6003716c5b03701d4f90766eec67b5bb7afbfb093428676c61e87d53",
+    "protected_AST_unchanged": [
+      "validate_proposal",
+      "_publication_policy",
+      "scope_fingerprint",
+      "complete_donation",
+      "DurablePublication.prepare",
+      "DurablePublication.load",
+      "DurablePublication.fresh",
+      "DurablePublication.guard",
+      "DurablePublication.publish",
+      "DurablePublication._confirm_result",
+      "ModelPublicationJournal",
+      "publish_model_candidate"
+    ],
+    "findings": [
+      "Automaticcorrectness marker is created only in locally synthesized production/testpairs; incomingmanifeststripsmarker and scope cache, continuous_jobs stripsmarker fromcuratedjobs, and DurablePublication.prepare whitelist preventsmarkerenteringdurablejobcontract.",
+      "Onlyfreshnewresponsepath afteractualrecord_usage+validate_proposal invokespreflight. Existingclaimedoutbox publication returns earlier, unchanged; curatedtasks defaultFalse exempt. No newinference/codeexecution or testexecution.",
+      "Any changed/moved COMMENTtoken causesunknown beforewithhold; exacttoken text and positionCounter compared. Includesordinaryprose/tooling directives. No specialcomment allowlist or semanticnormalization.",
+      "ast.dump equality is deliberately structuraltriage, not semantic-equivalence or test-efficacy proof. Constant-onlywrongassertion passesstructuraldelta testintentionally. No efficacyclaim implied bykeep.",
+      "Bounds: <=4editedPythonfiles, <=200KBoriginal/newUTF8each, <=100001tokensteps, <=50000nodes/depth128 perAST; cancellationbefore/periodicloops/after propagatesInterruptedError. Syntax/encoding/recursion/memory/bounduncertainty staysunknown and preservesexistingbehavior.",
+      "Withhold only no-productionASTdelta or no-regressionASTdelta fornewautomaticcorrectness. Reuses oldno_changefinish/event/ownerfinally; actualusage alreadyrecorded and kept, no submittedstatus/PR/credit fabricated.",
+      "Existingartifactmodelpublication, auth/consent/account, outboxpolicy identity, sourcefreshness and rawtoken accounting functions unchanged byASTproof."
+    ],
+    "limits": [
+      "No testsrerun or liveDB/API/accounts/runtime controls byreviewer; owner466PASS117subtests is referenced qualification, not my own run.",
+      "Not semantic bugdetection, maintainerreview replacement, regression-efficacy proof or untrustedtest execution. Comment changes intentionally escapeheuristic asunknown.",
+      "Parser/tokenizer allocation occurs beforevisitorcount but source-bytebudgetbounds input; cancellationnotOSpreemptive or walltimeSLA."
+    ],
+    "actions": {
+      "source_edits": 0,
+      "test_execution": 0,
+      "live_DB_API": 0,
+      "models_resources": 0
+    }
+  },
+  "corpus_replay": {
+    "status": "ONE PURE HELPER CORPUS REPLAY; no tests/semanticacceptance",
+    "helper_source_sha256": "f7f9e62972510ce2fe3146224b7e7317cb5d034fddbc19d0f4d3500cf20f36e1",
+    "activated_donation_source_sha256": "a1de4a7a0774caee0d7d2ab9b5d1105edd5d9aa19cc5cf092780569a34e974db",
+    "helper_definition_only_extracted": true,
+    "cases": [
+      {
+        "pr": 942,
+        "exact_head": "38d049e83a11e5998e908205a0864ff849e02bc9",
+        "base": "d9e39611c2499930a82145316bcb3fe331bf13d0",
+        "verdict": {
+          "status": "unknown",
+          "reason": "comment_token_changed"
+        },
+        "seconds": 0.03395690000616014,
+        "bodies": {
+          "Validation/test_core_tool_health.py": {
+            "before_sha256": "74da7f99ae5352f1fcbdf331d75eb9f9839639a64b5c19a557104bf94ab6a287",
+            "edited_sha256": "cafaa52be1c5350f881439f7a9e01894b6d6faff6962fe6ad5974202635bf2cb",
+            "before_git_blob": "6731c952cc636109cb3a108d653fa56f4db1b826",
+            "edited_git_blob": "2ccaaf088001847e8fa9965c926b8144c9f98c67",
+            "patch_blob_prefixes_verified": true
+          },
+          "core_tool_health.py": {
+            "before_sha256": "fe229051b67a390a60fb359727da4a2f1150218412be7233add0cf9251628e48",
+            "edited_sha256": "5195f7c4d6fed8a266f37ccd4009195a3bbcd7ac29b029fd1f51ca1e028629c3",
+            "before_git_blob": "a390e0b348548ba8b88def62de7db2ba552014de",
+            "edited_git_blob": "fd2caeb6d3b885a4f06025c95f26745c32b16a01",
+            "patch_blob_prefixes_verified": true
+          }
+        }
+      },
+      {
+        "pr": 945,
+        "exact_head": "f84b907f7ad97735f918df559a6bb130e235ee4a",
+        "base": "87efdb4ddf64ed5354807ff6aa378887be89af72",
+        "verdict": {
+          "status": "withhold",
+          "reason": "no_production_ast_delta"
+        },
+        "seconds": 0.02770590002182871,
+        "bodies": {
+          "Validation/test_public_api_catalog.py": {
+            "before_sha256": "b52895177987aadf9cc855163e206e56ae674df57a0c01570407fe4089957497",
+            "edited_sha256": "4eeb1c3a5f5fd28ed189084fa01add44898afc127c5dd50f63d5b291cdb9ebc8",
+            "before_git_blob": "8aadc9623690f83925e820d9dffb1d29936fecb7",
+            "edited_git_blob": "335d5f39c92c2588c3dd824a2c1e28576c0a73e5",
+            "patch_blob_prefixes_verified": true
+          }
+        }
+      },
+      {
+        "pr": 937,
+        "exact_head": "20d6e83830ad75520bf9547313ba9e29cb1ca3cf",
+        "base": "288e3f2303b1d4c9fb23b835d2faea8773c47fbb",
+        "verdict": {
+          "status": "unknown",
+          "reason": "comment_token_changed"
+        },
+        "seconds": 0.031116299971472472,
+        "bodies": {
+          "Validation/test_natural_voice.py": {
+            "before_sha256": "34b6bff0cbea86aa6f62eb32dd9b1caf2516a07868d1a65c8d3c87c4554a9a68",
+            "edited_sha256": "2c5e882c3948e33ecf8777b07647939474658d0b8af11b9863bbb59194bbbd83",
+            "before_git_blob": "3ea879500bdc22f3ce127ee45ef4c20315388a4f",
+            "edited_git_blob": "df46e8866cf4c57103958bdc3e0d11ba0e84a12d",
+            "patch_blob_prefixes_verified": true
+          },
+          "natural_voice.py": {
+            "before_sha256": "a98d5a29ba7c54d20520188f577e9628e7024f54e94fd2a5e8001d67b00474cc",
+            "edited_sha256": "8a7cefc3babd3055822f78f561d562e502a266a70d1acd60e5206956d50b3a6e",
+            "before_git_blob": "acc9c3bb6aa98b5d7f14bf40e4115f3fb000802f",
+            "edited_git_blob": "f54a82dfb6547442b3ff31647013545d00d8f3e7",
+            "patch_blob_prefixes_verified": true
+          }
+        }
+      }
+    ],
+    "proposed_code_executed": false,
+    "proposed_modules_imported": false,
+    "network_or_GitHub_calls": false,
+    "source_edits": false,
+    "source_hash_after": "a1de4a7a0774caee0d7d2ab9b5d1105edd5d9aa19cc5cf092780569a34e974db",
+    "measurement_limit": "Exact public before/head strings bound to saved patch Gitblob prefixes. Structural verdict only; UNKNOWN is preserved behavior, withhold is no-code-fix triage, neither proves correctness."
+  },
+  "validation": {
+    "affected_modules": {
+      "exit_code": 0,
+      "source_bytes_unchanged": true,
+      "passed": 466,
+      "subtests_passed": 117,
+      "skipped": 0,
+      "modules": [
+        "Validation/test_donation.py",
+        "Validation/test_donation_regressions.py",
+        "Validation/test_github_account.py",
+        "Validation/test_chatgpt_auth.py"
+      ],
+      "sha256": {
+        "donation.py": "a1de4a7a0774caee0d7d2ab9b5d1105edd5d9aa19cc5cf092780569a34e974db",
+        "Validation/test_donation.py": "16567bde6003716c5b03701d4f90766eec67b5bb7afbfb093428676c61e87d53"
+      }
+    }
+  },
+  "sha256": {
+    "donation.py": "a1de4a7a0774caee0d7d2ab9b5d1105edd5d9aa19cc5cf092780569a34e974db",
+    "Validation/test_donation.py": "16567bde6003716c5b03701d4f90766eec67b5bb7afbfb093428676c61e87d53"
+  },
+  "limits": [
+    "Filters only structurally formatting/test-only automaticcorrectness responses with unchangedcommenttokens; not semantic equivalence or regression-efficacy proof.",
+    "ANY changed/movedcomments UNKNOWN;942/937andsemanticwrongpatches stillrequiremaintainer review.",
+    "Wrong changedassertion intentionally allowedstructuralonly, no proposedcode executed/imported.",
+    "No extra inference/dependencies/runtimefiles/schema; oldno_change/token/quota/consent/public404/outbox/credit contracts retained.",
+    "No sharedroot/private/Original/installed source changes, actualservices/accounts/audio/models/deviceactions, remote mutation/commit/push/release."
+  ]
+}
