@@ -95,3 +95,13 @@ On a model refusal, the router tries installed derestricted local models. It pre
 ## Changing and testing code
 
 See [CONTRIBUTING.md](CONTRIBUTING.md). Keep behavior and safety checks in the relevant module, update the README when user-visible behavior changes, and add each new shipped file to `install-files.json`. The source ZIP and EXE embed the same manifest-defined payload.
+
+## Local security evidence
+
+The pinned `cale-security` wheel is an app-owned toolbox extension. Its catalog is registered lazily, and a missing extension does not disable independent tools. CVE records stay in the local SQLite/FTS store under `Knowledge/CVE`; source and binary reports stay with their task. The bridge binds artifact operations to the current supervisor owner and complete instruction hashes. Model arguments do not supply that authority. Stop/Pause and instruction changes invalidate the analysis.
+
+Ghidra uses an exclusive nonhidden app Temp project while its supplied input copy, fixed exporter and report remain task-owned. Analysis does not execute the supplied program. Product matches, source patterns and decompilation are investigation evidence, not a verified deployed vulnerability.
+
+The distribution carries its readable source and tests. Existing Validation imports those tests, and the self-check basis hashes the actual installed package/Java/test bytes. A direct release wheel URL with SHA-256 is installed by the existing requirements updater before source activation. The runtime manifest stays at 250 entries for older clients. See [package documentation](packages/cale-security/README.md).
+
+Camera capture has a separate local lifecycle. The GUI retains each suspended child before assignment/resume and owns a Windows Job with kill-on-close enabled. The family must be observed empty before replacement; uncertainty retains the exact owner for retry. A bounded legacy scan retires only this installation's exact camera entrypoint with a proven expired owner, while current and unknown owners are preserved. A fatal worker error ends that session before later buffered readiness or preview messages can replace it. Readiness follows the first valid frame.

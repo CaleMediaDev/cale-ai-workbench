@@ -1,0 +1,114 @@
+{
+  "release": "0.5.553",
+  "base": "6711888829f1faf43d470c27cba6c2470e47aa5f",
+  "sha256": {
+    "camera_presence.py": "d6fa4a10de9614ee03b4a919b75a6adefe43829139f854d2283f7fadeb8bba18",
+    "long_tasks.py": "7a1251294180dc7e1256c139b89b3fbcb42a56dcd757102007936d8a26fa96a6",
+    "toolbox_mcp.py": "943bbcb6e2eedaf7eef5bceef2bfabc6402841b1bfbabfc82f9f69844cb493e8",
+    "self_diagnostics.py": "9e48b95af6ee4f101ea05083088d9420d61ba9b31c3a277d66fe18630e4bfcf8",
+    "Validation/test_camera_presence.py": "38cb4875fa4986121923173f4e5ad78af1cbc4e8ba8f61cefe526ed3f293e3ec",
+    "Validation/test_toolbox_mcp.py": "c6591f569f971bb98d965fa739590a2af2b3a8ae4e698f41c35c014baa8eee8b",
+    "Validation/test_self_diagnostics.py": "bcc9d432fc52cbf55bfeda0aa5625fdf7ea7f239a66210724434150f1429b499",
+    "Validation/test_self_update.py": "fe9011949feff394783b742cb6565a387da35481d0937e050c92bf44bc318893",
+    "requirements-windows.txt": "187362dcf7359d515a454c6bd8974a26821746db51db0cb5145decf4a029783d",
+    "native_agent.py": "573fd2a92ba2fbe4092dae4de3e4e3deeecdacb3a7ef6d6a75ebbf954f243eb5",
+    "Validation/test_native_agent.py": "1e3da57aff8d8223128d8ff7c2e5db948b5ae4ac43ac5398c1e697d2b49c37de",
+    "packages/cale-security/cale_security/bridge.py": "12227ad50712d2a4415d0df092773ce8144b888fbec187079d1ac06b5ce8798f",
+    "packages/cale-security/cale_security/CaleStaticExport.java": "38a840f084b2fdd633f294485f5d98c4efaf49415382bf6f0dc26ffea63e7bf1",
+    "packages/cale-security/cale_security/cve_intelligence.py": "aaf38c0c19ceed6b3ca11cac749fcc6121b7482bf1a251e571f2e82c567f1718",
+    "packages/cale-security/cale_security/security_analysis.py": "e852fbd8b16fc5bd3c143afb0f9ed0db12b3bc00af310cb189be0b346a629991",
+    "packages/cale-security/cale_security/__init__.py": "f041fc344631b909d6c787973b4a9e3dd382f48deb65180450912c93937b6a80",
+    "packages/cale-security/cale_security/tests/test_bridge.py": "2a5c269aaf991f00bb8715b23355239d354434ba8f915f0dc82233d9e6295d1d",
+    "packages/cale-security/cale_security/tests/test_cve_intelligence.py": "39af8908dd67ec59ebb84d1704ab8892fb706c70ebe90ea4a43875d51d7ab616",
+    "packages/cale-security/cale_security/tests/test_security_analysis.py": "45ab1dc0b92f371c993702ea0466491a9954b21e17f3b14a6527ca2cdb8a7856",
+    "packages/cale-security/cale_security/tests/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "changes": [
+    "Toolbox discovery exposes eleven lazy local security tools from an inert SHA-pinned wheel.",
+    "Official CVE baseline and cumulative delta are mirrored locally with raw record provenance and bounded read-only results.",
+    "A covering SQLite index accelerates full state counts without dropping fields or changing logical CVE data.",
+    "Supplied source/dependency evidence and bounded Ghidra analysis use fresh current-task ownership and instruction hashes.",
+    "Camera startup retires only proven expired-owner workers; new capture families use kill-on-close Windows Jobs.",
+    "Unconfirmed camera cleanup retains ownership and prevents replacement; readiness requires a valid frame and fatal errors remain fatal.",
+    "Self-checks collect packaged tests and bind actual installed Python, Java and test bytes, not just package versions."
+  ],
+  "validation": {
+    "affected_modules": {
+      "exit_code": 0,
+      "collected": 478,
+      "passed": 475,
+      "skipped": 3,
+      "subtests_passed": 2,
+      "seconds": 124.37,
+      "source_bytes_unchanged": true,
+      "skip_reasons": [
+        "Windows game-library symlink privilege",
+        "POSIX file locking",
+        "Windows package-file symlink privilege"
+      ],
+      "package_cases": {
+        "cve": 67,
+        "analysis": 39,
+        "bridge": 30
+      },
+      "camera_cases": 105,
+      "self_update_cases": 31,
+      "native_prompt_controls": 2,
+      "boundary_blocks": 0,
+      "owned_jobs_empty": true
+    },
+    "qualified_runtime_manifest_entries": 250,
+    "updater_runtime_files_including_manifest": 251,
+    "scope": "Four full affected validation modules and two existing prompt controls; not the complete application suite."
+  },
+  "wheel": {
+    "distribution": "cale-security",
+    "version": "0.1.1",
+    "bytes": 56486,
+    "sha256": "429a75c509fc86ca1cad26147bb208d24ea18073d747e92e8debedb8604b2956",
+    "members": 13,
+    "package_files": 9,
+    "verification": "Tampered valid ZIP rejected by pip hash check; direct and requirements-file installs into separate owned targets passed. Import origins and nine file hashes matched; no import-time DB/network/process activity.",
+    "receipt_sha256": "710ce2cd7f71bfbeaa9c78a997e6df5211ecd0081296646278d78b336f33c7db"
+  },
+  "real_backend_evidence": {
+    "cve_snapshot": "cve_2026-11-06_1500Z",
+    "records": 420233,
+    "states": {
+      "PUBLISHED": 401114,
+      "REJECTED": 19119
+    },
+    "data_preservation": "All typed logical document/batch/active/FTS/ancillary table identities and seven raw CVE samples matched before and after index construction.",
+    "covering_index_added_bytes": 13357056,
+    "index_constructor_seconds": 1.366,
+    "warm_tool_seconds": {
+      "catalog_status": 0.2961,
+      "search": 0.6057,
+      "product_candidates": 0.5263,
+      "record_page": 0.5236
+    },
+    "sql_vm_budget_per_connection_seconds": 0.5,
+    "ghidra": "Known neutral PE64 imported and decompiled to return42 in17.46s; subject was never executed.",
+    "camera": "A proven expired-owner camera family prevented opening the webcam. Exact orphan retirement restored capture; the installed negotiation routine delivered1920x1080@30fps. No private camera screenshot or frames are included in this evidence."
+  },
+  "retained_failures": [
+    "Original Ghidra exporter compile error and hidden-project-path runtime failure were fixed and retained as diagnostic evidence.",
+    "Windows path-anchor and lstat/fstat timestamp mismatches were fixed without weakening raw-byte instruction binding.",
+    "Actual catalog status exceeded the SQL budget before the covering index; no budget increase or state-count omission was used.",
+    "The scope writer could exceed its reader bound; the new guard rejects oversized scopes before publishing them.",
+    "Static camera review caught lost cleanup ownership, pending-child handoff and late-success races before execution."
+  ],
+  "limits": [
+    "Not the complete installed application self-check.",
+    "Physical-camera recovery and real neutral-PE Ghidra backend were separately verified, not rerun by this CPU suite.",
+    "Existing owned Toolbox Python/dependencies reused; exact installer payload qualification still required.",
+    "No live client website audit, arbitrary binary verdict or actual-model app-delivery success claim.",
+    "Unpromoted worker/context-floor/saved-browser-replay experiments are excluded.",
+    "CVE/product/version overlaps and source patterns are investigation leads, not confirmed deployed vulnerabilities; absence of matches is not clearance.",
+    "Decompilation is approximate and format-dependent. No universal reverse-engineering, arbitrary-binary or live-client-site verdict.",
+    "Camera ownership is scoped to known app processes and the current GUI lifetime; unknown legacy owners are preserved, not killed by name.",
+    "CVE storage needs several gigabytes. Retention preserves active/partial/unknown data and reuses SQLite pages without automatic VACUUM.",
+    "The old updater installs dependencies before source activation; a source rollback does not uninstall the inert wheel."
+  ],
+  "qualification_receipt_sha256": "797ff49a3d99effa783dc8a229d6e391f427cde2ce3e9b6845a3e601ca5286da"
+}

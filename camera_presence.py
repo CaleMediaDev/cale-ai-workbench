@@ -94,6 +94,198 @@ def stop_owned_avatar_process_tree(process, timeout=3, root=None):
     for pid,started in identities:remove_avatar_lease_records(root or ROOT,pid,started)
     return identities
 
+
+def _camera_process_binding(process, root):
+    """Recognize only the app's exact camera entrypoint and owner arguments."""
+    if Path(process.exe()).name.lower() not in {'python.exe', 'pythonw.exe', 'python', 'python3'}:
+        return None
+    argv = process.cmdline()
+    if (not isinstance(argv, list) or not 5 <= len(argv) <= 16
+            or any(not isinstance(value, str) or len(value) > 4096 for value in argv)):
+        return None
+    script = (Path(root).resolve(strict=True)/'camera_presence.py').resolve(strict=True)
+    offset = 1
+    while offset < len(argv) and argv[offset] in {'-u', '-B', '-I'}:
+        offset += 1
+    if offset >= len(argv):
+        return None
+    candidate_script = Path(argv[offset])
+    # Do not resolve arbitrary other Python argv (including UNC paths). Only
+    # inspect the exact absolute app entrypoint after a lexical match.
+    if (not candidate_script.is_absolute()
+            or os.path.normcase(os.path.normpath(str(candidate_script))) != os.path.normcase(str(script))
+            or candidate_script.resolve(strict=True) != script):
+        return None
+    values = {}; flags = set(); index = offset+1
+    while index < len(argv):
+        key = argv[index]
+        if key in {'--avatar', '--virtual-output'} and key not in flags:
+            flags.add(key); index += 1; continue
+        if key not in {'--parent-pid', '--parent-started'} or key in values or index+1 >= len(argv):
+            return None
+        values[key] = argv[index+1]; index += 2
+    if set(values) != {'--parent-pid', '--parent-started'} or not values['--parent-pid'].isdigit():
+        return None
+    owner_pid = int(values['--parent-pid']); owner_started = float(values['--parent-started'])
+    started = process.create_time()
+    if (not 0 < owner_pid <= 2**31-1 or owner_pid == process.pid
+            or not math.isfinite(owner_started) or owner_started <= 0
+            or type(started) not in (int, float) or not math.isfinite(started) or started <= 0):
+        return None
+    return (process.pid, started, tuple(argv), str(Path(process.exe()).resolve(strict=True)), owner_pid, owner_started)
+
+
+def _camera_owner_expired(binding):
+    try:
+        owner = psutil.Process(binding[4])
+        born = owner.create_time()
+        if type(born) not in (int, float) or not math.isfinite(born) or born <= 0:
+            return None
+        # A recycled owner PID is not the explicitly recorded original owner.
+        if abs(born-binding[5]) > .001:
+            return True
+        alive = owner.is_running()
+        return not alive if type(alive) is bool else None
+    except psutil.NoSuchProcess:
+        return True
+    except (psutil.Error, OSError, ValueError, TypeError):
+        return None  # Access denied or uncertain ownership is never retirement authority.
+
+
+def reap_stale_camera_workers(root, timeout=3):
+    """Retire exact stale camera workers, never a name-wide Python family.
+
+    Current and unknown owners survive. PID birth, full argv and owner expiry
+    are checked again immediately before terminate and before a forced kill.
+    """
+    if type(timeout) not in (int, float) or not math.isfinite(timeout) or not 0 < timeout <= 10:
+        raise ValueError('Camera cleanup timeout must be bounded')
+    summary = {'stopped': [], 'preserved': 0, 'scan_limited': False}
+    deadline = time.monotonic()+3
+    for number, candidate in enumerate(psutil.process_iter(['pid', 'name']), 1):
+        if number > 4096 or time.monotonic() >= deadline:
+            summary['scan_limited'] = True; break
+        actuated = False
+        try:
+            if str(candidate.info.get('name', '')).lower() not in {'python.exe','pythonw.exe','python','python3'}:
+                continue
+            binding = _camera_process_binding(candidate, root)
+            if binding is None:
+                continue
+            if _camera_owner_expired(binding) is not True:
+                summary['preserved'] += 1; continue
+            current = psutil.Process(binding[0])
+            if _camera_process_binding(current, root) != binding or _camera_owner_expired(binding) is not True:
+                summary['preserved'] += 1; continue
+            actuated = True
+            current.terminate()
+            try:
+                current.wait(timeout=timeout)
+            except psutil.TimeoutExpired:
+                current = psutil.Process(binding[0])
+                if _camera_process_binding(current, root) != binding or _camera_owner_expired(binding) is not True:
+                    raise RuntimeError('Camera owner changed during cleanup; no replacement was started')
+                current.kill(); current.wait(timeout=timeout)
+            summary['stopped'].append({'pid':binding[0], 'started':binding[1], 'owner_pid':binding[4], 'owner_started':binding[5]})
+        except psutil.NoSuchProcess:
+            continue
+        except psutil.TimeoutExpired:
+            raise RuntimeError('A verified stale camera worker did not stop; no replacement was started') from None
+        except (psutil.Error, OSError, ValueError, TypeError) as error:
+            if actuated:
+                raise RuntimeError('Stale camera cleanup is unconfirmed; no replacement was started') from error
+            summary['preserved'] += 1
+    return summary
+
+
+def close_owned_camera_job(process, timeout=3):
+    """Fence only the Job attached to this exact spawned Popen, once."""
+    if type(timeout) not in (int, float) or not math.isfinite(timeout) or not 0 < timeout <= 10:
+        raise ValueError('Camera cleanup timeout must be bounded')
+    state = vars(process).get('_cale_camera_job')
+    if not isinstance(state, dict):
+        return
+    with state['lock']:
+        handle = state.get('handle')
+        if handle is None:
+            if state.get('confirmed_empty') is True:return
+            raise RuntimeError('Owned camera cleanup remains unconfirmed')
+        state['confirmed_empty'] = False
+        state['lifecycle'] = 'cleanup_unconfirmed'
+        api = state['api']; deadline = time.monotonic()+timeout
+        try:
+            if state.get('assigned') is False:
+                if process.poll() is None:process.kill()
+                process.wait(timeout=max(.01, deadline-time.monotonic()))
+            api.TerminateJobObject(handle, 125)
+            process.wait(timeout=max(.01, deadline-time.monotonic()))
+            while True:
+                members = api.QueryInformationJobObject(handle, api.JobObjectBasicProcessIdList)
+                if (type(members) is not tuple or len(members) > 4096
+                        or any(type(pid) is not int or pid <= 0 for pid in members)):
+                    raise RuntimeError('Owned camera family membership is unknown')
+                if not members:
+                    break
+                if time.monotonic() >= deadline:
+                    raise RuntimeError('Owned camera family did not stop; no replacement was started')
+                time.sleep(.05)
+            handle.Close()
+            state['handle'] = None
+            state['confirmed_empty'] = True
+            state['lifecycle'] = 'closed'
+        except Exception as error:
+            # Retain the exact Job for retry; a close request is not zero proof.
+            raise RuntimeError('Owned camera cleanup is unconfirmed; no replacement was started') from error
+
+
+class CameraStartError(RuntimeError):
+    """Keep the exact pending child reachable when startup cleanup is unknown."""
+    def __init__(self, process):
+        super().__init__('Camera startup cleanup is unconfirmed; no replacement was started')
+        self.process = process
+
+
+def spawn_owned_camera_process(command, *, cwd, env=None, on_created=None):
+    """Host camera command only: assign suspended child before any capture.
+
+    The existing pywin32 dependency supplies kill-on-close containment. The GUI
+    retains its handle; an abrupt GUI exit also closes it and its camera family.
+    """
+    if os.name != 'nt':
+        raise RuntimeError('Owned camera capture currently requires Windows')
+    import ctypes
+    import subprocess
+    import win32job
+    job = win32job.CreateJobObject(None, 'Local\\CaleCamera-'+uuid.uuid4().hex)
+    process = None; assigned = False
+    try:
+        limits = win32job.QueryInformationJobObject(job, win32job.JobObjectExtendedLimitInformation)
+        limits['BasicLimitInformation']['LimitFlags'] |= win32job.JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+        win32job.SetInformationJobObject(job, win32job.JobObjectExtendedLimitInformation, limits)
+        process = subprocess.Popen(command, cwd=cwd, env=env, stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL, text=True, encoding='utf-8', errors='replace',
+            creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0)|0x00000004)
+        process._cale_camera_job = {'handle':job, 'api':win32job, 'lock':threading.Lock(), 'confirmed_empty':False, 'assigned':False, 'lifecycle':'pending'}
+        if on_created is not None:on_created(process)
+        win32job.AssignProcessToJobObject(job, int(process._handle)); assigned = True
+        process._cale_camera_job['assigned'] = True
+        resume = ctypes.WinDLL('ntdll').NtResumeProcess
+        resume.argtypes = [ctypes.c_void_p]; resume.restype = ctypes.c_long
+        if resume(int(process._handle)) < 0:
+            raise RuntimeError('Owned camera could not resume')
+        process._cale_camera_job['lifecycle'] = 'running'
+        return process
+    except BaseException:
+        try:
+            if process is not None:
+                close_owned_camera_job(process)
+            else:
+                job.Close()
+        except Exception as cleanup_error:
+            if process is not None:raise CameraStartError(process) from cleanup_error
+            raise
+        raise
+
 class VisitorState:
     """Require a stable face, then an empty room before greeting again."""
 
@@ -767,7 +959,6 @@ def watch(device=0, parent_pid=None, parent_started=None, avatar=False, virtual_
         dimensions = (f"{int(negotiated['width'])}×{int(negotiated['height'])}" if negotiated['width'] and negotiated['height'] else "resolution unreported")
         fps = f"{negotiated['fps']:g} driver-reported fps" if negotiated['fps'] else "fps unreported"
         mode = "Native 4K requested; device fallback is shown" if isinstance(source, int) else "Network camera native format"
-        emit("ready", f"Camera on · {dimensions} · {fps}. {mode}. Local only; no video saved.")
         failed_reads = 0
         last_preview = 0.0
         first_frame = True
@@ -791,6 +982,7 @@ def watch(device=0, parent_pid=None, parent_started=None, avatar=False, virtual_
             failed_reads = 0
             if first_frame:
                 first_frame = False
+                emit("ready", f"Camera on · {frame.shape[1]}×{frame.shape[0]} · {fps}. {mode}. Local only; no video saved.")
                 emit("notice", f"Camera frames: {frame.shape[1]}×{frame.shape[0]} native pixels; preview is reduced for responsiveness.")
             captured_frames += 1
             preview_now = time.monotonic()

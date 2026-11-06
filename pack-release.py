@@ -22,6 +22,22 @@ missing_tests = sorted(
 if missing_tests:
     raise ValueError("Release manifest omits validation files: " + ", ".join(missing_tests))
 extras = [
+    ".gitattributes",
+    "benchmarks/results/local-security-tools-553-20261106.json",
+    "packages/cale-security/LICENSE",
+    "packages/cale-security/README.md",
+    "packages/cale-security/build_wheel.py",
+    "packages/cale-security/cale_security/CaleStaticExport.java",
+    "packages/cale-security/cale_security/__init__.py",
+    "packages/cale-security/cale_security/bridge.py",
+    "packages/cale-security/cale_security/cve_intelligence.py",
+    "packages/cale-security/cale_security/security_analysis.py",
+    "packages/cale-security/cale_security/tests/__init__.py",
+    "packages/cale-security/cale_security/tests/test_bridge.py",
+    "packages/cale-security/cale_security/tests/test_cve_intelligence.py",
+    "packages/cale-security/cale_security/tests/test_security_analysis.py",
+    "packages/cale-security/source-manifest.json",
+    "packages/cale-security/source-provenance.json",
     "benchmarks/results/concise-installed-briefing-552-20261106.json",
     "benchmarks/results/reviewed-voice-content-551-20261106.json",
     "benchmarks/results/compact-task-guidance-550-20261106.json",

@@ -1420,3 +1420,159 @@ def test_b():
     if defer_child:
         assert report["progress"]["deferred_reason"] == "active_projects"
     assert not (root / "must-not-run.txt").exists()
+
+
+def security_distribution_fixture(tmp_path, monkeypatch):
+    import importlib.metadata
+
+    root, _state = diagnostic_install(tmp_path)
+    site = tmp_path / 'owned-site-packages'
+    names = (
+        'cale_security/__init__.py', 'cale_security/cve_intelligence.py',
+        'cale_security/security_analysis.py', 'cale_security/bridge.py',
+        'cale_security/CaleStaticExport.java', 'cale_security/tests/__init__.py',
+        'cale_security/tests/test_cve_intelligence.py',
+        'cale_security/tests/test_security_analysis.py', 'cale_security/tests/test_bridge.py',
+    )
+    for name in names:
+        target = site / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(b'raise AssertionError("Package bytes must never be imported for hashing")\n')
+    distribution = SimpleNamespace(version='0.1.0', locate_file=lambda name: site / name)
+    def locate(name):
+        assert name == 'cale-security'
+        return distribution
+    monkeypatch.setattr(importlib.metadata, 'distribution', locate)
+    monkeypatch.setattr(importlib.metadata, 'distributions', lambda: [])
+    return root, site, names, distribution
+
+
+@pytest.mark.parametrize('name', ['cale_security/cve_intelligence.py',
+                                  'cale_security/CaleStaticExport.java',
+                                  'cale_security/tests/test_bridge.py'])
+def test_live_basis_binds_same_version_security_code_java_and_test_bytes(tmp_path, monkeypatch, name):
+    root, site, _names, distribution = security_distribution_fixture(tmp_path, monkeypatch)
+    python = root / 'Toolbox/python/Scripts/python.exe'
+    before = diagnostics._live_basis(root, python)
+    (site / name).write_bytes(b'changed bytes, same installed distribution version\n')
+    assert distribution.version == '0.1.0'
+    assert diagnostics._live_basis(root, python) != before
+
+
+def test_security_byte_basis_is_stable_without_package_import_or_record_claims(tmp_path, monkeypatch):
+    import builtins
+    root, _site, names, distribution = security_distribution_fixture(tmp_path, monkeypatch)
+    original = builtins.__import__
+    attempted = []
+    def guarded(name, *args, **kwargs):
+        if name == 'cale_security' or name.startswith('cale_security.'):
+            attempted.append(name)
+            raise AssertionError('No package code import is permitted')
+        return original(name, *args, **kwargs)
+    monkeypatch.setattr(builtins, '__import__', guarded)
+    python = root / 'Toolbox/python/Scripts/python.exe'
+    assert diagnostics._live_basis(root, python) == diagnostics._live_basis(root, python)
+    facts = diagnostics._security_package_basis()
+    assert facts['present'] and facts['version'] == distribution.version
+    assert [row['name'] for row in facts['files']] == list(names)
+    assert all(len(row['sha256']) == 64 for row in facts['files']) and attempted == []
+    assert not hasattr(distribution, 'files')  # No RECORD checksum authority used.
+
+
+@pytest.mark.parametrize('name', [
+    'cale_security/__init__.py', 'cale_security/cve_intelligence.py',
+    'cale_security/security_analysis.py', 'cale_security/bridge.py',
+    'cale_security/CaleStaticExport.java', 'cale_security/tests/__init__.py',
+    'cale_security/tests/test_cve_intelligence.py',
+    'cale_security/tests/test_security_analysis.py', 'cale_security/tests/test_bridge.py',
+])
+def test_missing_expected_security_member_refuses_basis_instead_of_absence(tmp_path, monkeypatch, name):
+    root, site, _names, _distribution = security_distribution_fixture(tmp_path, monkeypatch)
+    (site / name).unlink()
+    with pytest.raises((OSError, ValueError)):
+        diagnostics._live_basis(root, root / 'Toolbox/python/Scripts/python.exe')
+
+
+def test_absent_security_distribution_has_explicit_stable_marker(tmp_path, monkeypatch):
+    import importlib.metadata
+    root, _site, _names, _distribution = security_distribution_fixture(tmp_path, monkeypatch)
+    python = root / 'Toolbox/python/Scripts/python.exe'
+    present = diagnostics._live_basis(root, python)
+    def missing(name):
+        raise importlib.metadata.PackageNotFoundError(name)
+    monkeypatch.setattr(importlib.metadata, 'distribution', missing)
+    assert diagnostics._security_package_basis() == {'present': False}
+    absent = diagnostics._live_basis(root, python)
+    assert absent != present and absent == diagnostics._live_basis(root, python)
+
+
+def test_security_distribution_version_is_part_of_actual_byte_binding(tmp_path, monkeypatch):
+    root, _site, _names, distribution = security_distribution_fixture(tmp_path, monkeypatch)
+    python = root / 'Toolbox/python/Scripts/python.exe'
+    before = diagnostics._live_basis(root, python)
+    distribution.version = '0.1.1'
+    assert diagnostics._live_basis(root, python) != before
+
+
+@pytest.mark.parametrize('bound', ['file', 'total'])
+def test_security_byte_basis_has_per_file_and_aggregate_read_bounds(tmp_path, monkeypatch, bound):
+    _root, site, names, _distribution = security_distribution_fixture(tmp_path, monkeypatch)
+    if bound == 'file':
+        (site / names[0]).write_bytes(b'x' * (2 * 1024**2 + 1))
+    else:
+        for name in names[:4]:
+            (site / name).write_bytes(b'x' * (2 * 1024**2))
+    with pytest.raises(ValueError):
+        diagnostics._security_package_basis()
+
+
+def test_security_byte_basis_refuses_hardlink_alias(tmp_path, monkeypatch):
+    import os
+    _root, site, names, _distribution = security_distribution_fixture(tmp_path, monkeypatch)
+    target = site / names[1]
+    outside = tmp_path / 'owned-outside-control'
+    outside.write_bytes(target.read_bytes())
+    target.unlink()
+    os.link(outside, target)
+    with pytest.raises(ValueError):
+        diagnostics._security_package_basis()
+    assert outside.read_bytes().startswith(b'raise AssertionError')
+
+
+def test_security_byte_basis_refuses_symlink_member_when_available(tmp_path, monkeypatch):
+    _root, site, names, _distribution = security_distribution_fixture(tmp_path, monkeypatch)
+    target = site / names[1]
+    outside = tmp_path / 'owned-outside-control'
+    outside.write_bytes(target.read_bytes())
+    target.unlink()
+    try:
+        target.symlink_to(outside)
+    except OSError:
+        pytest.skip('Creating an actual symlink is unavailable for this test user')
+    with pytest.raises(ValueError):
+        diagnostics._security_package_basis()
+
+
+def test_security_byte_basis_refuses_file_mutation_during_full_read(tmp_path, monkeypatch):
+    _root, site, names, _distribution = security_distribution_fixture(tmp_path, monkeypatch)
+    target = site / names[1]
+    original_open = Path.open
+    class MutatingReader:
+        def __init__(self):
+            self.handle = original_open(target, 'rb')
+        def __enter__(self):
+            return self
+        def fileno(self):
+            return self.handle.fileno()
+        def read(self, amount):
+            raw = self.handle.read(amount)
+            with original_open(target, 'ab') as writer:
+                writer.write(b'changed during actual read\n')
+            return raw
+        def __exit__(self, *args):
+            self.handle.close()
+    def opened(path, mode='r', *args, **kwargs):
+        return MutatingReader() if path == target and mode == 'rb' else original_open(path, mode, *args, **kwargs)
+    monkeypatch.setattr(Path, 'open', opened)
+    with pytest.raises(ValueError):
+        diagnostics._security_package_basis()

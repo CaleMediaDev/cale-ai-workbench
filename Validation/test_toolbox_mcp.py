@@ -1791,3 +1791,250 @@ def test_registered_helper_catalog_dispatch_reuses_current_task_without_model(tm
         assert result['value']==110 and result['inference_calls']==0
         assert not result['task_completion']
     model.assert_not_called()
+
+
+@pytest.fixture
+def isolated_security_catalog(monkeypatch):
+    """Reload only the extension registry; preserve every existing local tool."""
+    import sys
+    from types import ModuleType
+
+    monkeypatch.setattr(toolbox_mcp, 'LOCAL_CATALOG', toolbox_mcp.LOCAL_CATALOG.copy())
+    monkeypatch.setattr(toolbox_mcp, 'SECURITY_HANDLERS', toolbox_mcp.SECURITY_HANDLERS.copy())
+    monkeypatch.setattr(toolbox_mcp, 'SECURITY_ERROR', toolbox_mcp.SECURITY_ERROR)
+    extension = ModuleType('cale_security.bridge')
+    monkeypatch.setitem(sys.modules, extension.__name__, extension)
+    return extension
+
+
+def test_security_catalog_dispatch_and_schema_use_host_bound_handlers(isolated_security_catalog):
+    calls = []
+    async def handler(query):
+        calls.append(query)
+        return {'candidate_only': True}
+    schema = {'description': 'Local CVE candidate lookup', 'inputSchema': {
+        'type':'object', 'properties': {'query': {'type':'string'}},
+        'required':['query'], 'additionalProperties':False}}
+    def build(root, registered):
+        assert root == toolbox_mcp.ROOT and registered is toolbox_mcp.registered_project
+        return {'local.cve_search': schema}, {'local.cve_search': handler}
+    isolated_security_catalog.build_tools = build
+    toolbox_mcp._load_security_tools()
+    assert toolbox_mcp.toolbox_schema('local.cve_search')['inputSchema'] == schema['inputSchema']
+    assert toolbox_mcp.toolbox_status()['security_tools'] == {'available':True, 'tools':1, 'error':None}
+    assert asyncio.run(toolbox_mcp.toolbox_call('local.cve_search', '{"query":"neutral"}')) == {'candidate_only':True}
+    assert calls == ['neutral']
+    assert toolbox_mcp.toolbox_schema('local.make_music')
+
+
+def test_security_missing_package_reports_error_and_keeps_independent_tools(isolated_security_catalog, monkeypatch):
+    import builtins
+    original = builtins.__import__
+    def missing(name, *args, **kwargs):
+        if name == 'cale_security.bridge':
+            raise ModuleNotFoundError('Reviewed security dependency is missing')
+        return original(name, *args, **kwargs)
+    monkeypatch.setattr(builtins, '__import__', missing)
+    toolbox_mcp._load_security_tools()
+    assert not toolbox_mcp.SECURITY_HANDLERS
+    assert 'dependency is missing' in toolbox_mcp.toolbox_search('CVE')['backend_errors']['security']
+    assert toolbox_mcp.toolbox_status()['security_tools']['available'] is False
+    assert toolbox_mcp.toolbox_schema('local.make_music')
+
+
+def test_security_bad_catalog_cannot_replace_independent_tool(isolated_security_catalog):
+    original = toolbox_mcp.LOCAL_CATALOG['local.make_music']
+    isolated_security_catalog.build_tools = lambda *args: (
+        {'local.make_music': {'description':'invalid duplicate'}}, {'local.make_music':lambda: None})
+    toolbox_mcp._load_security_tools()
+    assert not toolbox_mcp.SECURITY_HANDLERS
+    assert 'invalid tool catalog' in toolbox_mcp.SECURITY_ERROR
+    assert toolbox_mcp.LOCAL_CATALOG['local.make_music'] is original
+
+
+def test_native_security_real_package_workflow_binds_owned_scope_and_local_cve_snapshot(tmp_path, monkeypatch):
+    import hashlib
+    import json
+    from pathlib import Path
+    import sqlite3
+    import subprocess
+    import urllib.request
+    from zipfile import ZipFile, ZIP_STORED
+
+    import pytest
+    import capability_index
+    import cloud_ai
+    import long_tasks
+    import native_agent
+    import project_memory
+    import toolbox_mcp
+    from cale_security import bridge
+    from cale_security import cve_intelligence as cve
+    from cale_security import security_analysis as analysis
+
+    # These are the real package implementations, not the bridge unit-test fakes.
+    assert analysis.inspect_security_artifacts.__module__ == 'cale_security.security_analysis'
+    assert analysis.build_security_sbom.__module__ == 'cale_security.security_analysis'
+    assert cve.CVEIndex.sync_local_archive.__module__ == 'cale_security.cve_intelligence'
+    assert bridge.build_tools.__module__ == 'cale_security.bridge'
+
+    app = tmp_path/'owned-app'; app.mkdir()
+    state = app/'LongTasks'; state.mkdir()
+    folder = tmp_path/'owned-client-source'; folder.mkdir()
+    notes = folder/'.local-ai'; notes.mkdir()
+    brief = 'Inspect only my supplied requirements and source. Explain candidate CVEs; do not run code or contact sites.'
+    project = {'id': 'owned-security-integration', 'folder': str(folder), 'brief': brief,
+               'generation': 7, 'status': 'working'}
+    (folder/'AGENTS.md').write_text('Local source inspection only. Do not execute artifacts or use the network.\n', encoding='utf-8')
+    (notes/'USER-REQUESTS.md').write_text('Inspect the explicitly supplied neutral files and keep results as unconfirmed leads.\n', encoding='utf-8')
+    (notes/'native-worker.json').write_text('{"status":"running"}', encoding='utf-8')
+    (folder/'requirements.txt').write_text('neutral-package==1.2.3\n', encoding='utf-8')
+    (folder/'client.py').write_text('raise RuntimeError("THIS SOURCE MUST NEVER EXECUTE")\neval(untrusted_text)\n', encoding='utf-8')
+    source_paths = [folder/'AGENTS.md', notes/'USER-REQUESTS.md', folder/'requirements.txt', folder/'client.py']
+    # Raw bytes are authoritative: Windows write_text may have emitted CRLF.
+    before = {str(path): path.read_bytes() for path in source_paths}
+    with sqlite3.connect(state/'projects.db') as connection:
+        connection.executescript('CREATE TABLE projects(id TEXT,folder TEXT,brief TEXT,generation INTEGER,status TEXT);'
+                                 'CREATE TABLE requests(project TEXT,action TEXT,status TEXT);')
+        connection.execute('INSERT INTO projects VALUES(?,?,?,?,?)',
+                           (project['id'], project['folder'], brief, project['generation'], 'working'))
+
+    inference_calls, external_calls, child_calls = [], [], []
+    def no_inference(*args, **kwargs):
+        inference_calls.append(True)
+        pytest.fail('Static security tools must not invoke Router.complete or inference HTTP')
+    def no_external(*args, **kwargs):
+        external_calls.append(True)
+        pytest.fail('Synthetic local CVE archive and source tools must not open HTTP')
+    def no_child(*args, **kwargs):
+        child_calls.append(True)
+        pytest.fail('No analyzer, subject, package hook or specialist service may start')
+    monkeypatch.setattr(cloud_ai.Router, 'complete', no_inference)
+    monkeypatch.setattr(cloud_ai, 'post', no_inference)
+    monkeypatch.setattr(cve, 'build_opener', no_external)
+    monkeypatch.setattr(cve, 'latest_release', no_external)
+    monkeypatch.setattr(urllib.request, 'urlopen', no_external)
+    monkeypatch.setattr(subprocess, 'Popen', no_child)
+
+    # Use the real registration and native ContextVar owner contract against an
+    # owned fixture DB. Copy globals before _load mutates its discovered catalog.
+    monkeypatch.setattr(toolbox_mcp, 'ROOT', app)
+    monkeypatch.setattr(toolbox_mcp, 'LOCAL_CATALOG', toolbox_mcp.LOCAL_CATALOG.copy())
+    monkeypatch.setattr(toolbox_mcp, 'SECURITY_HANDLERS', toolbox_mcp.SECURITY_HANDLERS.copy())
+    monkeypatch.setattr(toolbox_mcp, 'SECURITY_ERROR', toolbox_mcp.SECURITY_ERROR)
+    monkeypatch.setattr(native_agent, 'ROOT', app)
+    monkeypatch.setattr(long_tasks, 'STATE', state)
+    toolbox_mcp._load_security_tools()
+    assert toolbox_mcp.SECURITY_ERROR is None
+
+    # Real local archive ingestion. The asset's official-shaped identity and
+    # SHA describe a SYNTHETIC test snapshot, never a claim of upstream content.
+    record = {'dataType': 'CVE_RECORD', 'dataVersion': '5.1',
+        'cveMetadata': {'cveId': 'CVE-2026-0001', 'state': 'PUBLISHED'},
+        'containers': {'cna': {'providerMetadata': {'orgId': 'owned-synthetic-cna'},
+            'descriptions': [{'lang': 'en', 'value': 'Synthetic neutral-package test candidate, not a real advisory.'}],
+            'affected': [{'vendor': 'Neutral', 'product': 'neutral-package', 'packageName': 'neutral-package',
+                          'versions': [{'version': '1.2.3', 'status': 'affected'}]}],
+            'references': [{'url': 'https://example.invalid/never-fetch-or-execute-this-reference.py'}]}}}
+    record_raw = json.dumps(record, separators=(',', ':'), ensure_ascii=False).encode('utf-8')
+    archive = tmp_path/'synthetic-cve-baseline.zip'
+    with ZipFile(archive, 'w', compression=ZIP_STORED) as package:
+        package.writestr('cves/2026/0xxx/CVE-2026-0001.json', record_raw)
+    archive_sha = hashlib.sha256(archive.read_bytes()).hexdigest()
+    tag = 'cve_2026-11-06_1500Z'
+    asset_name = '2026-11-06_all_CVEs_at_midnight.zip'
+    asset = cve.Asset('baseline', tag, '2026-11-06', asset_name,
+        'https://github.com/CVEProject/cvelistV5/releases/download/'+tag+'/'+asset_name,
+        archive.stat().st_size, 123, '2026-11-06T15:19:12Z', archive_sha)
+    knowledge = app/'Knowledge/CVE'
+    index = cve.CVEIndex(knowledge/'index.sqlite3')
+    index.sync_local_archive(asset, archive, knowledge/'archives')
+    assert index.status()['complete'] is True and index.status()['records'] == 1
+    expected_record_sha = hashlib.sha256(record_raw).hexdigest()
+    assert index.lookup('CVE-2026-0001')['record_sha256'] == expected_record_sha
+
+    # Populate discovery from real LOCAL_CATALOG without starting REA/browser.
+    # An intentionally empty remote-specialist snapshot leaves local tools real.
+    (state/'specialists.json').write_text('{"tools":[],"errors":{}}', encoding='utf-8')
+    capability_index.sync(app)
+
+    def native_call(tool, arguments):
+        raw = native_agent.execute_tool(folder, 'call_local_tool', {'tool': tool, 'arguments': arguments})
+        assert not raw.startswith('Tool error:'), raw
+        result = json.loads(raw)
+        assert isinstance(result, dict)
+        return result
+
+    original_owner = project_memory._VERIFICATION_PROJECT.get()
+    with project_memory.verification_context(project):
+        discovered = json.loads(native_agent.execute_tool(folder, 'discover_local_tools', {'query': 'security_engagement'}))
+        assert any(row['name'] == 'local.security_engagement' for row in discovered)
+        schema = toolbox_mcp.toolbox_schema('local.security_engagement')['inputSchema']
+        assert schema['additionalProperties'] is False
+        assert 'host' not in schema['properties'] and 'app_dir' not in schema['properties']
+        assert set(schema['required']) == {'project_folder', 'user_request', 'artifact_paths'}
+        for name in toolbox_mcp.SECURITY_HANDLERS:
+            offered = toolbox_mcp.toolbox_schema(name)['inputSchema']['properties']
+            assert not {'host', 'app_dir', 'capture_scope', 'cancel', 'database_path'} & set(offered)
+        scope = native_call('local.security_engagement', {'project_folder': str(folder),
+            'user_request': 'Inspect these supplied local files only.', 'artifact_paths': ['requirements.txt', 'client.py']})
+        assert scope['live_checks_started'] is False and scope['permissions'] == ['local_static_analysis']
+        engagement_id = scope['engagement_id']
+        saved_scope_path = notes/'security/engagements'/ (engagement_id+'.json')
+        saved_scope = json.loads(saved_scope_path.read_text(encoding='utf-8'))
+        assert saved_scope['host_basis']['task_id'] == project['id']
+        assert saved_scope['host_basis']['owner_generation'] == 7
+        assert saved_scope['host_basis']['instruction_basis'] == {
+            'brief': hashlib.sha256(brief.encode('utf-8')).hexdigest(),
+            'rules': hashlib.sha256(before[str(folder/'AGENTS.md')]).hexdigest(),
+            'followups': hashlib.sha256(before[str(notes/'USER-REQUESTS.md')]).hexdigest()}
+        assert saved_scope['request_sha256'] == hashlib.sha256(before[str(notes/'USER-REQUESTS.md')]).hexdigest()
+
+        inspected = native_call('local.inspect_security_artifacts', {'project_folder': str(folder), 'engagement_id': engagement_id})
+        assert inspected['scope_sha256'] == hashlib.sha256(saved_scope_path.read_bytes()).hexdigest()
+        files = {row['path']: row for row in inspected['files']}
+        assert set(files) == {'requirements.txt', 'client.py'}
+        assert files['client.py']['sha256'] == hashlib.sha256(before[str(folder/'client.py')]).hexdigest()
+        assert files['client.py']['findings'] == [{'rule': 'dynamic_code', 'line': 2, 'status': 'review_candidate'}]
+        assert inspected['component_count'] == 1 and inspected['next_offset'] is None
+
+        bom = native_call('local.build_security_sbom', {'project_folder': str(folder), 'engagement_id': engagement_id})
+        assert bom['bomFormat'] == 'CycloneDX' and bom['specVersion'] == '1.6'
+        assert [(row['name'], row['version']) for row in bom['components']] == [('neutral-package', '1.2.3')]
+        assert bom['component_count'] == 1
+
+        mapped = native_call('local.map_security_cves', {'project_folder': str(folder), 'engagement_id': engagement_id})
+        assert mapped['assessment'] == 'CANDIDATE' and mapped['confirmed_vulnerability'] is False
+        assert mapped['catalog']['source'] == 'CVEProject/cvelistV5' and mapped['catalog']['records'] == 1
+        assert mapped['catalog']['complete'] is True
+        assert any(row['archive_sha256'] == archive_sha and row['source_key'] == asset.key for row in mapped['catalog']['provenance'])
+        assert len(mapped['candidates']) == 1
+        candidate = mapped['candidates'][0]
+        assert candidate['cve_id'] == 'CVE-2026-0001' and candidate['confirmed_vulnerability'] is False
+        assert candidate['snapshot_id'] == mapped['catalog']['snapshot_id']
+        assert candidate['mapping'] == 'candidate_exact_version'
+
+        official_row = native_call('local.cve_record', {'cve_id': 'CVE-2026-0001', 'json_pointer': '/containers/cna/affected'})
+        assert official_row['record_sha256'] == expected_record_sha
+        assert official_row['references_fetched'] is False and official_row['source'] == 'CVEProject/cvelistV5'
+
+        with sqlite3.connect(state/'projects.db') as connection:
+            connection.execute('INSERT INTO requests VALUES(?,?,?)', (project['id'], 'pause', 'pending'))
+        refused = native_agent.execute_tool(folder, 'call_local_tool', {'tool': 'local.inspect_security_artifacts',
+            'arguments': {'project_folder': str(folder), 'engagement_id': engagement_id}})
+        assert refused.startswith('Tool error: InterruptedError:') and 'paused' in refused.lower()
+        assert json.loads((notes/'native-worker.json').read_text())['status'] == 'running'
+
+    assert project_memory._VERIFICATION_PROJECT.get() == original_owner
+    assert {str(path): path.read_bytes() for path in source_paths} == before
+    assert hashlib.sha256(archive.read_bytes()).hexdigest() == archive_sha
+    assert not inference_calls and not external_calls and not child_calls
+
+
+# Re-export the wheel's tests and fixtures into the existing installed suite.
+# Older updaters have a 250-file manifest limit, so these remain in the pinned
+# package instead of creating omitted or uninstalled Validation files. Keeping
+# the imports unconditional makes a missing required wheel fail collection.
+from cale_security.tests.test_cve_intelligence import *  # noqa: F403
+from cale_security.tests.test_security_analysis import *  # noqa: F403
+from cale_security.tests.test_bridge import *  # noqa: F403

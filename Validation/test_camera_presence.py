@@ -6,6 +6,193 @@ import io
 import os
 import unittest
 import pytest
+
+
+class _CameraProcessFixture:
+    def __init__(self, pid, started, argv):
+        import sys
+        self.pid=pid; self.started=started; self.argv=argv
+        self.info={'pid':pid,'name':Path(sys.executable).name}; self.actions=[]; self.alive=True
+    def exe(self):
+        import sys
+        return sys.executable
+    def cmdline(self):return list(self.argv)
+    def create_time(self):return self.started
+    def is_running(self):return self.alive
+    def terminate(self):self.actions.append('terminate');self.alive=False
+    def kill(self):self.actions.append('kill');self.alive=False
+    def wait(self,timeout):self.actions.append('wait');return 0
+
+
+def _camera_stale_world(tmp_path, monkeypatch, owner='missing', reuse=False, foreign=False):
+    import camera_presence as camera,sys
+    root=tmp_path/'app';root.mkdir();(root/'camera_presence.py').write_text('# Owned source identity only',encoding='utf-8')
+    script=root/'camera_presence.py'
+    if foreign:script=tmp_path/'foreign-camera_presence.py'
+    argv=[sys.executable,'-u',str(script),'--parent-pid','9901','--parent-started','10.0']
+    old=_CameraProcessFixture(8801,20.0,argv)
+    replacement=_CameraProcessFixture(8801,21.0,argv) if reuse else old
+    def process(pid):
+        if pid==8801:return replacement
+        if pid==9901:
+            if owner=='missing':raise psutil.NoSuchProcess(pid)
+            if owner=='unknown':raise psutil.AccessDenied(pid)
+            return SimpleNamespace(create_time=lambda:11.0 if owner=='reused' else 10.0,is_running=lambda:True)
+        if pid==os.getpid():return SimpleNamespace(create_time=lambda:30.0,is_running=lambda:True)
+        raise psutil.NoSuchProcess(pid)
+    monkeypatch.setattr(camera.psutil,'process_iter',lambda *_:[old])
+    monkeypatch.setattr(camera.psutil,'Process',process)
+    return camera,root,old,replacement
+
+
+@pytest.mark.parametrize('owner',['missing','reused'])
+def test_stale_camera_retirement_requires_expired_exact_owner(tmp_path,monkeypatch,owner):
+    camera,root,old,_=_camera_stale_world(tmp_path,monkeypatch,owner=owner)
+    result=camera.reap_stale_camera_workers(root)
+    assert old.actions==['terminate','wait'] and len(result['stopped'])==1
+    assert result['stopped'][0]['pid']==8801 and result['stopped'][0]['started']==20.0
+
+
+@pytest.mark.parametrize('case',['current','unknown','reused_worker','foreign_script','missing_owner_arg','duplicate_owner_arg'])
+def test_camera_retirement_preserves_current_foreign_and_uncertain_workers(tmp_path,monkeypatch,case):
+    camera,root,old,replacement=_camera_stale_world(tmp_path,monkeypatch,
+        owner=case if case in {'current','unknown'} else 'missing',reuse=case=='reused_worker',foreign=case=='foreign_script')
+    if case=='missing_owner_arg':old.argv=old.argv[:-2]
+    if case=='duplicate_owner_arg':old.argv+=['--parent-pid','9901']
+    result=camera.reap_stale_camera_workers(root)
+    assert result['stopped']==[] and old.actions==[] and replacement.actions==[]
+
+
+def _camera_monitor_fixture(tmp_path,monkeypatch,process):
+    import ast,queue,threading,time,camera_presence as camera
+    source=Path(__file__).parents[1]/'long_tasks.py';tree=ast.parse(source.read_text(encoding='utf-8'))
+    monitor=next(n for n in ast.walk(tree) if isinstance(n,ast.FunctionDef) and n.name=='monitor' and 'offer_camera_frame' in ast.unparse(n))
+    python=tmp_path/'Media/python/Scripts/python.exe';python.parent.mkdir(parents=True);python.write_bytes(b'owned fixture')
+    spawned=Mock(return_value=process)
+    if hasattr(camera,'spawn_owned_camera_process'):monkeypatch.setattr(camera,'spawn_owned_camera_process',spawned)
+    if hasattr(camera,'reap_stale_camera_workers'):monkeypatch.setattr(camera,'reap_stale_camera_workers',Mock(return_value={'stopped':[]}))
+    namespace={'ROOT':tmp_path,'camera_start_lock':threading.Lock(),'current':lambda:True,'greeting_process':[None],
+        'generation':1,'animated':False,'sharing':False,'voice_events':queue.Queue(),'json':json,'os':os,
+        'camera_worker_command':lambda *_:['fixed-camera-command'],'offer_camera_frame':Mock(),
+        'stop_owned_camera_process':Mock(),'subprocess':SimpleNamespace(Popen=spawned,PIPE=-1,DEVNULL=-3,TimeoutExpired=__import__('subprocess').TimeoutExpired)}
+    exec(compile(ast.Module(body=[monitor],type_ignores=[]),str(source),'exec'),namespace)
+    return namespace,spawned
+
+
+def test_camera_specific_worker_error_is_not_overwritten_by_generic_exit(tmp_path,monkeypatch):
+    process=Mock();process.stdout=io.StringIO(json.dumps({'event':'error','message':'Webcam unavailable: owned diagnostic'})+'\n')
+    process.returncode=1;process.poll.return_value=1
+    namespace,spawned=_camera_monitor_fixture(tmp_path,monkeypatch,process)
+    namespace['monitor']()
+    values=[]
+    while not namespace['voice_events'].empty():values.append(namespace['voice_events'].get_nowait())
+    errors=[value[1][2] for value in values if value[1][1]=='camera_error']
+    assert errors==['Webcam unavailable: owned diagnostic']
+    spawned.assert_called_once()
+
+
+@pytest.mark.parametrize('good_frame',[False,True])
+def test_camera_ready_requires_a_real_valid_frame(monkeypatch,tmp_path,good_frame):
+    import camera_presence as camera,sys
+    events=[];permission=[True];reads=[0]
+    capture=Mock();capture.isOpened.return_value=True
+    def read():
+        reads[0]+=1
+        if good_frame:
+            if reads[0]>1:permission[0]=False
+            return True,np.zeros((24,32,3),dtype=np.uint8)
+        return False,None
+    capture.read.side_effect=read
+    cv2=SimpleNamespace(error=RuntimeError,data=SimpleNamespace(haarcascades='.'),CAP_DSHOW=0,
+        CascadeClassifier=lambda *_:SimpleNamespace(empty=lambda:False),VideoCapture=lambda *_:capture)
+    monkeypatch.setitem(sys.modules,'cv2',cv2)
+    monkeypatch.setitem(sys.modules,'camera_network',SimpleNamespace(camera_source=lambda _:0,greeting_camera=lambda:0))
+    monkeypatch.setitem(sys.modules,'face_identity',SimpleNamespace(ENROLL_REQUEST=tmp_path/'absent',FaceModel=Mock(),enroll=Mock()))
+    monkeypatch.setattr(camera,'allowed',lambda:permission[0]);monkeypatch.setattr(camera,'owner_alive',lambda *_:True)
+    monkeypatch.setattr(camera,'negotiate_capture',lambda *_:{'width':3840,'height':2160,'fps':30})
+    monkeypatch.setattr(camera,'LatestFrameWorker',lambda *_:SimpleNamespace(submit=lambda *_:None,close=lambda:None))
+    monkeypatch.setattr(camera,'preview_frame',lambda *_:'')
+    monkeypatch.setattr(camera,'time',SimpleNamespace(monotonic=lambda:0.,sleep=lambda *_:None))
+    monkeypatch.setattr(camera,'emit',lambda kind,message='':events.append((kind,message,reads[0])))
+    assert camera.watch()==(0 if good_frame else 1)
+    ready=[row for row in events if row[0]=='ready']
+    assert len(ready)==(1 if good_frame else 0)
+    if good_frame:assert ready[0][2]==1 and '32×24' in ready[0][1]
+    capture.release.assert_called_once()
+
+
+def test_owned_camera_job_starts_suspended_and_assigns_before_resume(tmp_path,monkeypatch):
+    import camera_presence as camera,sys,ctypes,subprocess,threading
+    events=[];job=SimpleNamespace(Close=Mock());process=Mock();process._handle=123;process.pid=77
+    process.wait.return_value=0
+    def query(_job,kind):return {'BasicLimitInformation':{'LimitFlags':0}} if kind==1 else ()
+    api=SimpleNamespace(CreateJobObject=Mock(return_value=job),QueryInformationJobObject=query,
+        SetInformationJobObject=Mock(),AssignProcessToJobObject=lambda *_:events.append('assign'),
+        TerminateJobObject=Mock(),JobObjectExtendedLimitInformation=1,JobObjectBasicProcessIdList=2,JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE=0x2000)
+    monkeypatch.setitem(sys.modules,'win32job',api)
+    def popen(*args,**kwargs):
+        assert kwargs['creationflags']&4;events.append('spawn suspended');return process
+    monkeypatch.setattr(subprocess,'Popen',popen)
+    resume=Mock(side_effect=lambda *_:events.append('resume') or 0)
+    monkeypatch.setattr(ctypes,'WinDLL',lambda *_:SimpleNamespace(NtResumeProcess=resume))
+    assert camera.spawn_owned_camera_process(['owned harmless command'],cwd=tmp_path) is process
+    assert events==['spawn suspended','assign','resume']
+    camera.close_owned_camera_job(process)
+    api.TerminateJobObject.assert_called_once_with(job,125);job.Close.assert_called_once()
+    camera.close_owned_camera_job(process);job.Close.assert_called_once()
+
+
+def test_owned_camera_job_reaps_a_real_harmless_child_without_camera(tmp_path):
+    import camera_presence as camera,sys
+    command=[sys.executable,'-I','-B','-c','import time;print("owned camera job fixture",flush=True);time.sleep(60)']
+    process=camera.spawn_owned_camera_process(command,cwd=tmp_path)
+    try:
+        assert process.stdout.readline().strip()=='owned camera job fixture'
+        camera.close_owned_camera_job(process)
+        assert process.poll() is not None and process._cale_camera_job['handle'] is None
+    finally:
+        camera.close_owned_camera_job(process)
+        if process.stdout is not None:process.stdout.close()
+
+
+@pytest.mark.parametrize('stage',['assign','resume'])
+def test_owned_camera_start_failure_reaps_only_its_suspended_child(tmp_path,monkeypatch,stage):
+    import camera_presence as camera,sys,ctypes,subprocess
+    process=Mock();process._handle=123;process.pid=77;process.wait.return_value=0;process.poll.return_value=None
+    job=SimpleNamespace(Close=Mock())
+    def assign(*args):
+        if stage=='assign':raise OSError('Owned assignment failure')
+    api=SimpleNamespace(CreateJobObject=Mock(return_value=job),
+        QueryInformationJobObject=lambda _j,kind:{'BasicLimitInformation':{'LimitFlags':0}} if kind==1 else (),
+        SetInformationJobObject=Mock(),AssignProcessToJobObject=assign,TerminateJobObject=Mock(),
+        JobObjectExtendedLimitInformation=1,JobObjectBasicProcessIdList=2,JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE=0x2000)
+    monkeypatch.setitem(sys.modules,'win32job',api)
+    monkeypatch.setattr(subprocess,'Popen',lambda *a,**k:process)
+    monkeypatch.setattr(ctypes,'WinDLL',lambda *_:SimpleNamespace(NtResumeProcess=Mock(return_value=-1)))
+    with pytest.raises((RuntimeError,OSError)):
+        camera.spawn_owned_camera_process(['owned harmless command'],cwd=tmp_path)
+    if stage=='assign':process.kill.assert_called_once()
+    else:process.kill.assert_not_called()
+    assert process.wait.called
+    job.Close.assert_called_once()
+
+
+def test_camera_job_unknown_membership_prevents_replacement(tmp_path):
+    import camera_presence as camera,threading
+    job=SimpleNamespace(Close=Mock())
+    api=SimpleNamespace(TerminateJobObject=Mock(),QueryInformationJobObject=lambda *_:('unknown',),
+        JobObjectBasicProcessIdList=2)
+    process=Mock();process._cale_camera_job={'handle':job,'api':api,'lock':threading.Lock()}
+    for _ in range(2):
+        with pytest.raises(RuntimeError,match='cleanup is unconfirmed'):
+            camera.close_owned_camera_job(process)
+        assert process._cale_camera_job['handle'] is job
+        job.Close.assert_not_called()
+    api.QueryInformationJobObject=lambda *_:()
+    camera.close_owned_camera_job(process)
+    camera.close_owned_camera_job(process)
+    assert process._cale_camera_job['confirmed_empty'] is True
+    job.Close.assert_called_once()
 from types import SimpleNamespace
 from pathlib import Path
 from unittest.mock import Mock, patch
@@ -822,7 +1009,10 @@ def test_camera_preview_uses_latest_slot_independent_of_voice_fifo():
         'ROOT':source.parent,'media_python':Path('test-only-python'),'greeting_process':[None],
         'greeting_until':[0],'time':__import__('time'),'current':lambda:True,'generation':0,'animated':False,'sharing':False,'camera_start_lock':__import__('threading').Lock(),'stop_owned_camera_process':Mock(),'camera_worker_command':Mock(return_value=['fake-camera-command'])})
     exec(compile(ast.Module(body=[camera_monitor],type_ignores=[]),str(source),'exec'),namespace)
-    with patch.object(Path,'is_file',return_value=True):namespace['monitor']()
+    with (patch.object(Path,'is_file',return_value=True),
+          patch('camera_presence.reap_stale_camera_workers',return_value={'stopped':[]}),
+          patch('camera_presence.spawn_owned_camera_process',return_value=process)):
+        namespace['monitor']()
     assert namespace['camera_frames'].get_nowait()==(0,'99')
     assert namespace['voice_events'].get_nowait()==('camera_session',(0,'camera_notice','native resolution'))
     assert namespace['voice_events'].empty()
@@ -1266,6 +1456,8 @@ def test_avatar_launcher_reaps_old_owner_before_setup_and_new_capture(tmp_path,m
     monkeypatch.setattr(video_generation,'ensure_avatar_profile',setup)
     monkeypatch.setitem(__import__('sys').modules,'psutil',SimpleNamespace(Process=lambda _:SimpleNamespace(create_time=lambda:123)))
     def spawned(*args,**kwargs):assert events[-1]=='setup';events.append('new capture');return child
+    monkeypatch.setattr(__import__('camera_presence'),'reap_stale_camera_workers',Mock(return_value={'stopped':[]}))
+    monkeypatch.setattr(__import__('camera_presence'),'spawn_owned_camera_process',spawned)
     scheduled=[]
     fake_threading=SimpleNamespace(Thread=lambda **kwargs:SimpleNamespace(start=lambda:scheduled.append(kwargs['target'])))
     import long_tasks
@@ -1596,3 +1788,157 @@ def test_live_worker_qualifies_prepared_profile_once_and_never_marks_cancelled_r
         assert 'render' not in events
         if outcome not in {'consent_ended','runtime_consent_ended'}:assert status['phase']=='failed'
     assert published and all(not image.any() for image in published)
+
+
+
+def test_actual_camera_monitor_reaps_verified_orphan_before_new_capture(tmp_path,monkeypatch):
+    import camera_presence as camera
+    camera,root,old,_=_camera_stale_world(tmp_path,monkeypatch)
+    real_reaper=camera.reap_stale_camera_workers
+    child=Mock();child.stdout=io.StringIO('');child.returncode=0;child.poll.return_value=0
+    namespace,spawned=_camera_monitor_fixture(root,monkeypatch,child)
+    monkeypatch.setattr(camera,'reap_stale_camera_workers',real_reaper)
+    def start(*args,**kwargs):
+        assert old.alive is False, 'A stale camera owner would still hold the device'
+        return child
+    spawned.side_effect=start
+    namespace['monitor']()
+    assert old.actions==['terminate','wait']
+    spawned.assert_called_once()
+    assert namespace['voice_events'].empty()
+
+
+def test_real_camera_monitor_retains_uncertain_family_and_retry_never_spawns(tmp_path,monkeypatch):
+    import camera_presence as camera,threading,long_tasks
+    job=SimpleNamespace(Close=Mock())
+    api=SimpleNamespace(TerminateJobObject=Mock(),QueryInformationJobObject=lambda *_:('unknown',),JobObjectBasicProcessIdList=2)
+    child=Mock();child.stdout=io.StringIO('');child.returncode=0;child.poll.return_value=0
+    child._cale_camera_job={'handle':job,'api':api,'lock':threading.Lock()}
+    namespace,spawned=_camera_monitor_fixture(tmp_path,monkeypatch,child)
+    namespace['stop_owned_camera_process']=long_tasks.stop_owned_camera_process
+    namespace['monitor']()
+    assert namespace['greeting_process'][0] is child
+    assert spawned.call_count==1
+    namespace['monitor']()
+    assert namespace['greeting_process'][0] is child
+    assert spawned.call_count==1, 'Unknown owned family must prevent a replacement capture'
+    job.Close.assert_not_called()
+    api.QueryInformationJobObject=lambda *_:()
+    long_tasks.stop_owned_camera_process(child)
+    job.Close.assert_called_once()
+
+
+@pytest.mark.parametrize('failure',['wait','revalidate'])
+def test_stale_camera_post_termination_unknown_blocks_new_capture(tmp_path,monkeypatch,failure):
+    camera,root,old,_=_camera_stale_world(tmp_path,monkeypatch)
+    if failure=='wait':
+        old.wait=lambda **_:(_ for _ in ()).throw(psutil.AccessDenied(old.pid))
+    else:
+        old.wait=lambda **_:(_ for _ in ()).throw(psutil.TimeoutExpired(1,old.pid))
+        original=old.cmdline
+        old.cmdline=lambda:(_ for _ in ()).throw(psutil.AccessDenied(old.pid)) if old.actions else original()
+    with pytest.raises(RuntimeError,match='unconfirmed'):
+        camera.reap_stale_camera_workers(root)
+    assert old.actions==['terminate']
+
+
+@pytest.mark.parametrize('stage',['callback','assign'])
+def test_pending_camera_start_cleanup_unknown_remains_owned_on_gui_retry(tmp_path,monkeypatch,stage):
+    import camera_presence as camera,ctypes,subprocess,sys,long_tasks
+    child=Mock();child.pid=77;child._handle=123;child.poll.return_value=None
+    child.wait.side_effect=subprocess.TimeoutExpired('owned pending child',1)
+    child.stdout=io.StringIO('')
+    namespace,spawned=_camera_monitor_fixture(tmp_path,monkeypatch,child)
+    namespace['stop_owned_camera_process']=long_tasks.stop_owned_camera_process
+    job=SimpleNamespace(Close=Mock())
+    api=SimpleNamespace(CreateJobObject=lambda *_:job,QueryInformationJobObject=lambda j,k:{'BasicLimitInformation':{'LimitFlags':0}} if k==1 else (),
+        SetInformationJobObject=Mock(),AssignProcessToJobObject=Mock(side_effect=OSError('owned assign failure')),TerminateJobObject=Mock(),
+        JobObjectExtendedLimitInformation=1,JobObjectBasicProcessIdList=2,JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE=0x2000)
+    monkeypatch.setitem(sys.modules,'win32job',api)
+    monkeypatch.setattr(subprocess,'Popen',Mock(return_value=child))
+    real_spawn=camera.spawn_owned_camera_process
+    # The monitor fixture replaces the factory; select the actual frozen definition.
+    import ast
+    tree=ast.parse((Path(__file__).parents[1]/'camera_presence.py').read_text(encoding='utf-8'))
+    definition=next(n for n in tree.body if isinstance(n,ast.FunctionDef) and n.name=='spawn_owned_camera_process')
+    own=dict(vars(camera));exec(compile(ast.Module(body=[definition],type_ignores=[]),'owned-camera-factory','exec'),own)
+    def launch(*args,**kwargs):
+        if stage=='callback':
+            retained=kwargs['on_created']
+            def interrupted(created):
+                retained(created);raise OSError('owned callback failure')
+            kwargs['on_created']=interrupted
+        return own['spawn_owned_camera_process'](*args,**kwargs)
+    spawned.side_effect=launch
+    # Real cleanup takes the direct Job path after the child is terminal only;
+    # here force the owned-tree precursor to complete, preserving Job uncertainty.
+    monkeypatch.setattr(camera,'stop_owned_avatar_process_tree',lambda *_a,**_k:None)
+    namespace['monitor']()
+    assert namespace['greeting_process'][0] is child and spawned.call_count==1
+    # Retry through the actual outer entrypoint, including its early-running guard.
+    import time,video_generation
+    outer=next(n for n in ast.walk(ast.parse((Path(__file__).parents[1]/'long_tasks.py').read_text(encoding='utf-8')))
+               if isinstance(n,ast.FunctionDef) and n.name=='start_camera_greeting')
+    namespace.update(time=time,greeting_until=[time.time()+60],camera_generation=[1],
+        avatar_selected=SimpleNamespace(get=lambda:False),virtual_selected=SimpleNamespace(get=lambda:False),
+        update_camera_layout=lambda:None,clear_camera_preview=lambda:None,camera_preview=Mock(),
+        threading=SimpleNamespace(Thread=lambda target,daemon:SimpleNamespace(start=target)))
+    monkeypatch.setattr(video_generation,'save_avatar_camera_mode',lambda *_:None)
+    exec(compile(ast.Module(body=[outer],type_ignores=[]),'actual-camera-entrypoint','exec'),namespace)
+    namespace['start_camera_greeting']()
+    assert namespace['camera_generation'][0]==2, 'Pending owner must reach cleanup retry'
+    assert namespace['greeting_process'][0] is child and spawned.call_count==1
+    assert child._cale_camera_job['assigned'] is False
+    job.Close.assert_not_called()
+    child.poll.return_value=0;child.wait.side_effect=None
+    camera.close_owned_camera_job(child)
+    job.Close.assert_called_once()
+
+
+def test_camera_fatal_error_stops_stream_before_late_success_events(tmp_path,monkeypatch):
+    process=Mock();process.returncode=0;process.poll.return_value=0
+    process.stdout=io.StringIO(''.join(json.dumps({'event':kind,'message':message})+'\n' for kind,message in
+        [('error','Specific fatal camera failure'),('ready','Camera ready'),('notice','success'),('frame','private preview')]))
+    namespace,spawned=_camera_monitor_fixture(tmp_path,monkeypatch,process)
+    namespace['monitor']()
+    values=[]
+    while not namespace['voice_events'].empty():values.append(namespace['voice_events'].get_nowait())
+    assert [item[1][1:] for item in values]==[('camera_error','Specific fatal camera failure')]
+    namespace['offer_camera_frame'].assert_not_called()
+    assert namespace['stop_owned_camera_process'].call_count>=1
+    spawned.assert_called_once()
+
+
+def test_camera_last_job_handle_close_reaps_only_owned_harmless_family(tmp_path):
+    import camera_presence as camera,sys,time
+    command=[sys.executable,'-I','-B','-c','import time;print("last handle fixture",flush=True);time.sleep(60)']
+    child=camera.spawn_owned_camera_process(command,cwd=tmp_path)
+    identities=[];closed=False
+    try:
+        assert child.stdout.readline().strip()=='last handle fixture'
+        owner=psutil.Process(child.pid)
+        identities=[(member.pid,member.create_time()) for member in [owner]+owner.children(recursive=True)]
+        assert identities
+        child._cale_camera_job['handle'].Close();closed=True
+        child._cale_camera_job['handle']=None
+        deadline=time.monotonic()+5
+        def same_live(pid,started):
+            try:
+                member=psutil.Process(pid)
+                return abs(member.create_time()-started)<.001 and member.is_running()
+            except psutil.NoSuchProcess:return False
+        while any(same_live(*identity) for identity in identities) and time.monotonic()<deadline:time.sleep(.02)
+        assert not any(same_live(*identity) for identity in identities)
+        assert child.wait(timeout=1) is not None
+        child._cale_camera_job['confirmed_empty']=True
+    finally:
+        if not closed:camera.close_owned_camera_job(child)
+        else:
+            # Failure cleanup is restricted to the previously captured exact births.
+            for pid,started in identities:
+                try:
+                    member=psutil.Process(pid)
+                    if abs(member.create_time()-started)<.001 and member.is_running():
+                        member.kill();member.wait(timeout=3)
+                except psutil.NoSuchProcess:pass
+        if child.stdout is not None:child.stdout.close()

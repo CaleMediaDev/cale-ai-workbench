@@ -13,6 +13,7 @@ import math
 import os
 import re
 import sqlite3
+import stat
 import subprocess
 import sys
 import time
@@ -390,6 +391,65 @@ def _transient_database_busy(details):
             and 0 <= code <= 2**31-1 and code & 255 in {sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED})
 
 
+_SECURITY_PACKAGE_FILES = (
+    'cale_security/__init__.py',
+    'cale_security/cve_intelligence.py',
+    'cale_security/security_analysis.py',
+    'cale_security/bridge.py',
+    'cale_security/CaleStaticExport.java',
+    'cale_security/tests/__init__.py',
+    'cale_security/tests/test_cve_intelligence.py',
+    'cale_security/tests/test_security_analysis.py',
+    'cale_security/tests/test_bridge.py',
+)
+
+
+def _security_package_basis():
+    """Hash actual app-owned wheel bytes, without importing the wheel's code."""
+    import importlib.metadata
+
+    try:
+        distribution = importlib.metadata.distribution('cale-security')
+    except importlib.metadata.PackageNotFoundError:
+        return {'present': False}
+    version = distribution.version
+    if not isinstance(version, str) or not 0 < len(version) <= 128:
+        raise ValueError('Self-check security package metadata is unavailable')
+    package = Path(distribution.locate_file('cale_security')).absolute()
+    facts, total = [], 0
+    for name in _SECURITY_PACKAGE_FILES:
+        path = Path(distribution.locate_file(name)).absolute()
+        if path != package.joinpath(*Path(name).parts[1:]):
+            raise ValueError('Self-check security package location is unavailable')
+        for parent in reversed(path.parents):
+            info = parent.lstat()
+            if not stat.S_ISDIR(info.st_mode) or getattr(info, 'st_file_attributes', 0) & 0x400:
+                raise ValueError('Self-check security package path is unavailable')
+        def identity(info):
+            if (not stat.S_ISREG(info.st_mode) or info.st_nlink != 1
+                    or getattr(info, 'st_file_attributes', 0) & 0x400
+                    or info.st_size > 2 * 1024 * 1024):
+                raise ValueError('Self-check security package file is unavailable')
+            # Windows path/fd creation-time fields need not agree. Bind the
+            # common identity fields and actual content, never ctime equality.
+            return info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns
+        before = identity(path.lstat())
+        with path.open('rb') as stream:
+            opened = identity(os.fstat(stream.fileno()))
+            if before != opened or total + opened[2] > 8 * 1024 * 1024:
+                raise ValueError('Self-check security package changed or exceeded its bounds')
+            raw = stream.read(2 * 1024 * 1024 + 1)
+            after = identity(os.fstat(stream.fileno()))
+        current = identity(path.lstat())
+        total += len(raw)
+        if (before != opened or opened != after or after != current
+                or len(raw) != opened[2] or len(raw) > 2 * 1024 * 1024
+                or total > 8 * 1024 * 1024):
+            raise ValueError('Self-check security package changed or exceeded its bounds')
+        facts.append({'name': name, 'bytes': len(raw), 'sha256': hashlib.sha256(raw).hexdigest()})
+    return {'present': True, 'version': version, 'files': facts}
+
+
 def _live_basis(root, python):
     """Source/runtime correlation for ONE live session, never cached pass reuse."""
     import importlib.metadata
@@ -430,6 +490,7 @@ def _live_basis(root, python):
         "base": str(Path(sys.base_prefix).resolve()), "platform": sys.platform,
         "packages": sorted((str(dist.metadata.get("Name", "")), dist.version)
                            for dist in importlib.metadata.distributions()),
+        "security_package": _security_package_basis(),
         "environment": {name: hashlib.sha256(os.environ.get(name, "").encode()).hexdigest()
                         for name in ("PYTHONHOME", "PYTHONPATH", "CUDA_VISIBLE_DEVICES", "OLLAMA_HOST")}}
     digest.update(json.dumps(runtime, sort_keys=True).encode())

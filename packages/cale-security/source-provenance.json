@@ -1,0 +1,58 @@
+[
+  {
+    "member": "cale_security/cve_intelligence.py",
+    "qualified_raw_sha256": "aaf38c0c19ceed6b3ca11cac749fcc6121b7482bf1a251e571f2e82c567f1718",
+    "packaged_sha256": "aaf38c0c19ceed6b3ca11cac749fcc6121b7482bf1a251e571f2e82c567f1718",
+    "test_import_relocations": []
+  },
+  {
+    "member": "cale_security/security_analysis.py",
+    "qualified_raw_sha256": "e852fbd8b16fc5bd3c143afb0f9ed0db12b3bc00af310cb189be0b346a629991",
+    "packaged_sha256": "e852fbd8b16fc5bd3c143afb0f9ed0db12b3bc00af310cb189be0b346a629991",
+    "test_import_relocations": []
+  },
+  {
+    "member": "cale_security/bridge.py",
+    "qualified_raw_sha256": "12227ad50712d2a4415d0df092773ce8144b888fbec187079d1ac06b5ce8798f",
+    "packaged_sha256": "12227ad50712d2a4415d0df092773ce8144b888fbec187079d1ac06b5ce8798f",
+    "test_import_relocations": []
+  },
+  {
+    "member": "cale_security/CaleStaticExport.java",
+    "qualified_raw_sha256": "38a840f084b2fdd633f294485f5d98c4efaf49415382bf6f0dc26ffea63e7bf1",
+    "packaged_sha256": "38a840f084b2fdd633f294485f5d98c4efaf49415382bf6f0dc26ffea63e7bf1",
+    "test_import_relocations": []
+  },
+  {
+    "member": "cale_security/tests/test_cve_intelligence.py",
+    "qualified_raw_sha256": "b4c85333e5ca4b6fd0227f257dfb08f0d060e24927a445ec7d25b21077e0edcf",
+    "packaged_sha256": "39af8908dd67ec59ebb84d1704ab8892fb706c70ebe90ea4a43875d51d7ab616",
+    "test_import_relocations": [
+      [
+        "sys.path.insert(0, str(Path(__file__).resolve().parents[1]))",
+        "# Installed tests use only the explicit package namespace."
+      ],
+      [
+        "import cve_intelligence as cve",
+        "from cale_security import cve_intelligence as cve"
+      ]
+    ]
+  },
+  {
+    "member": "cale_security/tests/test_security_analysis.py",
+    "qualified_raw_sha256": "ff4d8d3be558d86a9a3b2e10e011c02d89785169f8de723ed4dbb4a4c53ab3ed",
+    "packaged_sha256": "45ab1dc0b92f371c993702ea0466491a9954b21e17f3b14a6527ca2cdb8a7856",
+    "test_import_relocations": [
+      [
+        "import security_analysis as security",
+        "from cale_security import security_analysis as security"
+      ]
+    ]
+  },
+  {
+    "member": "cale_security/tests/test_bridge.py",
+    "qualified_raw_sha256": "2a5c269aaf991f00bb8715b23355239d354434ba8f915f0dc82233d9e6295d1d",
+    "packaged_sha256": "2a5c269aaf991f00bb8715b23355239d354434ba8f915f0dc82233d9e6295d1d",
+    "test_import_relocations": []
+  }
+]

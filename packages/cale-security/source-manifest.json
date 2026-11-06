@@ -1,0 +1,42 @@
+{
+  "cale_security/cve_intelligence.py": {
+    "path": "cale_security/cve_intelligence.py",
+    "sha256": "aaf38c0c19ceed6b3ca11cac749fcc6121b7482bf1a251e571f2e82c567f1718",
+    "replacements": []
+  },
+  "cale_security/security_analysis.py": {
+    "path": "cale_security/security_analysis.py",
+    "sha256": "e852fbd8b16fc5bd3c143afb0f9ed0db12b3bc00af310cb189be0b346a629991",
+    "replacements": []
+  },
+  "cale_security/bridge.py": {
+    "path": "cale_security/bridge.py",
+    "sha256": "12227ad50712d2a4415d0df092773ce8144b888fbec187079d1ac06b5ce8798f",
+    "replacements": []
+  },
+  "cale_security/CaleStaticExport.java": {
+    "path": "cale_security/CaleStaticExport.java",
+    "sha256": "38a840f084b2fdd633f294485f5d98c4efaf49415382bf6f0dc26ffea63e7bf1",
+    "replacements": []
+  },
+  "cale_security/tests/test_cve_intelligence.py": {
+    "path": "cale_security/tests/test_cve_intelligence.py",
+    "sha256": "39af8908dd67ec59ebb84d1704ab8892fb706c70ebe90ea4a43875d51d7ab616",
+    "replacements": []
+  },
+  "cale_security/tests/test_security_analysis.py": {
+    "path": "cale_security/tests/test_security_analysis.py",
+    "sha256": "45ab1dc0b92f371c993702ea0466491a9954b21e17f3b14a6527ca2cdb8a7856",
+    "replacements": []
+  },
+  "cale_security/tests/test_bridge.py": {
+    "path": "cale_security/tests/test_bridge.py",
+    "sha256": "2a5c269aaf991f00bb8715b23355239d354434ba8f915f0dc82233d9e6295d1d",
+    "replacements": []
+  },
+  "LICENSE": {
+    "path": "LICENSE",
+    "sha256": "212ae339700f4ba3f3ea1fa71e05d1424538b449dfa65dd4abf605c409ae6739",
+    "replacements": []
+  }
+}

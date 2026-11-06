@@ -30,6 +30,8 @@ NODE = BOX / "node-v26.13.0-win-x64/node.exe"
 CATALOG = {}
 SESSIONS = {}
 ERRORS = {}
+SECURITY_HANDLERS = {}
+SECURITY_ERROR = None
 DISCOVERY_MAX_PAGES = 32
 DISCOVERY_MAX_TOOLS = 2000
 DISCOVERY_SECONDS = 15
@@ -426,6 +428,11 @@ def toolbox_status() -> dict:
             for group in ("rea", "devtools")
         },
         "local_tools_available": True,
+        "security_tools": {
+            "available": bool(SECURITY_HANDLERS),
+            "tools": len(SECURITY_HANDLERS),
+            "error": SECURITY_ERROR,
+        },
     }
 
 
@@ -446,7 +453,7 @@ def toolbox_search(query: str = "", offset: int = 0) -> dict:
     offset = max(0, offset)
     return {
         "total_available": len(all_tools),
-        "backend_errors": ERRORS.copy(),
+        "backend_errors": {**ERRORS, **({"security": SECURITY_ERROR} if SECURITY_ERROR else {})},
         "matching": len(matches),
         "offset": offset,
         "tools": [
@@ -508,6 +515,7 @@ async def toolbox_call(tool: str, arguments_json: str = "{}", project_folder: st
             "local.register_expression_helper": register_expression_helper,
             "local.find_expression_helpers": find_expression_helpers,
             "local.run_expression_helper": run_expression_helper,
+            **SECURITY_HANDLERS,
         }
         handler = local_tools[tool]
         value = handler(**arguments)
@@ -1534,6 +1542,36 @@ async def import_game_example(project_folder: str, game_id: str, path: str) -> d
     if value.startswith("Tool error:"):
         raise ValueError(value)
     return json.loads(value)
+
+
+def _load_security_tools():
+    """Register the optional pinned package without starting analysis or downloads.
+
+    Older updaters install this wheel before activating this file. A damaged or
+    missing package has a concrete discovery error and leaves other tools usable.
+    Its bridge acquires live task authority when a tool runs, never from model JSON.
+    """
+    global SECURITY_HANDLERS, SECURITY_ERROR
+    for name in SECURITY_HANDLERS:
+        LOCAL_CATALOG.pop(name, None)
+    SECURITY_HANDLERS = {}
+    try:
+        from cale_security.bridge import build_tools
+
+        catalog, handlers = build_tools(ROOT, registered_project)
+        if set(catalog) != set(handlers) or any(
+            not name.startswith("local.") or name in LOCAL_CATALOG
+            or not callable(handlers[name]) for name in catalog
+        ):
+            raise ValueError("Security package returned an invalid tool catalog")
+        LOCAL_CATALOG.update(catalog)
+        SECURITY_HANDLERS = handlers
+        SECURITY_ERROR = None
+    except Exception as error:
+        SECURITY_ERROR = f"{type(error).__name__}: {str(error)[:400]}"
+
+
+_load_security_tools()
 
 
 if __name__ == "__main__":

@@ -1,0 +1,3 @@
+# Security wheel inputs and its Java exporter are pinned by their exact bytes.
+# Preserve those bytes on every checkout so rebuilding keeps resource digests valid.
+packages/cale-security/** -text

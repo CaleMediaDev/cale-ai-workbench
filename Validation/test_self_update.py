@@ -348,6 +348,35 @@ class SelfUpdateTests(unittest.TestCase):
             self.assertEqual(install.call_args.args[0][-1], "openai==3.42.0")
             self.assertEqual(install.call_args.args[0][0], str(runtime))
 
+    def test_shipped_security_wheel_url_hash_survives_existing_updater_as_one_argument(self):
+        requirements = Path(self_update.__file__).with_name('requirements-windows.txt').read_text(encoding='utf-8')
+        pins = [line.strip() for line in requirements.splitlines() if 'releases/download/' in line
+                and 'cale_security-' in line and not line.lstrip().startswith('#')]
+        self.assertEqual(len(pins), 1)
+        pin = pins[0]
+        self.assertRegex(pin, r'^https://github\.com/CaleMediaDev/cale-ai-workbench/releases/download/'
+                             r'v\d+\.\d+\.\d+/cale_security-\d+\.\d+\.\d+-py3-none-any\.whl#sha256=[0-9a-f]{64}$')
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            runtime = root/'Toolbox/python/Scripts/python.exe'
+            runtime.parent.mkdir(parents=True)
+            runtime.write_bytes(b'Owned placeholder; mocked pip must not execute it')
+            (root/'requirements-windows.txt').write_text('\n'.join(
+                line for line in requirements.splitlines() if line.strip() != pin)+'\n', encoding='utf-8')
+            payload = io.BytesIO()
+            with ZipFile(payload, 'w') as archive:
+                archive.writestr('requirements-windows.txt', requirements)
+            payload.seek(0)
+            with patch.object(self_update, 'ROOT', root), patch.object(
+                self_update.subprocess, 'run', return_value=MagicMock(returncode=0, stderr='')
+            ) as install, ZipFile(payload) as archive:
+                self_update.sync_new_toolbox_requirements(archive)
+            self.assertEqual(install.call_count, 1)
+            self.assertEqual(install.call_args.args[0], [str(runtime), '-m', 'pip', 'install',
+                '--disable-pip-version-check', pin])
+            self.assertEqual(install.call_args.kwargs['timeout'], 1800)
+            self.assertTrue(install.call_args.args[0][-1].endswith('#sha256='+pin.rsplit('=', 1)[1]))
+
     def test_toolbox_dependency_failure_keeps_old_source_and_version(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)

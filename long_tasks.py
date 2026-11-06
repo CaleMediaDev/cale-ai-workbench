@@ -3766,18 +3766,25 @@ def monitor_restart_needed(now=None, tasks_active=None):
 
 
 def stop_owned_camera_process(process, timeout=3):
-    """Reap the exact child Popen before another process may open its camera."""
+    """Reap the exact child Popen and its owned Job before another capture."""
     if process is None:return
-    if isinstance(getattr(process,"pid",None),int):
-        from camera_presence import stop_owned_avatar_process_tree
-        stop_owned_avatar_process_tree(process,timeout=timeout,root=ROOT)
-        return
-    if process.poll() is None:
-        process.terminate()
-        try:process.wait(timeout=timeout)
-        except subprocess.TimeoutExpired:
-            process.kill();process.wait(timeout=timeout)
-    else:process.wait(timeout=timeout)
+    try:
+        if isinstance(getattr(process,"pid",None),int):
+            from camera_presence import stop_owned_avatar_process_tree
+            stop_owned_avatar_process_tree(process,timeout=timeout,root=ROOT)
+            return
+        if process.poll() is None:
+            process.terminate()
+            try:process.wait(timeout=timeout)
+            except subprocess.TimeoutExpired:
+                process.kill();process.wait(timeout=timeout)
+        else:process.wait(timeout=timeout)
+    except Exception as error:
+        raise RuntimeError('Owned camera cleanup is unconfirmed; no replacement was started') from error
+    finally:
+        if vars(process).get('_cale_camera_job') is not None:
+            from camera_presence import close_owned_camera_job
+            close_owned_camera_job(process,timeout=timeout)
 
 
 def camera_worker_command(root, python, parent_pid, parent_started, animated=False, virtual_output=False):
@@ -5525,7 +5532,10 @@ def gui():
     def start_camera_greeting(restart=False):
         """Setup runs off Tk; old camera owner is reaped before any new launch."""
         if greeting_until[0] <= time.time():return
-        if not restart and greeting_process[0] is not None and greeting_process[0].poll() is None:return
+        existing=greeting_process[0]
+        pending=vars(existing).get('_cale_camera_job') if existing is not None else None
+        needs_cleanup=isinstance(pending,dict) and pending.get('lifecycle') in {'pending','cleanup_unconfirmed'}
+        if not restart and existing is not None and existing.poll() is None and not needs_cleanup:return
         camera_generation[0]+=1
         generation=camera_generation[0]
         animated=avatar_selected.get();sharing=bool(animated and virtual_selected.get())
@@ -5549,6 +5559,7 @@ def gui():
             except (AttributeError,OSError,ValueError):pass
         def current():return generation==camera_generation[0] and greeting_until[0]>time.time()
         def monitor():
+            from camera_presence import CameraStartError, reap_stale_camera_workers, spawn_owned_camera_process
             process=None
             try:
                 import psutil,video_generation
@@ -5557,6 +5568,7 @@ def gui():
                     previous=greeting_process[0]
                     stop_owned_camera_process(previous)
                     if greeting_process[0] is previous:greeting_process[0]=None
+                    reap_stale_camera_workers(ROOT)
                     if not current():return
                     media_python=ROOT/"Media/python/Scripts/python.exe"
                     if animated:
@@ -5566,28 +5578,38 @@ def gui():
                     if not media_python.is_file():raise RuntimeError("Camera tools are still installing.")
                     if not current():return
                     command=camera_worker_command(ROOT,media_python,os.getpid(),psutil.Process(os.getpid()).create_time(),animated,sharing)
-                    process=subprocess.Popen(command,cwd=ROOT,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,
-                        text=True,encoding="utf-8",errors="replace",creationflags=getattr(subprocess,"CREATE_NO_WINDOW",0),
-                        env=video_generation._avatar_environment() if animated else None)
+                    def retain_created(created):greeting_process[0]=created
+                    process=spawn_owned_camera_process(command,cwd=ROOT,
+                        env=video_generation._avatar_environment() if animated else None,on_created=retain_created)
                     greeting_process[0]=process
+                specific_error=False
                 for line in process.stdout:
                     if not current():break
                     if len(line)>2_800_256:continue
                     try:event=json.loads(line)
                     except ValueError:continue
+                    if event.get("event")=="error" and str(event.get("message","")).strip():specific_error=True
                     if event.get("event")=="frame":offer_camera_frame(str(event.get("message","")),generation)
                     else:voice_events.put(("camera_session",(generation,"camera_"+str(event.get("event","error")),str(event.get("message","")))))
+                    if specific_error:
+                        stop_owned_camera_process(process)
+                        break  # Fatal session errors cannot be undone by later async ready/frame events.
                 if not current():stop_owned_camera_process(process)
                 else:
                     process.wait()
-                    if process.returncode:voice_events.put(("camera_session",(generation,"camera_error","Camera stopped. Your real image is not used as an animated fallback.")))
+                    if process.returncode and not specific_error:voice_events.put(("camera_session",(generation,"camera_error","Camera stopped. Your real image is not used as an animated fallback.")))
             except Exception as error:
+                if isinstance(error,CameraStartError):
+                    process=error.process
+                    greeting_process[0]=process
                 if current():voice_events.put(("camera_session",(generation,"camera_error",str(error)[:220])))
             finally:
                 if process is not None:
                     try:stop_owned_camera_process(process)
-                    except (OSError,subprocess.TimeoutExpired):pass
-                    if greeting_process[0] is process:greeting_process[0]=None
+                    except RuntimeError as error:
+                        if current():voice_events.put(("camera_session",(generation,"camera_error",str(error)[:220])))
+                    else:
+                        if greeting_process[0] is process:greeting_process[0]=None
         threading.Thread(target=monitor,daemon=True).start()
 
     def change_camera_view():
@@ -5623,8 +5645,8 @@ def gui():
             camera_scene.pack_forget()
             clear_camera_preview()
             process = greeting_process[0]
-            if process is not None and process.poll() is None:
-                process.terminate()
+            if process is not None:
+                threading.Thread(target=stop_owned_camera_process,args=(process,),daemon=True).start()
             status.set("Camera greeting turned off.")
 
     camera_button = ttk.Button(
