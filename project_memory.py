@@ -310,7 +310,9 @@ def index(folder: str | Path, include_code: bool = False, max_files: int = 800) 
             # Retire vanished or ineligible sources outside the inspected set,
             # without discarding valid records from excluded directories.
             stale_ids.update(identifier for identifier in existing_files - seen
-                             if not _eligible(root, root / identifier[len("file:"):]))
+                             if (not _eligible(root, root / identifier[len("file:"):])
+                                 or (root / identifier[len("file:"):]).resolve().relative_to(root).as_posix()
+                                 != identifier[len("file:"):]))
         stale = list(stale_ids)
         for identifier in stale:
             conn.execute("DELETE FROM memories WHERE id=?", (identifier,))
