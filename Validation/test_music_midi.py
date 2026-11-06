@@ -404,11 +404,12 @@ def test_note_csv_normalization_can_be_repeated(tmp_path, bends):
     assert not path.with_suffix(".csv.tmp").exists()
 
 
-def test_note_csv_without_pitch_bends_can_be_normalized_repeatedly(tmp_path):
+def test_note_csv_with_empty_array_pitch_bend_can_be_normalized_repeatedly(tmp_path):
     path = tmp_path / "notes.csv"
+    # Simulate CSV row where pitch_bend is an empty string array representation if Basic Pitch outputs it that way
     path.write_text(
         ",".join(music_midi.NOTE_COLUMNS) + "\n"
-        + "0.0,1.0,69,85,\n"
+        + "0.0,1.0,69,85,[]\n"
     )
 
     music_midi.normalize_note_events(path)
@@ -420,8 +421,10 @@ def test_note_csv_without_pitch_bends_can_be_normalized_repeatedly(tmp_path):
         rows = list(csv.DictReader(stream))
     assert len(rows) == 1
     assert list(rows[0]) == music_midi.NOTE_COLUMNS
+    # When input is '[]', it should result in '[]' after normalization
     assert rows[0]["pitch_bend"] == "[]"
     assert not path.with_suffix(".csv.tmp").exists()
+
 
 
 @pytest.mark.parametrize("valid", [True, False])

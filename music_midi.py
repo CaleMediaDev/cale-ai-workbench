@@ -78,7 +78,9 @@ def normalize_note_events(path: Path) -> None:
                 if len(row) < 5:
                     raise RuntimeError("Basic Pitch returned an incomplete note event.")
                 bends = row[4:]
-                if bends == [""]:
+                if not bends:
+                    bends = []
+                elif bends == [""]:
                     bends = []
                 elif bends[0].lstrip().startswith("["):
                     bends = json.loads(",".join(bends))
