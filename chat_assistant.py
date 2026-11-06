@@ -434,8 +434,6 @@ def choose_task(text: str, tasks: list[dict], *, allow_single=True) -> dict | No
     """Find an unambiguous follow-up target, or require the person to choose."""
     if not tasks:
         return None
-    if len(tasks) == 1 and allow_single:
-        return tasks[0]
     value = text.strip().casefold()
     if value.isdecimal():
         try:
@@ -444,6 +442,8 @@ def choose_task(text: str, tasks: list[dict], *, allow_single=True) -> dict | No
             # Python limits integer-string conversion for oversized replies.
             return None
         return tasks[index] if 0 <= index < len(tasks) else None
+    if len(tasks) == 1 and allow_single:
+        return tasks[0]
     matches = [task for task in tasks
                if task["title"].strip() and task["title"].casefold() in value]
     return matches[0] if len(matches) == 1 else None
