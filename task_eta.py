@@ -204,8 +204,12 @@ def countdown(db_path: Path, task_id: str, percent: int, status: str,
                 (task_id,percent,active_seconds,observed) VALUES(?,?,?,?)""",
                 (task_id, percent, elapsed, now),
             )
+        # Excluded downtime or simultaneous updates can give distinct progress
+        # samples the same active time. Prefer the latest progress on ties.
         samples = conn.execute("""SELECT percent,active_seconds,observed FROM task_eta_samples
-            WHERE task_id=? ORDER BY active_seconds DESC LIMIT 4""", (task_id,)).fetchall()
+            WHERE task_id=?
+            ORDER BY active_seconds DESC, observed DESC, percent DESC LIMIT 4""",
+            (task_id,)).fetchall()
     if not active:
         return "Paused" if status == "paused" else ""
     if percent >= 95:
