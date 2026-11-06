@@ -95,6 +95,43 @@ class OllamaRuntimeTests(unittest.TestCase):
             self.assertFalse(installer.with_suffix(".partial").exists())
             self.assertEqual(installer.read_bytes(), b"previous installer")
 
+    def test_run_exits_if_idle_after_lock(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            bundled = root / "Toolbox/ollama/ollama.exe"
+            bundled.parent.mkdir(parents=True)
+            bundled.touch()
+            native = root / "native.exe"
+
+            def complete_other_install(*args):
+                native.touch()
+
+            with (
+                patch.object(ollama_runtime, "ROOT", root),
+                patch.object(ollama_runtime, "STATUS", root / "LongTasks/status.json"),
+                patch.object(ollama_runtime, "native_path", return_value=native),
+                patch.object(
+                    ollama_runtime.msvcrt,
+                    "locking",
+                    side_effect=complete_other_install,
+                ) as locking,
+                patch.object(ollama_runtime, "busy", return_value=False),
+                patch.object(ollama_runtime, "pinned_installer") as pinned,
+                patch.object(ollama_runtime, "save_download_status") as status,
+                patch.object(ollama_runtime.subprocess, "run") as install,
+            ):
+                self.assertTrue(ollama_runtime.migration_needed())
+                ollama_runtime.run()
+                locking.assert_called_once()
+                pinned.assert_not_called()
+                install.assert_not_called()
+                status.assert_any_call(
+                    ollama_runtime.STATUS,
+                    "complete",
+                    "No tasks or downloads running",
+                    100,
+                )
+
     def test_run_rechecks_migration_after_acquiring_lock(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)

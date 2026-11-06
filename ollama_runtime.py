@@ -138,6 +138,14 @@ def run():
             # Another worker may have finished after our initial check.
             if not migration_needed():
                 return
+            if not busy():
+                save_download_status(
+                    STATUS,
+                    "complete",
+                    "No tasks or downloads running",
+                    100,
+                )
+                return
             while busy():
                 save_download_status(
                     STATUS,
