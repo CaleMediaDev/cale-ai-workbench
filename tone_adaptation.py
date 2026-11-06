@@ -45,6 +45,8 @@ def social_reply(utterance: str) -> str:
         if choice.get("finish_reason") in ("length", "content_filter", "tool_calls", "function_call"):
             return "I heard you. What do you need?"
         message = choice["message"]
+        if message.get("role", "assistant") != "assistant":
+            return "I heard you. What do you need?"
         if message.get("tool_calls") or message.get("function_call"):
             return "I heard you. What do you need?"
         content = message.get("content")

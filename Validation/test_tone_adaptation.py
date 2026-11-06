@@ -66,6 +66,24 @@ class ToneAdaptationTests(unittest.TestCase):
                         self.assertEqual(tone_adaptation.social_reply("Please do that task."),
                                          "I heard you. What do you need?")
 
+    def test_only_assistant_message_content_is_spoken(self):
+        for role in ("user", "system", "developer", "tool", "function", None,
+                     "assistant"):
+            with self.subTest(role=role):
+                result = {"choices": [{
+                    "finish_reason": "stop",
+                    "message": {"role": role, "content": "Hello there!"},
+                }]}
+                with patch("cloud_ai.post", return_value=result):
+                    answer = tone_adaptation.social_reply("Hello")
+                expected = ("Hello there!" if role == "assistant"
+                            else "I heard you. What do you need?")
+                self.assertEqual(answer, expected)
+
+        result = {"choices": [{"message": {"content": "Hello there!"}}]}
+        with patch("cloud_ai.post", return_value=result):
+            self.assertEqual(tone_adaptation.social_reply("Hello"), "Hello there!")
+
     def test_malformed_model_response_leaves_a_short_reply(self):
         for result in ({"choices": None}, {"choices": [{"message": None}]}):
             with self.subTest(result=result):
