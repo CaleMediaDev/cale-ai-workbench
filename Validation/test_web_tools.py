@@ -63,6 +63,39 @@ class BusinessContactTests(unittest.TestCase):
         )
         self.assertEqual(result["sources"][0]["email_addresses"], ["hello@puremichiganlawncare.com"])
 
+    def test_fetch_decodes_charset_with_optional_whitespace(self):
+        import json
+        from pathlib import Path
+        from types import SimpleNamespace
+
+        url = "https://example.org/details"
+        for parameter in ('charset="iso-8859-1"', 'CHARSET = "iso-8859-1"'):
+            with self.subTest(parameter=parameter):
+                content_type = "text/plain; " + parameter
+
+                def download(command, **kwargs):
+                    Path(command[command.index("--output") + 1]).write_bytes(
+                        b"Caf\xe9"
+                    )
+                    return SimpleNamespace(
+                        returncode=0,
+                        stderr=b"",
+                        stdout=json.dumps({
+                            "http_code": 200,
+                            "content_type": content_type,
+                        }).encode("utf-8"),
+                    )
+
+                with (
+                    patch.object(web_tools, "check_url", return_value=(
+                        web_tools.urlsplit(url), ["93.184.216.34"],
+                    )),
+                    patch.object(web_tools, "curl_executable", return_value="curl"),
+                    patch.object(web_tools.subprocess, "run", side_effect=download),
+                ):
+                    result = web_tools.fetch(url)
+                self.assertEqual(result, (url, "Café", content_type, 200))
+
     def test_reader_parses_mixed_case_html_content_type(self):
         body = (
             '<html><head><title>Business contact</title></head><body>'
