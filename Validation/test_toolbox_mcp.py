@@ -1045,6 +1045,27 @@ def test_backend_schema_serialization_failure_isolated_before_publication():
     asyncio.run(check())
 
 
+@pytest.mark.parametrize("across_pages", [False, True])
+def test_backend_discovery_rejects_duplicate_tool_names(across_pages):
+    calls = []
+    first = SimpleNamespace(name="inspect", inputSchema={"type": "object"})
+    conflicting = SimpleNamespace(name="inspect", inputSchema={"type": "string"})
+
+    class FakeSession:
+        async def list_tools(self, cursor=None):
+            calls.append(cursor)
+            if not across_pages:
+                return SimpleNamespace(tools=[first, conflicting], next_cursor=None)
+            if cursor is None:
+                return SimpleNamespace(tools=[first], next_cursor="second")
+            assert cursor == "second"
+            return SimpleNamespace(tools=[conflicting], next_cursor=None)
+
+    with pytest.raises(ValueError, match="duplicate tool name"):
+        asyncio.run(toolbox_mcp._discover_tools(FakeSession()))
+    assert calls == ([None, "second"] if across_pages else [None])
+
+
 def test_backend_discovery_includes_tools_from_later_pages():
     discovery_calls = []
     tool_calls = []
