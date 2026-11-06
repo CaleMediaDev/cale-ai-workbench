@@ -325,6 +325,31 @@ def test_transcription_ignores_directory_matching_note_csv(tmp_path):
     assert source.read_bytes() == b"audio"
 
 
+def test_inference_output_decoding_matches_child_utf8_mode(tmp_path):
+    source = tmp_path / "guitar.wav"
+    source.write_bytes(b"audio")
+    target = tmp_path / "notes"
+    diagnostic = "Cannot transcribe: 音楽.wav"
+
+    def render(args, **kwargs):
+        assert kwargs["env"]["PYTHONUTF8"] == "1"
+        assert kwargs.get("encoding") == "utf-8"
+        assert kwargs.get("errors") == "replace"
+        return type("Done", (), {
+            "returncode": 1, "stdout": "", "stderr": diagnostic,
+        })()
+
+    with patch.object(music_midi.music_backend, "_setup_lock", return_value=nullcontext()), \
+         patch.object(music_midi, "install", return_value=Path("python.exe")), \
+         patch.object(music_midi.subprocess, "run", side_effect=render):
+        with pytest.raises(RuntimeError) as error:
+            music_midi.transcribe_to_midi(str(source), str(target))
+
+    assert str(error.value) == diagnostic
+    assert list(target.iterdir()) == []
+    assert source.read_bytes() == b"audio"
+
+
 def test_failed_transcription_with_partial_output_can_be_retried(tmp_path):
     source = tmp_path / "guitar.wav"
     source.write_bytes(b"audio")
