@@ -295,6 +295,25 @@ def test_recovery_retries_png_with_invalid_chunk_checksum(tmp_path):
     assert not output.exists()
 
 
+def test_recovery_restarts_job_with_overflowing_worker_pid(tmp_path):
+    job_id = "8" * 32
+    quick_image._write_job(tmp_path, job_id, {
+        "job_id": job_id, "status": "working", "prompt": "a dog",
+        "output_path": str(tmp_path / "dog.png"),
+        "worker_pid": float("inf"),
+    })
+
+    # Exercise the real PID validation: int(infinity) raises OverflowError.
+    with patch.object(quick_image, "_launch_job") as launch:
+        quick_image.recover_image_jobs(tmp_path)
+        launch.assert_called_once_with(tmp_path, job_id)
+
+    info = quick_image.image_job_status(tmp_path, job_id)
+    assert info["status"] == "queued"
+    assert info["worker_pid"] is None
+    assert info["recoveries"] == 1
+
+
 def test_recovery_skips_null_recovery_count_without_aborting_other_jobs(tmp_path):
     bad_id = "2" * 32
     good_id = "3" * 32
