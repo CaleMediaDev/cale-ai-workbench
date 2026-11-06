@@ -412,3 +412,493 @@ def test_concurrent_legacy_migration_preserves_deleted_id_high_water(tmp_path, m
     with real_connect(db) as conn:
         assert conn.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
         assert conn.execute("SELECT name FROM sqlite_master WHERE name='feedback_legacy'").fetchone() is None
+
+
+# Derived recall indexing is driven explicitly in owned fixtures; read APIs
+# and record/forget never start maintenance threads.
+def _finish_recall(root, steps=100):
+    for _ in range(steps):
+        result = feedback_learning.maintain(root)
+        assert result["status"] != "unavailable", result
+        if result["status"] == "ready": return result
+    raise AssertionError("bounded backfill did not finish")
+
+
+def test_indexed_old_lesson_keeps_priority_before_recent_fallback(tmp_path, monkeypatch):
+    clock = [0.0]
+    monkeypatch.setattr(feedback_learning.time, "time", lambda: clock[0])
+    feedback_learning.record(tmp_path, task("old", "Techno synth bass", title="Techno synth bass"), -1, "Use electronic drums")
+    for index in range(300):
+        clock[0] = index + 1.0
+        feedback_learning.record(tmp_path, task(str(index), "Classical piano sonata", title="Classical piano sonata"), -1, "Use softer piano dynamics")
+    assert not feedback_learning.guidance(tmp_path, "music", "Techno synth bass")
+    _finish_recall(tmp_path)
+    result = feedback_learning.guidance_details(tmp_path, "music", "Techno synth bass", limit=1)
+    assert "Use electronic drums" in result["text"]
+    assert "Use softer piano dynamics" not in result["text"]
+    assert result["status"]["candidate_rows"] <= 300
+    assert result["status"]["metadata_rows"] <= 2048
+    assert result["status"]["text_bytes"] <= 8 * 1024 * 1024
+
+
+def test_recall_read_missing_database_creates_nothing(tmp_path, monkeypatch):
+    root = tmp_path / "absent"
+    monkeypatch.setattr(feedback_learning, "_connect", lambda *a: (_ for _ in ()).throw(AssertionError("read migration")))
+    assert feedback_learning.guidance(root, "music", "Techno synth bass") == ""
+    assert feedback_learning.for_task(root, "task") == []
+    assert not root.exists()
+
+
+def test_old_writer_changes_are_captured_and_stale_text_is_not_recalled(tmp_path):
+    import sqlite3
+    ident = feedback_learning.record(tmp_path, task("old-writer", "Techno synth bass"), -1, "Old note")
+    _finish_recall(tmp_path)
+    with sqlite3.connect(tmp_path / "feedback-learning.sqlite3") as db:
+        db.execute("UPDATE feedback SET note='New note' WHERE id=?", (ident,))
+        assert db.execute("SELECT 1 FROM feedback_recall_changes_v1 WHERE event='doc'").fetchone()
+    assert "Old note" not in feedback_learning.guidance(tmp_path, "music", "Techno synth bass")
+    assert "New note" in feedback_learning.guidance(tmp_path, "music", "Techno synth bass")
+    _finish_recall(tmp_path)
+    assert feedback_learning.forget(tmp_path, ident)
+    assert not feedback_learning.guidance(tmp_path, "music", "Techno synth bass")
+
+
+def test_generation_floor_changes_are_observed_before_maintenance(tmp_path):
+    import sqlite3
+    feedback_learning.record(tmp_path, task("floor", "Techno synth bass"), -1, "Use electronic drums")
+    _finish_recall(tmp_path)
+    with sqlite3.connect(tmp_path / "feedback-learning.sqlite3") as db:
+        db.execute("UPDATE feedback_generations SET generation=2 WHERE task_id='floor'")
+        assert db.execute("SELECT 1 FROM feedback_recall_changes_v1 WHERE event='floor'").fetchone()
+    assert not feedback_learning.guidance(tmp_path, "music", "Techno synth bass")
+
+
+def test_index_checkpoint_and_queue_roll_back_together(tmp_path):
+    import sqlite3
+    feedback_learning.record(tmp_path, task("crash", "Techno synth bass"), -1, "Use electronic drums")
+    feedback_learning.maintain(tmp_path)
+    with sqlite3.connect(tmp_path / "feedback-learning.sqlite3") as db:
+        db.execute("UPDATE feedback SET note='Changed note'")
+        before = (db.execute("SELECT * FROM feedback_recall_meta_v1").fetchall(), db.execute("SELECT * FROM feedback_recall_changes_v1").fetchall())
+    def fail():raise OSError("simulated interrupted commit")
+    assert feedback_learning.maintain(tmp_path, before_commit=fail)["status"] == "unavailable"
+    with sqlite3.connect(tmp_path / "feedback-learning.sqlite3") as db:
+        assert before == (db.execute("SELECT * FROM feedback_recall_meta_v1").fetchall(), db.execute("SELECT * FROM feedback_recall_changes_v1").fetchall())
+    _finish_recall(tmp_path)
+
+
+
+def test_recall_omitted_rows_are_idempotent_and_recoverable(tmp_path):
+    import sqlite3
+    ident = feedback_learning.record(tmp_path, task("bad", "Techno synth bass"), -1, "Use electronic drums")
+    with sqlite3.connect(tmp_path / "feedback-learning.sqlite3") as db:
+        db.execute("UPDATE feedback SET brief=? WHERE id=?", ("x" * 4001, ident))
+    for _ in range(3):
+        result = feedback_learning.maintain(tmp_path)
+        assert result["status"] in {"partial", "limited"}
+    with sqlite3.connect(tmp_path / "feedback-learning.sqlite3") as db:
+        assert db.execute("SELECT omitted FROM feedback_recall_meta_v1").fetchone()[0] == 1
+        db.execute("UPDATE feedback SET brief='Techno synth bass' WHERE id=?", (ident,))
+    _finish_recall(tmp_path)
+    assert "Use electronic drums" in feedback_learning.guidance(tmp_path, "music", "Techno synth bass")
+    with sqlite3.connect(tmp_path / "feedback-learning.sqlite3") as db:
+        assert db.execute("SELECT omitted FROM feedback_recall_meta_v1").fetchone()[0] == 0
+
+
+def test_lost_generation_floor_table_never_revives_old_lessons(tmp_path):
+    import sqlite3
+    feedback_learning.record(tmp_path, task("lost-floor", "Techno synth bass"), -1, "Old lesson")
+    newer = feedback_learning.record(tmp_path, task("lost-floor", "Techno synth bass", generation=1), 1)
+    feedback_learning.forget(tmp_path, newer)
+    _finish_recall(tmp_path)
+    with sqlite3.connect(tmp_path / "feedback-learning.sqlite3") as db:
+        db.execute("DROP TABLE feedback_generations")
+    assert not feedback_learning.guidance(tmp_path, "music", "Techno synth bass")
+    assert feedback_learning.maintain(tmp_path)["status"] == "unavailable"
+
+
+def test_recall_lifecycle_is_singleton_and_starts_no_database_work_on_caller(tmp_path, monkeypatch):
+    from unittest.mock import Mock
+    threads = []
+    class FakeThread:
+        def __init__(self, target, **kwargs): self.target = target; threads.append(self)
+        def start(self): pass
+        def join(self, timeout): assert 0 <= timeout <= .25
+    monkeypatch.setattr(feedback_learning, "_maintenance_slot", None)
+    monkeypatch.setattr(feedback_learning, "_maintenance_atexit", False)
+    monkeypatch.setattr(feedback_learning.threading, "Thread", FakeThread)
+    monkeypatch.setattr(feedback_learning.atexit, "register", Mock())
+    probe = Mock(return_value={"status": "ready"})
+    monkeypatch.setattr(feedback_learning, "maintain", probe)
+    first = feedback_learning.start_maintenance(tmp_path)
+    assert feedback_learning.start_maintenance(tmp_path) is None
+    assert feedback_learning.start_maintenance(tmp_path / "other") is None
+    assert len(threads) == 1 and not probe.called
+    feedback_learning.stop_maintenance("not-the-owner")
+    assert not feedback_learning._maintenance_slot["stop"].is_set()
+    feedback_learning.stop_maintenance(first)
+    threads[0].target()
+    assert feedback_learning._maintenance_slot is None and not probe.called
+
+
+def test_failed_lifecycle_start_abandons_late_target_without_clearing_new_owner(tmp_path, monkeypatch):
+    import pytest
+    from unittest.mock import Mock
+    targets = []
+    class FakeThread:
+        def __init__(self, target, **kwargs): self.target = target; targets.append(target)
+        def start(self):
+            if len(targets) == 1: raise RuntimeError("after native launch")
+        def join(self, timeout): pass
+    monkeypatch.setattr(feedback_learning, "_maintenance_slot", None)
+    monkeypatch.setattr(feedback_learning, "_maintenance_atexit", False)
+    monkeypatch.setattr(feedback_learning.threading, "Thread", FakeThread)
+    monkeypatch.setattr(feedback_learning.atexit, "register", Mock())
+    probe = Mock(return_value={"status": "ready"})
+    monkeypatch.setattr(feedback_learning, "maintain", probe)
+    with pytest.raises(RuntimeError): feedback_learning.start_maintenance(tmp_path)
+    token = feedback_learning.start_maintenance(tmp_path)
+    targets[0]()
+    assert feedback_learning._maintenance_slot["token"] == token and not probe.called
+    feedback_learning.stop_maintenance(token); targets[1]()
+    assert feedback_learning._maintenance_slot is None
+
+
+
+def _bulk_feedback(root, amount, brief="Techno synth bass"):
+    import sqlite3
+    feedback_learning.record(root, task("bulk-first", brief, title=brief), -1, "Preference first")
+    with sqlite3.connect(root / "feedback-learning.sqlite3") as db:
+        db.executemany("INSERT INTO feedback(task_id,generation,kind,rating,title,brief,note,created) VALUES(?,0,'music',-1,?,?,?,?)",
+                       (("bulk-"+str(i),brief,brief,"Preference "+str(i),float(i+1)) for i in range(amount-1)))
+        db.executemany("INSERT INTO feedback_generations VALUES(?,0)", (("bulk-"+str(i),) for i in range(amount-1)))
+
+
+def test_common_term_queries_keep_all_python_row_and_text_caps(tmp_path, monkeypatch):
+    _bulk_feedback(tmp_path, 1000)
+    _finish_recall(tmp_path, steps=200)
+    original=feedback_learning._doc
+    calls=[]
+    def observed(*args, **kwargs):
+        result=original(*args, **kwargs)
+        if result[0] is not None:calls.append(1)
+        return result
+    monkeypatch.setattr(feedback_learning, "_doc", observed)
+    result=feedback_learning.guidance_details(tmp_path,"music","Techno synth bass")
+    assert result["text"] and result["status"]["limited"] is True
+    assert len(calls)==result["status"]["text_rows"]<=300
+    assert result["status"]["metadata_rows"]<=2048
+    assert result["status"]["text_bytes"]<=feedback_learning.RECALL_TEXT_BYTES
+    long_request=" ".join("term"+str(i) for i in range(2000))
+    limited=feedback_learning.guidance_details(tmp_path,"music",long_request)
+    assert limited["status"]["limited"] is True
+    assert limited["status"]["metadata_rows"]<=2048
+
+
+def test_old_writer_tied_rating_and_floor_deletion_never_recall_superseded_note(tmp_path):
+    import sqlite3
+    feedback_learning.record(tmp_path,task("ties","Techno synth bass",title="Techno synth bass"),-1,"Superseded note")
+    _finish_recall(tmp_path)
+    with sqlite3.connect(tmp_path / "feedback-learning.sqlite3") as db:
+        db.execute("INSERT INTO feedback(task_id,generation,kind,rating,title,brief,note,created) SELECT task_id,generation,kind,1,title,brief,'',created FROM feedback WHERE task_id='ties'")
+    result=feedback_learning.guidance(tmp_path,"music","Techno synth bass")
+    assert "Similar task the user liked:" in result and "Superseded" not in result
+    _finish_recall(tmp_path)
+    with sqlite3.connect(tmp_path / "feedback-learning.sqlite3") as db:
+        db.execute("DELETE FROM feedback_generations WHERE task_id='ties'")
+    assert not feedback_learning.guidance(tmp_path,"music","Techno synth bass")
+
+
+def test_index_rebuild_is_incremental_readonly_and_cleans_old_epochs_in_batches(tmp_path,monkeypatch):
+    import sqlite3
+    from unittest.mock import patch
+    _bulk_feedback(tmp_path,20)
+    _finish_recall(tmp_path)
+    connect=sqlite3.connect
+    statements=[]
+    def observed(*args,**kwargs):
+        db=connect(*args,**kwargs);db.set_trace_callback(statements.append);return db
+    monkeypatch.setattr(feedback_learning,"STOP",feedback_learning.STOP | {"unused-rebuild-token"})
+    with patch.object(feedback_learning.sqlite3,"connect",side_effect=observed):
+        assert feedback_learning.guidance(tmp_path,"music","Techno synth bass")
+    assert not any(sql.lstrip().upper().startswith(("CREATE","DROP","ALTER","DELETE","INSERT","UPDATE")) for sql in statements)
+    first=feedback_learning.maintain(tmp_path)
+    assert first["status"] in {"partial","cleanup"}
+    with connect(tmp_path / "feedback-learning.sqlite3") as db:
+        epoch,frontier=db.execute("SELECT epoch,frontier_id FROM feedback_recall_meta_v1").fetchone()
+        assert epoch==2 and frontier<20
+    _finish_recall(tmp_path)
+    with connect(tmp_path / "feedback-learning.sqlite3") as db:
+        assert not db.execute("SELECT 1 FROM feedback_recall_terms_v1 WHERE epoch<2 LIMIT 1").fetchone()
+        assert db.execute("SELECT indexed_docs FROM feedback_recall_meta_v1").fetchone()[0]==20
+
+
+def test_wal_writer_read_snapshot_is_consistent_and_does_not_count_uncommitted_feedback(tmp_path):
+    import sqlite3,time
+    feedback_learning.record(tmp_path,task("wal","Techno synth bass"),-1,"Committed note")
+    _finish_recall(tmp_path)
+    with sqlite3.connect(tmp_path / "feedback-learning.sqlite3") as setup:
+        setup.execute("PRAGMA journal_mode=WAL")
+    writer=sqlite3.connect(tmp_path / "feedback-learning.sqlite3")
+    try:
+        writer.execute("BEGIN IMMEDIATE")
+        writer.execute("UPDATE feedback SET note='Uncommitted note'")
+        started=time.monotonic();result=feedback_learning.guidance(tmp_path,"music","Techno synth bass");elapsed=time.monotonic()-started
+        assert "Committed note" in result and "Uncommitted note" not in result
+        assert elapsed<.3
+    finally:writer.rollback();writer.close()
+
+
+def test_read_legacy_floorless_store_never_runs_global_migration(tmp_path,monkeypatch):
+    import sqlite3
+    feedback_learning.record(tmp_path,task("legacy-ro","Techno synth bass"),-1,"Use electronic drums")
+    with sqlite3.connect(tmp_path / "feedback-learning.sqlite3") as db:db.execute("DROP TABLE feedback_generations")
+    monkeypatch.setattr(feedback_learning,"_connect",lambda *a:(_ for _ in ()).throw(AssertionError("global migration")))
+    result=feedback_learning.guidance_details(tmp_path,"music","Techno synth bass")
+    assert "Use electronic drums" in result["text"] and result["status"]["coverage"]=="legacy_partial"
+    with sqlite3.connect(tmp_path / "feedback-learning.sqlite3") as db:
+        assert not db.execute("SELECT 1 FROM sqlite_master WHERE name='feedback_generations'").fetchone()
+        assert not db.execute("SELECT 1 FROM sqlite_master WHERE name='feedback_recall_meta_v1'").fetchone()
+
+
+def test_record_forget_and_recall_never_start_a_worker(tmp_path,monkeypatch):
+    def forbidden(*args,**kwargs):raise AssertionError("unrequested thread")
+    monkeypatch.setattr(feedback_learning.threading,"Thread",forbidden)
+    ident=feedback_learning.record(tmp_path,task("no-thread","Techno synth bass"),-1,"Use electronic drums")
+    feedback_learning.guidance(tmp_path,"music","Techno synth bass")
+    assert feedback_learning.forget(tmp_path,ident)
+
+
+
+def test_lifecycle_stopping_birth_is_not_adopted_and_later_restart_gets_new_owner(tmp_path,monkeypatch):
+    from unittest.mock import Mock
+    threads=[]
+    class FakeThread:
+        def __init__(self,target,**kwargs):self.target=target;threads.append(self)
+        def start(self):pass
+        def join(self,timeout):pass  # Still exiting after bounded join.
+    monkeypatch.setattr(feedback_learning,"_maintenance_slot",None)
+    monkeypatch.setattr(feedback_learning,"_maintenance_atexit",False)
+    monkeypatch.setattr(feedback_learning.threading,"Thread",FakeThread)
+    monkeypatch.setattr(feedback_learning.atexit,"register",Mock())
+    first=feedback_learning.start_maintenance(tmp_path)
+    assert not feedback_learning.stop_maintenance(None)
+    assert not feedback_learning.stop_maintenance(first,timeout=0)
+    assert feedback_learning.start_maintenance(tmp_path) is None
+    assert len(threads)==1
+    threads[0].target()  # Old birth finishes; no DB work because stop was set.
+    second=feedback_learning.start_maintenance(tmp_path)
+    assert second is not None and second!=first and len(threads)==2
+    assert not feedback_learning.stop_maintenance(first)
+    feedback_learning.stop_maintenance(second,timeout=0);threads[1].target()
+    assert feedback_learning._maintenance_slot is None
+
+
+def test_optional_worker_maintains_maximum_valid_documents_and_recovers_vm_interrupt(tmp_path,monkeypatch):
+    import sqlite3
+    brief=" ".join(f"{i:03}" for i in range(1000))
+    for i in range(3):feedback_learning.record(tmp_path,task("max-"+str(i),brief,title="t"*200),-1,"n"*2000)
+    for _ in range(12):
+        result=feedback_learning.maintain(tmp_path)
+        assert result["status"]!="unavailable"
+        assert result["posting_mutations"]<=feedback_learning.RECALL_BATCH_MUTATIONS
+        assert result["text_bytes"]<=feedback_learning.RECALL_BATCH_BYTES
+        if result["status"]=="ready":break
+    else:raise AssertionError("max-sized valid documents made no bounded progress")
+    with sqlite3.connect(tmp_path / "feedback-learning.sqlite3") as db:
+        assert db.execute("SELECT indexed_docs FROM feedback_recall_meta_v1").fetchone()[0]==3
+        db.execute("UPDATE feedback SET note='changed' WHERE task_id='max-0'")
+        before=db.execute("SELECT * FROM feedback_recall_changes_v1").fetchall()
+    original=feedback_learning._deadline
+    def interrupt(conn,seconds):
+        conn.set_progress_handler(lambda:1,1)
+        return feedback_learning.time.monotonic()+seconds
+    monkeypatch.setattr(feedback_learning,"_deadline",interrupt)
+    assert feedback_learning.maintain(tmp_path)["status"]=="unavailable"
+    monkeypatch.setattr(feedback_learning,"_deadline",original)
+    with sqlite3.connect(tmp_path / "feedback-learning.sqlite3") as db:
+        assert db.execute("SELECT * FROM feedback_recall_changes_v1").fetchall()==before
+    _finish_recall(tmp_path)
+
+
+def test_tokenizer_version_normalizes_nested_code_filenames(tmp_path):
+    import importlib.util
+    from pathlib import Path
+    source=Path(feedback_learning.__file__).read_text(encoding="utf-8")
+    moved=tmp_path/"moved.py";moved.write_text(source,encoding="utf-8")
+    spec=importlib.util.spec_from_file_location("owned_moved_feedback",moved)
+    module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
+    assert module._maintenance_slot is None
+    assert module._recall_version()==feedback_learning._recall_version()
+
+
+
+def test_union_candidate_truncation_is_explicit_even_without_per_term_truncation(tmp_path):
+    with feedback_learning._connect(tmp_path) as db:
+        for i in range(360):
+            word=("amber","birch","cedar","dahlia","elmwood","firwood")[i//60]
+            ident="union-"+str(i)
+            db.execute("INSERT INTO feedback_generations VALUES(?,0)",(ident,))
+            db.execute("INSERT INTO feedback(task_id,generation,kind,rating,title,brief,note,created) VALUES(?,0,'music',-1,?,?,?,?)",(ident,word,word,"Preference "+str(i),float(i)))
+    _finish_recall(tmp_path)
+    result=feedback_learning.guidance_details(tmp_path,"music","amber birch cedar dahlia elmwood firwood")
+    assert result["status"]["candidate_rows"]==300
+    assert result["status"]["limited"] is True
+    assert result["status"]["metadata_rows"]<=2048
+
+
+def test_backfill_includes_zero_negative_and_minimum_sqlite_rowids(tmp_path):
+    import sqlite3
+    ids=(-(2**63),-1,0)
+    with feedback_learning._connect(tmp_path) as db:
+        for ident in ids:
+            name="legacy-"+str(ident)
+            db.execute("INSERT INTO feedback_generations VALUES(?,0)",(name,))
+            db.execute("INSERT INTO feedback(id,task_id,generation,kind,rating,title,brief,note,created) VALUES(?,?,0,'music',-1,'amber','amber','Preference',1)",(ident,name))
+    _finish_recall(tmp_path)
+    with sqlite3.connect(tmp_path / "feedback-learning.sqlite3") as db:
+        epoch,started,complete=db.execute("SELECT epoch,started,complete FROM feedback_recall_meta_v1").fetchone()
+        assert started==complete==1
+        assert [row[0] for row in db.execute("SELECT feedback_id FROM feedback_recall_docs_v1 WHERE epoch=? ORDER BY feedback_id",(epoch,))]==list(ids)
+    assert feedback_learning.guidance_details(tmp_path,"music","amber")["status"]["coverage"]=="indexed_snapshot_ready"
+
+
+
+def test_oversized_derived_terms_are_bounded_before_python_decode_and_do_not_erase_feedback(tmp_path):
+    import sqlite3
+    ident=feedback_learning.record(tmp_path,task("derived-corrupt","Techno synth bass"),-1,"Original note")
+    _finish_recall(tmp_path)
+    with sqlite3.connect(tmp_path / "feedback-learning.sqlite3") as db:
+        epoch=db.execute("SELECT epoch FROM feedback_recall_meta_v1").fetchone()[0]
+        db.execute("INSERT INTO feedback_recall_terms_v1 VALUES(?,?,?,'music',0,1)",(epoch,ident,"x"*300000))
+        db.execute("UPDATE feedback SET note='Fresh raw note' WHERE id=?",(ident,))
+    assert feedback_learning.maintain(tmp_path)["status"]=="unavailable"
+    result=feedback_learning.guidance(tmp_path,"music","Techno synth bass")
+    assert "Fresh raw note" in result and "Original note" not in result
+
+
+
+def test_restart_resumes_cursor_and_durable_old_id_and_beyond_target_changes(tmp_path):
+    import importlib.util,sqlite3
+    for i in range(30):
+        feedback_learning.record(tmp_path,task("restart-"+str(i),"amber" if i==0 else "birch",title="amber" if i==0 else "birch"),-1,"Original note")
+    first=feedback_learning.maintain(tmp_path)
+    assert first["status"]=="partial"
+    feedback_learning.record(tmp_path,task("restart-0","amber",title="amber"),-1,"Updated behind cursor")
+    feedback_learning.record(tmp_path,task("beyond","saffron",title="saffron"),-1,"New beyond target")
+    spec=importlib.util.spec_from_file_location("owned_feedback_restart",feedback_learning.__file__)
+    restarted=importlib.util.module_from_spec(spec);spec.loader.exec_module(restarted)
+    assert restarted._maintenance_slot is None
+    for _ in range(100):
+        if restarted.maintain(tmp_path)["status"]=="ready":break
+    else:raise AssertionError("durable restart backlog did not finish")
+    assert "Updated behind cursor" in restarted.guidance(tmp_path,"music","amber")
+    assert "New beyond target" in restarted.guidance(tmp_path,"music","saffron")
+    with sqlite3.connect(tmp_path / "feedback-learning.sqlite3") as db:
+        epoch=db.execute("SELECT epoch FROM feedback_recall_meta_v1").fetchone()[0]
+        assert db.execute("SELECT count(*) FROM feedback_recall_docs_v1 WHERE epoch=?",(epoch,)).fetchone()[0]==31
+        assert not db.execute("SELECT 1 FROM feedback_recall_changes_v1").fetchone()
+        assert db.execute("SELECT sum(docs) FROM feedback_recall_df_v1 WHERE epoch=?",(epoch,)).fetchone()[0]==db.execute("SELECT count(*) FROM feedback_recall_terms_v1 WHERE epoch=?",(epoch,)).fetchone()[0]
+
+
+def test_concurrent_wal_commit_uses_one_snapshot_and_next_recall_sees_new_note(tmp_path,monkeypatch):
+    import sqlite3
+    feedback_learning.record(tmp_path,task("snapshot","amber",title="amber"),-1,"Snapshot before commit")
+    _finish_recall(tmp_path)
+    with sqlite3.connect(tmp_path / "feedback-learning.sqlite3") as db:db.execute("PRAGMA journal_mode=WAL")
+    original=feedback_learning._doc;changed=[False]
+    def concurrent(conn,ident,*args,**kwargs):
+        if not changed[0]:
+            changed[0]=True
+            with sqlite3.connect(tmp_path / "feedback-learning.sqlite3") as writer:
+                writer.execute("UPDATE feedback SET note='Snapshot after commit'")
+        return original(conn,ident,*args,**kwargs)
+    monkeypatch.setattr(feedback_learning,"_doc",concurrent)
+    first=feedback_learning.guidance(tmp_path,"music","amber")
+    assert "Snapshot before commit" in first and "Snapshot after commit" not in first
+    second=feedback_learning.guidance(tmp_path,"music","amber")
+    assert "Snapshot after commit" in second and "Snapshot before commit" not in second
+
+
+def test_large_partial_backfill_recalls_old_match_without_claiming_full_coverage(tmp_path):
+    with feedback_learning._connect(tmp_path) as db:
+        db.execute("INSERT INTO feedback_generations VALUES('rare-old',0)")
+        db.execute("INSERT INTO feedback(task_id,generation,kind,rating,title,brief,note,created) VALUES('rare-old',0,'music',-1,'amber','amber','Old rare lesson',0)")
+        db.executemany("INSERT INTO feedback_generations VALUES(?,0)",(("scale-"+str(i),) for i in range(9999)))
+        db.executemany("INSERT INTO feedback(task_id,generation,kind,rating,title,brief,note,created) VALUES(?,0,'music',-1,'birch','birch','Recent unrelated lesson',?)",(("scale-"+str(i),float(i+1)) for i in range(9999)))
+    assert not feedback_learning.guidance(tmp_path,"music","amber")
+    batch=feedback_learning.maintain(tmp_path)
+    assert batch["status"]=="partial" and batch["rows"]<=feedback_learning.RECALL_BATCH_ROWS
+    result=feedback_learning.guidance_details(tmp_path,"music","amber")
+    assert "Old rare lesson" in result["text"] and "Recent unrelated lesson" not in result["text"]
+    assert result["status"]["coverage"]=="partial"
+    assert result["status"]["text_rows"]<=300 and result["status"]["metadata_rows"]<=2048
+
+
+def test_generation_floor_insert_trigger_makes_current_raw_review_visible_without_stale_authority(tmp_path):
+    import sqlite3
+    feedback_learning.record(tmp_path,task("insert-floor","amber",title="amber"),-1,"Raw current lesson")
+    _finish_recall(tmp_path)
+    with sqlite3.connect(tmp_path / "feedback-learning.sqlite3") as db:db.execute("DELETE FROM feedback_generations WHERE task_id='insert-floor'")
+    assert not feedback_learning.guidance(tmp_path,"music","amber")
+    with sqlite3.connect(tmp_path / "feedback-learning.sqlite3") as db:
+        db.execute("INSERT INTO feedback_generations VALUES('insert-floor',0)")
+        assert db.execute("SELECT 1 FROM feedback_recall_changes_v1 WHERE event='floor'").fetchone()
+    result=feedback_learning.guidance_details(tmp_path,"music","amber")
+    assert "Raw current lesson" in result["text"] and result["status"]["coverage"]=="partial"
+
+
+
+def test_complete_rare_recall_does_not_materialize_unrelated_recent_reviews(tmp_path):
+    feedback_learning.record(tmp_path,task("rare", "ambernebula",title="ambernebula"),-1,"Rare lesson")
+    for i in range(8):
+        feedback_learning.record(tmp_path,task("other-"+str(i),"birch",title="birch"),-1,"Unrelated lesson")
+    _finish_recall(tmp_path)
+    result=feedback_learning.guidance_details(tmp_path,"music","ambernebula")
+    assert "Rare lesson" in result["text"]
+    assert result["status"]["text_rows"]==1
+    assert result["status"]["fallback_used"] is False
+    assert result["status"]["limited"] is False
+
+
+def test_complete_stopword_and_absent_term_recall_materialize_no_texts(tmp_path):
+    feedback_learning.record(tmp_path,task("other","birch",title="birch"),-1,"Unrelated lesson")
+    _finish_recall(tmp_path)
+    for request in ("the and please with your", "unseenzirconium"):
+        result=feedback_learning.guidance_details(tmp_path,"music",request)
+        assert result["text"]==""
+        assert result["status"]["text_rows"]==0
+        assert result["status"]["fallback_used"] is False
+        assert result["status"]["limited"] is False
+
+
+def test_partial_recall_still_materializes_recent_fallback(tmp_path):
+    feedback_learning.record(tmp_path,task("old","amber",title="amber"),-1,"Indexed lesson")
+    _finish_recall(tmp_path)
+    feedback_learning.record(tmp_path,task("new","saffron",title="saffron"),-1,"New raw lesson")
+    result=feedback_learning.guidance_details(tmp_path,"music","saffron")
+    assert "New raw lesson" in result["text"]
+    assert result["status"]["coverage"]=="partial"
+    assert result["status"]["fallback_used"] is True
+
+
+def test_capped_postings_still_materialize_recent_fallback(tmp_path):
+    for i in range(70):
+        feedback_learning.record(tmp_path,task("common-"+str(i),"amber",title="amber"),-1,"Lesson "+str(i))
+    _finish_recall(tmp_path)
+    result=feedback_learning.guidance_details(tmp_path,"music","amber")
+    assert result["status"]["limited"] is True
+    assert result["status"]["fallback_used"] is True
+    assert result["status"]["candidate_rows"]==70
+
+
+def test_indexed_hash_drop_marks_partial_and_uses_fresh_raw_fallback(tmp_path):
+    import sqlite3
+    ident=feedback_learning.record(tmp_path,task("hash-drop","amber",title="amber"),-1,"Raw authoritative lesson")
+    _finish_recall(tmp_path)
+    with sqlite3.connect(tmp_path / "feedback-learning.sqlite3") as db:
+        db.execute("UPDATE feedback_recall_docs_v1 SET source_hash=? WHERE feedback_id=?",("0"*64,ident))
+    result=feedback_learning.guidance_details(tmp_path,"music","amber")
+    assert "Raw authoritative lesson" in result["text"]
+    assert result["status"]["coverage"]=="partial"
+    assert result["status"]["fallback_used"] is True

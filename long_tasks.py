@@ -8033,7 +8033,16 @@ def gui():
         window.destroy()
 
     window.protocol("WM_DELETE_WINDOW", close_window)
-    window.mainloop()
+    feedback_maintenance = None
+    try:
+        feedback_maintenance = feedback_learning.start_maintenance(STATE)
+    except (RuntimeError, OSError):
+        pass  # Optional recall indexing can remain partial; keep the app usable.
+    try:
+        window.mainloop()
+    finally:
+        if feedback_maintenance is not None:
+            feedback_learning.stop_maintenance(feedback_maintenance)
 
 
 def focus_existing_window():

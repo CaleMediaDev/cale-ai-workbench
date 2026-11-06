@@ -3899,3 +3899,36 @@ def test_start_permission_commit_interruption_preserves_running_operation_author
         for worker in workers:worker.join(3)
     assert workers and not any(worker.is_alive() for worker in workers)
     assert not pending.is_set()
+
+
+
+def test_feedback_maintenance_gui_lifecycle_starts_at_mainloop_and_stops_own_birth():
+    import ast
+    from pathlib import Path
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+    source=ast.parse((Path(__file__).resolve().parents[1]/"long_tasks.py").read_text(encoding="utf-8"))
+    gui=next(node for node in source.body if isinstance(node,ast.FunctionDef) and node.name=="gui")
+    begin=next(i for i,node in enumerate(gui.body) if isinstance(node,ast.Assign) and any(isinstance(t,ast.Name) and t.id=="feedback_maintenance" for t in node.targets))
+    for token in (None,"owned-birth"):
+        for fault in (None,RuntimeError("thread unavailable"),OSError("thread unavailable"),KeyboardInterrupt(),SystemExit()):
+            for loop_failure in (False,True):
+                events=[]
+                def start(root):
+                    events.append("start")
+                    if fault is not None:raise fault
+                    return token
+                def mainloop():
+                    events.append("mainloop")
+                    if loop_failure:raise RuntimeError("window closed with error")
+                memory=SimpleNamespace(start_maintenance=Mock(side_effect=start),stop_maintenance=Mock(side_effect=lambda birth:events.append(("stop",birth))))
+                state=object();namespace={"feedback_learning":memory,"STATE":state,"window":SimpleNamespace(mainloop=mainloop)}
+                caught=None
+                try:exec(compile(ast.Module(body=gui.body[begin:],type_ignores=[]),"<gui-lifecycle>","exec"),namespace)
+                except BaseException as error:caught=error
+                if isinstance(fault,(KeyboardInterrupt,SystemExit)):
+                    assert caught is fault and events==["start"]
+                else:
+                    assert bool(caught) is loop_failure
+                    assert events==["start","mainloop"]+([("stop",token)] if token and fault is None else [])
+                memory.start_maintenance.assert_called_once_with(state)
