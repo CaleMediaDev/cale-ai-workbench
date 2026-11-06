@@ -94,6 +94,10 @@ def read_scanned_pdf(path: str, max_pages: int = 6) -> dict:
                             selected.discard(index)
                             continue
                         scale = min(2, 1800 / max(width, height))
+                        if width * scale <= 0 or height * scale <= 0:
+                            # Positive page dimensions can underflow to zero pixels.
+                            selected.discard(index)
+                            continue
                         bitmap = page.render(scale=scale)
                     except pdfium.PdfiumError:
                         # Preserve other pages and report this scan as omitted.

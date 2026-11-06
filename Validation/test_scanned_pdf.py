@@ -596,6 +596,52 @@ def test_nan_scan_dimensions_preserve_native_text_and_report_omission(tmp_path):
     document.close.assert_called_once_with()
 
 
+def test_scaled_dimensions_underflow_preserves_native_text(tmp_path):
+    import sys
+    from unittest.mock import Mock
+
+    class PdfiumError(Exception):
+        pass
+
+    pdf = tmp_path / "underflow-sized-scan.pdf"
+    pdf.write_bytes(b"%PDF mocked")
+    pages = [Mock(), Mock()]
+    textpages = [Mock(), Mock()]
+    for page, textpage, text in zip(pages, textpages, ["Native order", ""]):
+        page.get_textpage.return_value = textpage
+        textpage.get_text_bounded.return_value = text
+    width, height = float.fromhex("0x0.0000000000001p-1022"), 1e308
+    assert width > 0 and width * (1800 / height) == 0
+    pages[1].get_size.return_value = (width, height)
+    pages[1].render.side_effect = ValueError("rendered bitmap has zero width")
+    document = Mock()
+    document.__len__ = Mock(return_value=2)
+    document.__getitem__ = Mock(side_effect=lambda index: pages[index])
+    recognize = Mock()
+
+    with patch.dict(sys.modules, {
+        "pypdfium2": SimpleNamespace(
+            PdfDocument=Mock(return_value=document), PdfiumError=PdfiumError
+        ),
+        "media_worker": SimpleNamespace(recognize_image=recognize),
+    }):
+        result = scanned_pdf.read_scanned_pdf(str(pdf))
+
+    assert "[Page 1; selectable text]\nNative order" in result["text"]
+    assert "[1 scanned pages were not read: 2.]" in result["text"]
+    assert "[Page 2; vision transcription]" not in result["text"]
+    assert result["pages_read"] == [1]
+    assert result["scanned_pages"] == [2]
+    assert result["has_scans"] is True
+    assert result["partial"] is True
+    recognize.assert_not_called()
+    for page, textpage in zip(pages, textpages):
+        page.render.assert_not_called()
+        textpage.close.assert_called_once_with()
+    assert [page.close.call_count for page in pages] == [1, 2]
+    document.close.assert_called_once_with()
+
+
 def test_failed_transcription_preserves_other_pages_and_reports_omission(tmp_path):
     import sys
     from unittest.mock import Mock
