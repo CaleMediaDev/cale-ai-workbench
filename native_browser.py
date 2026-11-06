@@ -114,7 +114,7 @@ def _dom_contract(folder: Path, page) -> dict:
           checker_id_supported:!!id && counts.get(id)===1 && id.length<=64 && /^[A-Za-z]/.test(id) && !/[^A-Za-z0-9_-]/.test(id),
           tag,type:type.slice(0,32),labels,aria_label:(el.getAttribute('aria-label')||'').slice(0,120),
           form:form ? {id:(form.getAttribute('id')||'').slice(0,120),name:(form.getAttribute('name')||'').slice(0,120)} : null,
-          visible,editable:visible && !disabled && !readOnly && ((tag==='input' && !['hidden','button','submit','reset','checkbox','radio','file','image'].includes(type.toLowerCase())) || tag==='textarea' || tag==='select' || el.isContentEditable),
+          visible,editable:visible && !disabled && !readOnly && ((tag==='input' && !['hidden','button','submit','reset','checkbox','radio','file','image','color','range'].includes(type.toLowerCase())) || tag==='textarea' || tag==='select' || el.isContentEditable),
           readOnly,disabled,constraints});
       }
       return {targets,truncated:nodes.length>targets.length};
