@@ -223,6 +223,29 @@ def test_slow_probe_does_not_extend_cached_failure_lifetime(tmp_path, monkeypatc
     assert len(node_checks) == 2
 
 
+@pytest.mark.parametrize("browser", [False, True])
+def test_dependency_probes_do_not_inherit_interactive_stdin(tmp_path, monkeypatch, browser):
+    executable = tmp_path / "node.exe"
+    executable.touch()
+    (tmp_path / "browser_probe.js").touch()
+    calls = []
+
+    def run(args, **kwargs):
+        calls.append((args, kwargs))
+        # Model a tool that waits for input unless its stdin receives EOF.
+        if kwargs.get("stdin") != core_tool_health.subprocess.DEVNULL:
+            raise core_tool_health.subprocess.TimeoutExpired(args, kwargs["timeout"])
+        return SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(core_tool_health.subprocess, "run", run)
+    if browser:
+        assert core_tool_health._browser_works(tmp_path, executable)
+    else:
+        assert core_tool_health._runnable(executable, "--version")
+    assert len(calls) == 1
+    assert calls[0][1]["stdin"] == core_tool_health.subprocess.DEVNULL
+
+
 def test_browser_runtime_failure_is_visible_even_when_node_runs(tmp_path, monkeypatch):
     monkeypatch.setattr(core_tool_health, "_runnable", lambda path, *args: True)
     monkeypatch.setattr(core_tool_health, "_browser_works", lambda root, node: False)

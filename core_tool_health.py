@@ -26,8 +26,8 @@ def _runnable(path: Path, *args: str) -> bool:
     if not path.is_file():
         return False
     try:
-        result = subprocess.run([str(path), *args], capture_output=True, timeout=10,
-                                creationflags=HIDE)
+        result = subprocess.run([str(path), *args], stdin=subprocess.DEVNULL,
+                                capture_output=True, timeout=10, creationflags=HIDE)
         return result.returncode == 0
     except (OSError, subprocess.TimeoutExpired):
         return False
@@ -41,7 +41,8 @@ def _browser_works(root: Path, node: Path) -> bool:
     try:
         result = subprocess.run(
             [str(node), str(probe), str(root), str(root / "Toolbox")],
-            cwd=root, capture_output=True, timeout=30, creationflags=HIDE,
+            cwd=root, stdin=subprocess.DEVNULL, capture_output=True,
+            timeout=30, creationflags=HIDE,
         )
         return result.returncode == 0
     except (OSError, subprocess.TimeoutExpired):
