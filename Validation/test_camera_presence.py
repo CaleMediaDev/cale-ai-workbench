@@ -779,6 +779,28 @@ def test_camera_requests_native_uhd_but_reports_negotiated_fallback():
     camera.set.assert_not_called()
 
 
+def test_camera_negotiation_survives_fourcc_construction_failure():
+    import camera_presence as cam
+
+    cv2 = SimpleNamespace(
+        CAP_PROP_FOURCC=1, CAP_PROP_FRAME_WIDTH=2, CAP_PROP_FRAME_HEIGHT=3,
+        CAP_PROP_FPS=4, CAP_PROP_BUFFERSIZE=5, CAP_PROP_READ_TIMEOUT_MSEC=6,
+        VideoWriter_fourcc=Mock(side_effect=RuntimeError('MJPG unsupported')),
+    )
+    camera = Mock()
+    camera.get.side_effect = lambda key: {2: 1920, 3: 1080, 4: 15}[key]
+
+    assert cam.negotiate_capture(camera, cv2) == {
+        'width': 1920, 'height': 1080, 'fps': 15,
+    }
+    cv2.VideoWriter_fourcc.assert_called_once_with(*'MJPG')
+    assert camera.set.call_args_list == [
+        unittest.mock.call(2, 3840), unittest.mock.call(3, 2160),
+        unittest.mock.call(4, 30), unittest.mock.call(5, 1),
+        unittest.mock.call(6, 2000),
+    ]
+
+
 def test_camera_preview_uses_latest_slot_independent_of_voice_fifo():
     import ast, queue
     source=Path(__file__).parents[1]/'long_tasks.py'

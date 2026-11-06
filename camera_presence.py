@@ -302,10 +302,12 @@ def preview_frame(frame, cv2):
 def negotiate_capture(camera, cv2, local=True):
     """Request native UHD transport, report driver values rather than upscale."""
     if local:
-        for name, value in (("CAP_PROP_FOURCC", getattr(cv2, "VideoWriter_fourcc", lambda *_: 0)(*"MJPG")),
+        for name, value in (("CAP_PROP_FOURCC", None),
                             ("CAP_PROP_FRAME_WIDTH", 3840), ("CAP_PROP_FRAME_HEIGHT", 2160),
                             ("CAP_PROP_FPS", 30), ("CAP_PROP_BUFFERSIZE", 1), ("CAP_PROP_READ_TIMEOUT_MSEC", 2000)):
             try:
+                if name == "CAP_PROP_FOURCC":
+                    value = getattr(cv2, "VideoWriter_fourcc", lambda *_: 0)(*"MJPG")
                 camera.set(getattr(cv2, name), value)
             except Exception:
                 pass  # Unsupported properties are common; actual values win.
