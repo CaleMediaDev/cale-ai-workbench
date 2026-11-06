@@ -163,7 +163,7 @@ def _worker_running(root: Path, job_id: str, info: dict) -> bool:
         return "--run-job" in command and job_id in command and any(
             str(item).endswith("quick_image.py") for item in command
         )
-    except (psutil.NoSuchProcess, psutil.ZombieProcess, ValueError, TypeError):
+    except (psutil.NoSuchProcess, psutil.ZombieProcess, ValueError, TypeError, OverflowError):
         return False
     except psutil.AccessDenied:
         return True
