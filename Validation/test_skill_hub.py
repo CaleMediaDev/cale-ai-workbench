@@ -98,6 +98,27 @@ class SkillHubTests(unittest.TestCase):
         self.assertEqual(set(skill_hub.SEEN), {identifier})
         self.assertEqual(skill_hub.INSPECTED, {})
 
+    def test_search_matches_canonically_equivalent_unicode(self):
+        identifier = "skills-sh/example/cafe"
+        for query, topic in (("caf\u00e9", "cafe\u0301"), ("cafe\u0301", "caf\u00e9")):
+            for field in ("name", "description"):
+                with self.subTest(query=repr(query), field=field):
+                    skill_hub.SEEN.clear()
+                    row = {"identifier": identifier, field: topic}
+                    payload = json.dumps([
+                        {"identifier": "skills-sh/example/unrelated", "name": "Unrelated"},
+                        row,
+                    ])
+                    with patch.object(skill_hub, "_run", return_value=payload):
+                        result = skill_hub.search(query)
+                    self.assertEqual(
+                        [match["identifier"] for match in result["matches"]],
+                        [identifier],
+                    )
+                    self.assertEqual(result["matches"][0][field], topic)
+                    self.assertEqual(set(skill_hub.SEEN), {identifier})
+                    self.assertEqual(skill_hub.INSPECTED, {})
+
     def test_search_does_not_match_stringified_metadata(self):
         identifier = "skills-sh/example/none-checker"
         payload = json.dumps([
