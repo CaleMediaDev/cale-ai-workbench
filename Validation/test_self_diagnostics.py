@@ -977,6 +977,37 @@ def test_progress_writer_reuses_one_connection_and_commits_each_finalized_node(t
         connections[0].execute('SELECT 1')
 
 
+def test_progress_ownership_check_holds_writer_lock_until_publication(tmp_path):
+    state, context, owned = progress_writer_fixture(tmp_path)
+    plugin = owned._LiveSelfCheck(context)
+    attempts = []
+
+    def replace_during_ownership_read(sql):
+        if not sql.startswith('SELECT substr(value'):
+            return
+        replacement = {**context, 'nonce': 'replacement-owner'}
+        with closing(sqlite3.connect(state / 'self-check-progress.sqlite3', timeout=0)) as rival:
+            try:
+                with rival:
+                    rival.execute('UPDATE live_session SET value=? WHERE slot=1',
+                                  (json.dumps(replacement),))
+            except sqlite3.OperationalError as error:
+                attempts.append(error.sqlite_errorcode == sqlite3.SQLITE_BUSY)
+            else:
+                attempts.append(False)
+
+    try:
+        plugin._writer.set_trace_callback(replace_during_ownership_read)
+        plugin.publish()
+        assert attempts == [True]
+        with closing(sqlite3.connect(state / 'self-check-progress.sqlite3')) as reader:
+            header = json.loads(reader.execute('SELECT value FROM live_session WHERE slot=1').fetchone()[0])
+        assert header['nonce'] == context['nonce']
+    finally:
+        plugin._writer.set_trace_callback(None)
+        plugin.close()
+
+
 def test_reused_progress_writer_rejects_a_superseded_session(tmp_path, monkeypatch):
     state, context, diagnostics = progress_writer_fixture(tmp_path)
     plugin = diagnostics._LiveSelfCheck(context)
