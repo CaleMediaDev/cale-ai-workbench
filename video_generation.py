@@ -241,9 +241,13 @@ def _model_fingerprints() -> dict | None:
     fingerprints = {}
     for relative in MODEL_HASHES:
         path = model_root / relative
-        if not path.is_file():
+        try:
+            if not path.is_file():
+                return None
+            stat = path.stat()
+        except OSError:
+            # A model may disappear or become unavailable between checks.
             return None
-        stat = path.stat()
         if stat.st_size < 100_000_000:
             return None
         fingerprints[relative] = [stat.st_size, stat.st_mtime_ns]
