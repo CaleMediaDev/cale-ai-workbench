@@ -236,6 +236,34 @@ def test_failed_repair_launch_returns_false_and_releases_lock(tmp_path, monkeypa
     assert "launch unavailable" in (state / "base-install-repair.log").read_text()
 
 
+def test_unavailable_repair_lock_returns_false_without_consuming_attempt(tmp_path, monkeypatch):
+    state = tmp_path / "LongTasks"
+    state.mkdir()
+    (tmp_path / "Install-Backend.ps1").write_text("# fixture", encoding="utf-8")
+    progress_path = state / "install-progress.json"
+    progress_text = json.dumps({
+        "status": "error", "current": "Setup needs attention: download failed",
+        "updated": 1,
+    })
+    progress_path.write_text(progress_text, encoding="utf-8")
+    # A directory cannot be opened as the recovery lock file.
+    (state / "base-install-repair.lock").mkdir()
+    monkeypatch.setattr(setup_recovery, "ROOT", tmp_path)
+    monkeypatch.setattr(setup_recovery, "STATE", state)
+    monkeypatch.setattr(setup_recovery.time, "time", lambda: 10000)
+    monkeypatch.setattr(setup_recovery, "_installer_running", lambda progress: False)
+    monkeypatch.setattr(setup_recovery, "_retry_runner_running", lambda: False)
+    locking = MagicMock()
+    with patch.dict("sys.modules", {"msvcrt": locking}), patch.object(
+        setup_recovery.subprocess, "Popen"
+    ) as launch:
+        assert setup_recovery.recover() is False
+        launch.assert_not_called()
+        locking.locking.assert_not_called()
+    assert progress_path.read_text(encoding="utf-8") == progress_text
+    assert not (state / "base-install-repair.json").exists()
+
+
 def test_unavailable_repair_log_returns_false_and_releases_lock(tmp_path, monkeypatch):
     state = tmp_path / "LongTasks"
     state.mkdir()
