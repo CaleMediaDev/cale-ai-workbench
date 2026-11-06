@@ -421,6 +421,27 @@ def test_replacing_prepared_deck_recovers_after_close_reports_an_error(tmp_path)
     assert player.outgoing is active and active.busy()
 
 
+@pytest.mark.parametrize("seconds,error", [("invalid", ValueError), (None, TypeError)])
+def test_invalid_blend_duration_preserves_decks_and_allows_retry(tmp_path, seconds, error):
+    player = radio.Player(lambda: Deck(lambda: 0), lambda: 0)
+    first, second = tmp_path/"first.wav", tmp_path/"second.wav"
+    player.play(first)
+    player.prepare(second)
+    current, staged = player.active, player.prepared
+
+    with pytest.raises(error):
+        player.blend(second, seconds)
+
+    assert player.active is current and current.busy()
+    assert current.volume == player.volume
+    assert player.prepared is staged and staged.opened and not staged.running
+    assert staged.volume == 0
+    assert player.outgoing is None and not player.mixing
+    assert player.blend(second, 8)
+    assert player.active is staged and staged.busy()
+    assert player.outgoing is current and current.busy()
+
+
 def test_failed_blend_start_releases_prepared_deck_and_allows_retry(tmp_path):
     player = radio.Player(lambda: Deck(lambda: 0), lambda: 0)
     first, second = tmp_path/"first.wav", tmp_path/"second.wav"
