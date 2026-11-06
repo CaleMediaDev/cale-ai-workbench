@@ -205,6 +205,27 @@ class AutoRouteTests(unittest.TestCase):
             "quick",
         )
 
+    def test_artifact_identification_questions_use_middle_tier(self):
+        for request in (
+            "What does this screenshot show?",
+            "What is in this image?",
+            "What are the contents of the attached PDF?",
+        ):
+            with self.subTest(request=request):
+                self.assertEqual(
+                    task_size([{"role": "user", "content": request}]),
+                    "balanced",
+                )
+        for request in (
+            "What is a PDF file?",
+            "What is the easiest way to create a folder?",
+        ):
+            with self.subTest(request=request):
+                self.assertEqual(
+                    task_size([{"role": "user", "content": request}]),
+                    "quick",
+                )
+
     def test_short_tool_tasks_do_not_use_fast_tier(self):
         for request in (
             "Read the attached PDF and summarize it.",
