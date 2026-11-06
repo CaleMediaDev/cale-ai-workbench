@@ -51,8 +51,14 @@ def _successful_job(folder: Path, status_key: str, *, min_bytes: int = 100, engi
     never opened, and a deleted output cannot count as a successful check.
     """
     try:
-        records = sorted(folder.glob("*.json"), key=lambda path: path.stat().st_mtime,
-                         reverse=True)[:100]
+        candidates = []
+        for path in folder.glob("*.json"):
+            try:
+                candidates.append((path.stat().st_mtime, path))
+            except OSError:
+                continue
+        records = [path for _, path in sorted(
+            candidates, key=lambda candidate: candidate[0], reverse=True)[:100]]
     except OSError:
         return False
     for path in records:
