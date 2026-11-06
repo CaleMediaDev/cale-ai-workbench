@@ -267,3 +267,36 @@ def test_common_pair_survives_high_ranked_rare_single_term_hits(tmp_path):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_full_scan_retires_unprovable_excluded_identity_after_eligibility(tmp_path):
+    original_resolve = Path.resolve
+    original_eligible = memory._eligible
+    for failure in ("outside", "missing", "loop"):
+        root = tmp_path / failure
+        root.mkdir()
+        source = root / "node_modules" / "reference.py"
+        source.parent.mkdir()
+        source.write_bytes(b"unchanged owned source")
+        memory.index_file(root, source)
+        checked = [False]
+        def eligible(scan_root, path):
+            result = original_eligible(scan_root, path)
+            if path == source and result:
+                checked[0] = True
+            return result
+        def resolve(path, *args, **kwargs):
+            if path == source and checked[0]:
+                if failure == "outside":
+                    return tmp_path / "outside.py"
+                if failure == "missing":
+                    raise FileNotFoundError("Source changed after eligibility")
+                raise RuntimeError("Alias loop after eligibility")
+            return original_resolve(path, *args, **kwargs)
+        with patch.object(memory, "_eligible", side_effect=eligible), patch.object(Path, "resolve", resolve):
+            result = memory.index(root, include_code=True)
+        assert checked[0] and result["removed"] == 1 and not result["truncated"]
+        with memory.connection(root) as conn:
+            assert conn.execute("SELECT id FROM memories WHERE id='file:node_modules/reference.py'").fetchone() is None
+            assert conn.execute("SELECT id FROM memory_fts WHERE id='file:node_modules/reference.py'").fetchone() is None
+        assert source.read_bytes() == b"unchanged owned source"
