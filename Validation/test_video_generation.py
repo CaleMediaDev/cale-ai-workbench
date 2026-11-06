@@ -521,6 +521,31 @@ def test_render_cleanup_waits_for_killed_server(tmp_path):
     ]
 
 
+def test_runtime_verification_handles_model_removed_before_stat(tmp_path):
+    runtime = tmp_path / "runtime"
+    python = runtime / "ComfyUI" / ".venv" / "Scripts" / "python.exe"
+    python.parent.mkdir(parents=True)
+    python.write_bytes(b"python")
+    model = runtime / "ComfyUI" / "models" / "model.safetensors"
+    model.parent.mkdir(parents=True)
+    model.write_bytes(b"model")
+    original_is_file = Path.is_file
+
+    def removed_after_file_check(path):
+        result = original_is_file(path)
+        if path == model and result:
+            path.unlink()
+        return result
+
+    with patch.object(video_generation, "RUNTIME", runtime), patch.object(
+        video_generation, "MODEL_HASHES", {"model.safetensors": "0" * 64}
+    ), patch.object(Path, "is_file", removed_after_file_check):
+        assert video_generation._verified_runtime() is False
+
+    assert not model.exists()
+    assert not (runtime / "cale-video-ready.json").exists()
+
+
 def test_runtime_requires_all_verified_weights_before_reuse(tmp_path):
     runtime = tmp_path / "runtime"
     models = runtime / "ComfyUI" / "models"
