@@ -99,6 +99,9 @@ def missing(root: Path = ROOT, *, fresh: bool = False) -> list[str]:
     with _health_lock:
         _health_generation += 1
         generation = _health_generation
+    # Sequential probes can be slow; their duration must not extend the
+    # lifetime of observations made at the beginning of this check.
+    check_started = time.monotonic()
     box = root / "Toolbox"
     unavailable = []
     node = box / "node-v26.13.0-win-x64/node.exe"
@@ -124,7 +127,7 @@ def missing(root: Path = ROOT, *, fresh: bool = False) -> list[str]:
     with _health_lock:
         # An older probe must not overwrite a newer post-repair observation.
         if generation == _health_generation:
-            _health_cache = (root, tuple(unavailable), time.monotonic())
+            _health_cache = (root, tuple(unavailable), check_started)
     return list(unavailable)
 
 
