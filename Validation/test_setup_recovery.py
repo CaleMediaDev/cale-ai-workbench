@@ -265,6 +265,9 @@ def test_unavailable_repair_lock_returns_false_without_consuming_attempt(tmp_pat
 
 
 def test_repair_lock_initialization_failure_does_not_consume_attempt(tmp_path, monkeypatch):
+    import errno
+    import io
+
     state = tmp_path / "LongTasks"
     state.mkdir()
     (tmp_path / "Install-Backend.ps1").write_text("# fixture", encoding="utf-8")
@@ -279,10 +282,15 @@ def test_repair_lock_initialization_failure_does_not_consume_attempt(tmp_path, m
     monkeypatch.setattr(setup_recovery.time, "time", lambda: 10000)
     monkeypatch.setattr(setup_recovery, "_installer_running", lambda progress: False)
     monkeypatch.setattr(setup_recovery, "_retry_runner_running", lambda: False)
-    lock = MagicMock()
-    lock.__enter__.return_value = lock
-    lock.tell.return_value = 0
-    lock.flush.side_effect = OSError("disk full")
+
+    class DiskFull(io.BytesIO):
+        write_calls = 0
+        def write(self, data):
+            self.write_calls += 1
+            raise OSError(errno.ENOSPC, "owned simulated disk-full write")
+
+    raw = DiskFull()
+    lock = io.BufferedRandom(raw, buffer_size=8)
     path_type = type(state)
     original_open = path_type.open
 
@@ -299,9 +307,10 @@ def test_repair_lock_initialization_failure_does_not_consume_attempt(tmp_path, m
         assert setup_recovery.recover() is False
         launch.assert_not_called()
         locking.locking.assert_not_called()
-    lock.write.assert_called_once_with(b"1")
-    lock.flush.assert_called_once()
-    lock.__exit__.assert_called_once()
+    # The first explicit flush and real buffered close each retry the write.
+    # Both errors are handled; the actual handle and underlying stream close.
+    assert raw.write_calls == 2
+    assert lock.closed and raw.closed
     assert progress_path.read_text(encoding="utf-8") == progress_text
     assert not (state / "base-install-repair.json").exists()
 
