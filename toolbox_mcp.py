@@ -368,6 +368,12 @@ async def lifespan(_server):
                     )
                     await session.initialize()
                 tools = await _discover_tools(session)
+                backend_catalog = {
+                    f"{group}.{tool.name}": tool.model_dump(
+                        by_alias=True, exclude_none=True
+                    )
+                    for tool in tools
+                }
             except BaseException as exc:
                 ERRORS[group] = str(exc) or type(exc).__name__
                 try:
@@ -380,10 +386,7 @@ async def lifespan(_server):
                 continue
             await stack.enter_async_context(backend_stack)
             SESSIONS[group] = session
-            for tool in tools:
-                CATALOG[f"{group}.{tool.name}"] = tool.model_dump(
-                    by_alias=True, exclude_none=True
-                )
+            CATALOG.update(backend_catalog)
         try:
             yield {}
         finally:
