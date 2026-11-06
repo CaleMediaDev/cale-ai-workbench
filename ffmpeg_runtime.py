@@ -29,7 +29,11 @@ def executable(root: Path = ROOT) -> Path:
 
 def working(root: Path = ROOT) -> bool:
     """Execute the installed binary; a file existing is not enough."""
-    target = executable(root)
+    return _working_executable(executable(root))
+
+
+def _working_executable(target: Path) -> bool:
+    """Check a discovered or installed executable before trusting it."""
     try:
         if not target.is_file():
             return False
@@ -78,10 +82,10 @@ def ensure(root: Path = ROOT) -> Path:
             found = subprocess.run(locate, capture_output=True, text=True,
                                    timeout=30, creationflags=HIDE)
             source = Path(shutil.which(found.stdout.strip()) or found.stdout.strip())
-            if found.returncode or not source.is_file():
+            if found.returncode or not _working_executable(source):
                 install = subprocess.run(
                     [str(python), "-m", "pip", "install", "--disable-pip-version-check",
-                     "imageio-ffmpeg==0.6.0"], capture_output=True, text=True,
+                     "--force-reinstall", "imageio-ffmpeg==0.6.0"], capture_output=True, text=True,
                     timeout=300, creationflags=HIDE,
                 )
                 if install.returncode:
