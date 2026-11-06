@@ -587,6 +587,15 @@ def test_oversized_numeric_task_selection_does_not_crash():
     assert chat_assistant.choose_task("２", tasks) == tasks[1]
 
 
+@pytest.mark.parametrize("selection", ["0", "2", " 2 ", "２", "9" * 5000])
+def test_single_task_does_not_override_invalid_numeric_selection(selection):
+    tasks = [{"id": "a", "title": "Build bakery site"}]
+    assert chat_assistant.choose_task(selection, tasks) is None
+    assert chat_assistant.choose_task("1", tasks) == tasks[0]
+    assert chat_assistant.choose_task("１", tasks) == tasks[0]
+    assert chat_assistant.choose_task("Also add a contact page", tasks) == tasks[0]
+
+
 def test_multiple_tasks_require_a_clear_followup_target():
     tasks = [{"id": "a", "title": "Build bakery site"}, {"id": "b", "title": "Research suppliers"}]
     assert chat_assistant.choose_task("also add a contact page", tasks) is None
