@@ -119,6 +119,31 @@ class SkillHubTests(unittest.TestCase):
                     self.assertEqual(set(skill_hub.SEEN), {identifier})
                     self.assertEqual(skill_hub.INSPECTED, {})
 
+    def test_search_normalizes_before_casefolding_greek_topics(self):
+        identifier = "skills-sh/example/greek"
+        decomposed = "\u03b1\u0345\u0301"
+        composed = "\u1fb4"
+        self.assertEqual(
+            skill_hub.unicodedata.normalize("NFC", decomposed), composed
+        )
+        for query, topic in ((decomposed, composed), (composed, decomposed)):
+            for field in ("name", "description"):
+                with self.subTest(query=repr(query), field=field):
+                    skill_hub.SEEN.clear()
+                    payload = json.dumps([
+                        {"identifier": "skills-sh/example/unrelated", "name": "Unrelated"},
+                        {"identifier": identifier, field: topic},
+                    ])
+                    with patch.object(skill_hub, "_run", return_value=payload):
+                        result = skill_hub.search(query)
+                    self.assertEqual(
+                        [match["identifier"] for match in result["matches"]],
+                        [identifier],
+                    )
+                    self.assertEqual(result["matches"][0][field], topic)
+                    self.assertEqual(set(skill_hub.SEEN), {identifier})
+                    self.assertEqual(skill_hub.INSPECTED, {})
+
     def test_search_preserves_combining_marks_in_topics(self):
         identifier = "skills-sh/example/matching"
         for query, topic, unrelated in (
