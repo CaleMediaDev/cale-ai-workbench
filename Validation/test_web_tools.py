@@ -195,6 +195,16 @@ class BusinessContactTests(unittest.TestCase):
             page = web_tools.read_webpage("https://example.org/details")
         self.assertEqual(page["text"], "Research & development\nContact &")
 
+    def test_reader_preserves_horizontal_rule_text_boundaries(self):
+        body = 'Phone<hr>5172581313'
+        with patch.object(
+            web_tools, "fetch",
+            return_value=("https://example.org/contact", body, "text/html", 200),
+        ):
+            page = web_tools.read_webpage("https://example.org/contact")
+        self.assertEqual(page["text"], "Phone\n5172581313")
+        self.assertEqual(web_tools.visible_phone_numbers(page["text"]), ["5172581313"])
+
     def test_reader_preserves_table_cell_text_boundaries(self):
         body = (
             '<table><tr><th>Contact</th><th>Details</th></tr>'
