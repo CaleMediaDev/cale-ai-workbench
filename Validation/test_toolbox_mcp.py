@@ -928,6 +928,68 @@ def test_failed_backend_cleanup_does_not_abort_independent_backend():
     asyncio.run(check())
 
 
+def test_backend_schema_serialization_failure_isolated_before_publication():
+    closed = []
+
+    @asynccontextmanager
+    async def fake_stdio(params):
+        group = "rea" if "rea.mjs" in " ".join(params.args) else "devtools"
+        try:
+            yield group, object()
+        finally:
+            closed.append((group, "stdio"))
+
+    def broken_dump(**kwargs):
+        raise ValueError("Backend schema serialization failed")
+
+    class FakeSession:
+        def __init__(self, group):
+            self.group = group
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            closed.append((self.group, "session"))
+
+        async def initialize(self):
+            if self.group == "devtools":
+                assert closed == [("rea", "session"), ("rea", "stdio")]
+                assert toolbox_mcp.CATALOG == {}
+                assert toolbox_mcp.SESSIONS == {}
+
+        async def list_tools(self):
+            healthy = SimpleNamespace(
+                name="healthy", model_dump=lambda **kwargs: {"name": "healthy"}
+            )
+            tools = [healthy]
+            if self.group == "rea":
+                tools.append(SimpleNamespace(name="broken", model_dump=broken_dump))
+            return SimpleNamespace(tools=tools)
+
+    async def check():
+        with (patch.object(toolbox_mcp, "stdio_client", fake_stdio),
+              patch.object(toolbox_mcp, "ClientSession",
+                           lambda group, *_args, **_kwargs: FakeSession(group)),
+              patch.dict(toolbox_mcp.SESSIONS, {}, clear=True),
+              patch.dict(toolbox_mcp.CATALOG, {}, clear=True),
+              patch.dict(toolbox_mcp.ERRORS, {}, clear=True)):
+            async with toolbox_mcp.lifespan(None):
+                assert "Backend schema serialization failed" in toolbox_mcp.ERRORS["rea"]
+                assert set(toolbox_mcp.SESSIONS) == {"devtools"}
+                assert set(toolbox_mcp.CATALOG) == {"devtools.healthy"}
+                assert toolbox_mcp.toolbox_schema("local.make_music")
+            assert closed == [
+                ("rea", "session"), ("rea", "stdio"),
+                ("devtools", "session"), ("devtools", "stdio"),
+            ]
+            assert toolbox_mcp.SESSIONS == {}
+            assert toolbox_mcp.CATALOG == {}
+            assert toolbox_mcp.ERRORS == {}
+
+    asyncio.run(check())
+
+
 def test_backend_discovery_includes_tools_from_later_pages():
     discovery_calls = []
     tool_calls = []
