@@ -238,6 +238,12 @@ def test_full_game_grader_passes_known_game_logic_and_rejects_frame_bug():
     </script></html>"""
     checks = model_fitness.grade_game_html(code, root)
     assert len(checks) == 13 and all(checks.values()), checks
+    # Browser-valid deferred initialization must run before live-state checks.
+    deferred = code.replace(
+        "<script>", "<script>document.addEventListener('DOMContentLoaded',()=>{"
+    ).replace("</script>", "});</script>")
+    deferred_checks = model_fitness.grade_game_html(deferred, root)
+    assert len(deferred_checks) == 13 and all(deferred_checks.values()), deferred_checks
     broken = code.replace("dir*120*dt", "dir*120/60")
     assert model_fitness.grade_game_html(broken, root)["frame_independence"] is False
     assert model_fitness.grade_game_html("<script>window.game={};</script>", root) == {
