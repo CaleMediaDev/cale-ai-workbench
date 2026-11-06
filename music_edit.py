@@ -10,6 +10,7 @@ import math
 import subprocess
 import tempfile
 import wave
+from decimal import Decimal
 from pathlib import Path
 
 import imageio_ffmpeg
@@ -74,6 +75,11 @@ def _run(arguments: list[str], output: Path) -> None:
         output.hardlink_to(staged)
 
 
+def _seconds(value: float) -> str:
+    # FFmpeg duration fields require decimal notation, not float exponents.
+    return format(Decimal(str(value)), "f")
+
+
 def edit_music(source_path: str, output_path: str, start_seconds: float = 0,
                duration_seconds: float | None = None, fade_in_seconds: float = 0,
                fade_out_seconds: float = 0, gain_db: float = 0) -> dict:
@@ -99,12 +105,12 @@ def edit_music(source_path: str, output_path: str, start_seconds: float = 0,
     if gain_db:
         filters.append(f"volume={gain_db:.17g}dB")
     if fade_in_seconds:
-        filters.append(f"afade=t=in:st=0:d={fade_in_seconds:.17g}")
+        filters.append(f"afade=t=in:st=0:d={_seconds(fade_in_seconds)}")
     if fade_out_seconds:
-        filters.append(f"afade=t=out:st={duration_seconds - fade_out_seconds:.17g}:d={fade_out_seconds:.17g}")
-    args = ["-ss", str(start_seconds), "-i", str(source)]
+        filters.append(f"afade=t=out:st={_seconds(duration_seconds - fade_out_seconds)}:d={_seconds(fade_out_seconds)}")
+    args = ["-ss", _seconds(start_seconds), "-i", str(source)]
     if duration_seconds is not None:
-        args += ["-t", str(duration_seconds)]
+        args += ["-t", _seconds(duration_seconds)]
     if filters:
         args += ["-af", ",".join(filters)]
     args += ["-vn"]

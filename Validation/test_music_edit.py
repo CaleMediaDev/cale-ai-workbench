@@ -64,6 +64,38 @@ def test_edit_music_rejects_nonfinite_timings(tmp_path, monkeypatch, parameter, 
     assert source.read_bytes() == original
 
 
+@pytest.mark.parametrize("seconds", [0.00001, 0.00002])
+def test_edit_music_serializes_small_timings_as_decimal(tmp_path, monkeypatch, seconds):
+    source = tmp_path / "song.wav"
+    output = tmp_path / "clip.wav"
+    original = b"original audio"
+    source.write_bytes(original)
+    calls = []
+    monkeypatch.setattr(music_edit, "_run", lambda *args: calls.append(args))
+
+    music_edit.edit_music(
+        str(source), str(output), start_seconds=seconds,
+        duration_seconds=4 * seconds, fade_in_seconds=seconds,
+        fade_out_seconds=seconds,
+    )
+
+    assert len(calls) == 1
+    arguments, destination = calls[0]
+    filters = arguments[arguments.index("-af") + 1].split(",")
+    fields = [dict(field.split("=", 1) for field in item.split(":")[1:])
+              for item in filters]
+    serialized = [arguments[arguments.index("-ss") + 1],
+                  arguments[arguments.index("-t") + 1],
+                  fields[0]["d"], fields[1]["st"], fields[1]["d"]]
+    expected = [seconds, 4 * seconds, seconds, 4 * seconds - seconds, seconds]
+    for text, value in zip(serialized, expected):
+        assert "e" not in text.lower()
+        assert float(text) == value
+    assert destination == output
+    assert not output.exists()
+    assert source.read_bytes() == original
+
+
 def test_edit_music_preserves_fade_timing_precision(tmp_path, monkeypatch):
     source = tmp_path / "song.wav"
     output = tmp_path / "clip.wav"
