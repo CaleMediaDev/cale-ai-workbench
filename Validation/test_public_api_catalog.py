@@ -12,6 +12,22 @@ import public_api_catalog
 import toolbox_mcp
 
 
+def test_search_public_apis_preserves_single_character_search_terms(tmp_path):
+    cache = tmp_path / "apis.json"
+    cache.write_text(json.dumps([
+        {"name": "Vitamin C", "description": "Nutrition data", "category": "Food",
+         "url": "https://example.org/c", "auth": "none", "status": "up"},
+        {"name": "Vitamin D", "description": "Nutrition data", "category": "Food",
+         "url": "https://example.org/d", "auth": "none", "status": "up"},
+    ]), encoding="utf-8")
+    with patch.object(public_api_catalog, "CACHE", cache), \
+         patch.object(public_api_catalog, "urlopen") as opened:
+        result = public_api_catalog.search_public_apis("vitamin C")
+    opened.assert_not_called()
+    assert result["count"] == 1
+    assert [item["name"] for item in result["results"]] == ["Vitamin C"]
+
+
 def test_search_public_apis_handles_single_character_words_correctly(tmp_path):
     cache = tmp_path / "apis.json"
     cache.write_text(json.dumps([
@@ -423,3 +439,11 @@ def test_invalid_first_download_does_not_create_catalog_cache(tmp_path, constant
         with pytest.raises(RuntimeError, match="unavailable while offline"):
             public_api_catalog._catalog()
     assert not cache.parent.exists()
+
+
+@pytest.mark.parametrize("query", ["", "  ", "\t\t", " a "])
+def test_search_public_apis_rejects_blank_or_padded_single_character_before_catalog(query):
+    with patch.object(public_api_catalog, "_catalog") as catalog:
+        with pytest.raises(ValueError, match="2 to 120 characters"):
+            public_api_catalog.search_public_apis(query)
+    catalog.assert_not_called()
