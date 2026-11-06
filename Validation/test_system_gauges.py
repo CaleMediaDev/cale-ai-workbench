@@ -111,7 +111,7 @@ def test_disk_counter_runtime_failure_is_isolated_and_recovers(monkeypatch):
         SimpleNamespace(read_bytes=9_000_000, write_bytes=6_000_000),
         SimpleNamespace(read_bytes=13_000_000, write_bytes=8_000_000),
     ])
-    times = iter([10.0, 12.0, 14.0, 16.0])
+    times = iter([10.0, 10.0, 12.0, 12.0, 14.0, 14.0, 16.0, 16.0])
 
     def disk_counters():
         reading = next(readings)
@@ -187,6 +187,44 @@ def test_disk_rate_uses_timestamp_after_counter_acquisition(monkeypatch):
     assert second["drive_write_mbps"] == pytest.approx(2)
 
 
+def test_network_rate_uses_timestamp_after_counter_acquisition(monkeypatch):
+    import sys
+    from types import SimpleNamespace
+
+    clock = [10.0]
+    delays = iter([3.0, 0.0])
+
+    def network_counters():
+        clock[0] += next(delays)
+        return SimpleNamespace(
+            bytes_recv=int(clock[0] * 1_000_000),
+            bytes_sent=int(clock[0] * 2_000_000),
+        )
+
+    monkeypatch.setitem(sys.modules, "psutil", SimpleNamespace(
+        disk_io_counters=lambda: None,
+        net_io_counters=network_counters,
+        net_if_stats=lambda: {"Ethernet": SimpleNamespace(isup=True, speed=100)},
+    ))
+    monkeypatch.setattr(system_gauges, "os", SimpleNamespace(name="nt"))
+    monkeypatch.setattr(system_gauges, "_cpu_times", lambda: None)
+    monkeypatch.setattr(system_gauges, "_ram_percent", lambda: None)
+    monkeypatch.setattr(system_gauges, "_gpu_percent", lambda: None)
+    monkeypatch.setattr(system_gauges, "_drive_space", lambda: (None, None))
+    monkeypatch.setattr(system_gauges.time, "monotonic", lambda: clock[0])
+
+    sampler = system_gauges.HardwareSampler()
+    first = sampler.sample()
+    assert first["net_down_mbps"] is None
+    assert first["net_up_mbps"] is None
+    clock[0] = 20.0
+    second = sampler.sample()
+    # Counter snapshots occur at 13 and 20 seconds, not 10 and 20.
+    assert second["net_down_mbps"] == pytest.approx(8)
+    assert second["net_up_mbps"] == pytest.approx(16)
+    assert second["net"] == 24
+
+
 def test_network_bandwidth_includes_link_load():
     assert system_gauges.network_bandwidth(
         (0, 0), (12_500_000, 2_500_000), 1, 200
@@ -215,7 +253,7 @@ def test_network_counter_runtime_failure_is_isolated_and_recovers(monkeypatch):
         SimpleNamespace(bytes_recv=9_000_000, bytes_sent=6_000_000),
         SimpleNamespace(bytes_recv=13_000_000, bytes_sent=8_000_000),
     ])
-    times = iter([10.0, 12.0, 14.0, 16.0])
+    times = iter([10.0, 10.0, 12.0, 12.0, 14.0, 14.0, 16.0, 16.0])
 
     def network_counters():
         reading = next(readings)
@@ -266,7 +304,7 @@ def test_network_throughput_survives_unavailable_interface_stats(monkeypatch, er
         SimpleNamespace(bytes_recv=3_000_000, bytes_sent=3_000_000),
         SimpleNamespace(bytes_recv=5_000_000, bytes_sent=4_000_000),
     ])
-    times = iter([10.0, 12.0, 14.0])
+    times = iter([10.0, 10.0, 12.0, 12.0, 14.0, 14.0])
     stats_calls = 0
 
     def interface_stats():
