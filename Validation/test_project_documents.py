@@ -213,6 +213,43 @@ def test_inspector_rejects_source_changes_during_excerpt_selection(tmp_path):
     assert source.read_bytes() == b"updated PDF source"
 
 
+def test_inspector_rejects_symlink_retargeting_during_excerpt_selection(tmp_path):
+    original = tmp_path / "original.txt"
+    updated = tmp_path / "updated.txt"
+    link = tmp_path / "notes.txt"
+    original.write_bytes(b"original document")
+    updated.write_bytes(b"updated document")
+    try:
+        link.symlink_to(original.name)
+    except (OSError, NotImplementedError):
+        import pytest
+        pytest.skip("Symlink creation is unavailable")
+
+    def retarget_during_selection(text, question, *, limit, subject):
+        assert text == "original document"
+        link.unlink()
+        link.symlink_to(updated.name)
+        return text
+
+    with patch.object(project_memory, "index_file"):
+        first = project_documents.inspect(tmp_path, "notes.txt")
+        assert first["text"] == "original document" and not first["cached"]
+        with patch.object(file_chat, "select_excerpt", side_effect=retarget_during_selection):
+            try:
+                project_documents.inspect(tmp_path, "notes.txt", question="What changed?")
+            except RuntimeError as exc:
+                assert "document changed" in str(exc)
+            else:
+                raise AssertionError("Retargeted symlink returned stale cached text")
+        fresh = project_documents.inspect(tmp_path, "notes.txt")
+        cached = project_documents.inspect(tmp_path, "notes.txt")
+
+    assert fresh["text"] == cached["text"] == "updated document"
+    assert not fresh["cached"] and cached["cached"]
+    assert original.read_bytes() == b"original document"
+    assert updated.read_bytes() == b"updated document"
+
+
 def test_inspector_rejects_source_changes_during_indexing(tmp_path):
     source = tmp_path / "notes.pdf"
     source.write_bytes(b"original PDF source")

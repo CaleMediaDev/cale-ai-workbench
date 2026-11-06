@@ -76,7 +76,7 @@ def inspect(folder: str | Path, path: str, question: str = "",
     if source.suffix.casefold() in file_chat.IMAGES:
         digest = _digest(source)
         description = _extract_snapshot(source, digest, question)[:limit]
-        if _digest(source) != digest:
+        if (root / path).resolve(strict=True) != source or _digest(source) != digest:
             raise RuntimeError("The document changed while it was being read; try again")
         return {"source": relative, "text": description, "kind": "image",
                 "total_characters": len(description), "next_start_char": None,
@@ -159,7 +159,9 @@ def inspect(folder: str | Path, path: str, question: str = "",
         excerpt = text[start:start + limit]
         next_char = start + len(excerpt) if start + len(excerpt) < len(text) else None
     # Question-based excerpt selection can outlast the earlier validation.
-    if _digest(source) != digest:
+    # Re-resolve the requested path too: a retargeted symlink can leave the
+    # original resolved source unchanged while pointing at different bytes.
+    if (root / path).resolve(strict=True) != source or _digest(source) != digest:
         raise RuntimeError("The document changed while it was being read; try again")
     return {"source": relative, "text": excerpt, "kind": "document",
             "total_characters": len(text), "next_start_char": next_char,
