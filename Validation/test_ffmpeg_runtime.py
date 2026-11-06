@@ -224,6 +224,39 @@ def test_ensure_repairs_package_after_undecodable_discovery(tmp_path):
     assert calls[1][1:4] == ["-m", "pip", "install"]
 
 
+def test_discovery_preserves_unicode_path_with_legacy_parent_encoding(tmp_path):
+    from unittest.mock import MagicMock
+
+    python = tmp_path / "Toolbox/python/Scripts/python.exe"
+    python.parent.mkdir(parents=True)
+    python.write_bytes(b"mock Python runtime")
+    source = tmp_path / "caf\u00e9" / "ffmpeg.exe"
+    source.parent.mkdir()
+    source.write_bytes(b"mock FFmpeg executable")
+
+    def run(args, **kwargs):
+        # Model a UTF-8 child and a parent whose default decoding is cp1252.
+        # A mismatched decoder produces a different, nonexistent source path.
+        assert args[1] == "-c", "A usable package must not require pip"
+        output = (str(source) + "\n").encode("utf-8")
+        decoded = output.decode(kwargs.get("encoding") or "cp1252")
+        return subprocess.CompletedProcess(args, 0, decoded, "")
+
+    with patch.dict(sys.modules, {"msvcrt": MagicMock()}), \
+            patch.object(ffmpeg_runtime, "working", side_effect=[False, False, True]), \
+            patch.object(ffmpeg_runtime.shutil, "which", return_value=None), \
+            patch.object(ffmpeg_runtime, "_working_executable",
+                         side_effect=lambda path: path == source and path.is_file()), \
+            patch.object(ffmpeg_runtime.subprocess, "run", side_effect=run) as mocked_run:
+        target = ffmpeg_runtime.ensure(tmp_path)
+
+    assert target.read_bytes() == source.read_bytes()
+    assert mocked_run.call_count == 1
+    discovery = mocked_run.call_args
+    assert discovery.kwargs["encoding"] == "utf-8"
+    assert "sys.stdout.reconfigure(encoding='utf-8')" in discovery.args[0][2]
+
+
 def test_ensure_resolves_discovered_ffmpeg_command_on_path(tmp_path):
     from unittest.mock import MagicMock
 
@@ -249,8 +282,9 @@ def test_ensure_resolves_discovered_ffmpeg_command_on_path(tmp_path):
     # Only discovery is needed: do not invoke pip for an executable on PATH.
     run.assert_called_once_with(
         [str(python), "-c",
+         "import sys; sys.stdout.reconfigure(encoding='utf-8'); "
          "import imageio_ffmpeg; print(imageio_ffmpeg.get_ffmpeg_exe())"],
-        capture_output=True, text=True, timeout=30,
+        capture_output=True, text=True, encoding="utf-8", timeout=30,
         creationflags=ffmpeg_runtime.HIDE,
     )
 
