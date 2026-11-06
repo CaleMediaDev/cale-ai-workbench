@@ -51,7 +51,8 @@ def install():
         import msvcrt
 
         STATUS.parent.mkdir(exist_ok=True)
-        lock_file = (STATUS.parent / "natural-voice.lock").open("a+b")
+        # Do not leave buffered writes for close() to retry after a disk error.
+        lock_file = (STATUS.parent / "natural-voice.lock").open("a+b", buffering=0)
     except (ImportError, OSError) as exc:
         save_download_status(STATUS, "error", str(exc)[:400], 0)
         return
