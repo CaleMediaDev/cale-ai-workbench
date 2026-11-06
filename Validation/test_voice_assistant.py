@@ -762,6 +762,51 @@ class VoiceTests(unittest.TestCase):
             fallback.assert_not_called()
             self.assertEqual(cached.read_bytes(), fresh_audio)
 
+    def test_unreadable_wake_cache_metadata_does_not_prevent_clone_synthesis(self):
+        with TemporaryDirectory() as folder:
+            root = Path(folder)
+            reference = root / "reference.wav"
+            reference.write_bytes(b"voice")
+            cached = root / "Media" / "voice-cache" / (
+                f"wake-v1-{reference.stat().st_mtime_ns}.wav"
+            )
+            original_stat = Path.stat
+            original_is_file = Path.is_file
+
+            def stat(path, *args, **kwargs):
+                if path == cached:
+                    raise PermissionError("cache metadata is unreadable")
+                return original_stat(path, *args, **kwargs)
+
+            def is_file(path):
+                if path == cached:
+                    return True
+                return original_is_file(path)
+
+            def synthesize(_message, output, cancel=None):
+                Path(output).write_bytes(b"fresh audio" * 200)
+                return {"path": str(output), "engine": "clone"}
+
+            with (
+                patch.object(voice_assistant, "ROOT", root),
+                patch.object(voice_assistant, "speech_ready", return_value=True),
+                patch.object(voice_assistant, "_heavy_gpu_active", return_value=False),
+                patch.object(cale_voice, "REFERENCE", reference),
+                patch.object(cale_voice, "ready", return_value=True),
+                patch.object(cale_voice, "speak", side_effect=synthesize) as clone,
+                patch.object(voice_assistant, "media_call") as fallback,
+                patch.object(voice_assistant, "_play_file") as play,
+                patch.object(Path, "is_file", is_file),
+                patch.object(Path, "stat", stat),
+            ):
+                result = voice_assistant.say(
+                    voice_assistant.WAKE_ACK, require_clone=True
+                )
+            self.assertEqual(result["engine"], "clone")
+            clone.assert_called_once()
+            fallback.assert_not_called()
+            play.assert_not_called()
+
     def test_cached_wake_playback_runtime_error_regenerates_clone(self):
         with TemporaryDirectory() as folder:
             root = Path(folder)
