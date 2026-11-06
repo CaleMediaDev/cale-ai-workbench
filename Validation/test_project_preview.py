@@ -99,6 +99,19 @@ class ProjectPreviewTests(unittest.TestCase):
                 self.skipTest(f"Symlinks unavailable: {error}")
             self.assertEqual(preview.source(folder), fallback.as_uri())
 
+    def test_non_html_symlink_target_does_not_block_static_html_fallback(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            folder = Path(temporary).resolve()
+            (folder / "notes.txt").write_text("not a preview", encoding="utf-8")
+            (folder / "dist").mkdir()
+            fallback = folder / "dist/index.html"
+            fallback.write_text("<html>preview</html>", encoding="utf-8")
+            try:
+                (folder / "index.html").symlink_to("notes.txt")
+            except (OSError, NotImplementedError) as error:
+                self.skipTest(f"Symlinks unavailable: {error}")
+            self.assertEqual(preview.source(folder), fallback.as_uri())
+
     def test_unresolvable_project_root_returns_no_preview(self):
         for error in (
             PermissionError("Cannot search project directory"),

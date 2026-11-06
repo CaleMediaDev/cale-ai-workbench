@@ -91,7 +91,11 @@ def source(folder):
     for name in HTML_CANDIDATES:
         try:
             html = (folder / name).resolve()
-            if html.is_relative_to(folder) and html.is_file():
+            if (
+                html.is_relative_to(folder)
+                and html.is_file()
+                and html.suffix.lower() in (".html", ".htm")
+            ):
                 return html.as_uri()
         except (OSError, RuntimeError):
             # An unreadable path or symlink loop must not block later candidates.
