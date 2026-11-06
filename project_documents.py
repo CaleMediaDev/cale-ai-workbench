@@ -95,7 +95,7 @@ def inspect(folder: str | Path, path: str, question: str = "",
         try:
             with cache.open("r", encoding="utf-8", newline="") as cached_text:
                 text = cached_text.read(MAX_EXTRACTED_CHARS + 1)
-            cached = len(text) <= MAX_EXTRACTED_CHARS
+            cached = bool(text) and len(text) <= MAX_EXTRACTED_CHARS
         except (OSError, UnicodeDecodeError):
             # Derived text is disposable; recover from an unreadable, removed,
             # or corrupt cache using the authoritative source.
@@ -109,22 +109,25 @@ def inspect(folder: str | Path, path: str, question: str = "",
             raise RuntimeError("The document changed while it was being read; try again")
         if len(text) > MAX_EXTRACTED_CHARS:
             raise ValueError("The extracted text is too large for this task reader")
-        cache.parent.mkdir(parents=True, exist_ok=True)
-        with tempfile.NamedTemporaryFile(
-            mode="w", encoding="utf-8", newline="", dir=cache.parent,
-            prefix=cache.name + ".", suffix=".tmp", delete=False,
-        ) as output:
-            temporary = Path(output.name)
+        # An empty result may be a transient extraction failure. Return it,
+        # but allow the next inspection to retry the authoritative source.
+        if text:
+            cache.parent.mkdir(parents=True, exist_ok=True)
+            with tempfile.NamedTemporaryFile(
+                mode="w", encoding="utf-8", newline="", dir=cache.parent,
+                prefix=cache.name + ".", suffix=".tmp", delete=False,
+            ) as output:
+                temporary = Path(output.name)
+                try:
+                    output.write(text)
+                except BaseException:
+                    output.close()
+                    temporary.unlink(missing_ok=True)
+                    raise
             try:
-                output.write(text)
-            except BaseException:
-                output.close()
+                os.replace(temporary, cache)
+            finally:
                 temporary.unlink(missing_ok=True)
-                raise
-        try:
-            os.replace(temporary, cache)
-        finally:
-            temporary.unlink(missing_ok=True)
         if _digest(source) != digest:
             raise RuntimeError("The document changed while it was being read; try again")
     if len(text) > MAX_EXTRACTED_CHARS:
