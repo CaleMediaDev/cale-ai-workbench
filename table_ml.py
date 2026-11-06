@@ -212,6 +212,7 @@ def train_table_model(csv_path: str, target_column: str, model_path: str,
     payload = {"format": "cale-table-model-v1", "problem_type": problem_type,
                "target_column": target_column, "schema": schema,
                "feature_names": vectorizer.get_feature_names_out().tolist(),
+               "feature_owners": feature_owners,
                "classes": model.classes_.tolist() if classes else [],
                "coefficients": model.coef_.tolist() if classes else [model.coef_.tolist()],
                "intercepts": model.intercept_.tolist() if classes else [float(model.intercept_)],
@@ -262,7 +263,10 @@ def predict_table_model(model_path: str, csv_path: str, output_path: str) -> dic
         with staged.open("x", encoding="utf-8", newline="") as stream:
             writer = csv.DictWriter(stream, fieldnames=[*columns, output_column])
             writer.writeheader()
-            feature_owners = {}
+            feature_owners = {
+                name: tuple(owner)
+                for name, owner in model.get("feature_owners", {}).items()
+            }
             for start in range(0, len(rows), 4096):
                 batch = rows[start:start + 4096]
                 matrix = vectorizer.transform(_features(batch, model["schema"], feature_owners))
@@ -356,4 +360,20 @@ def _checked_model(model: dict) -> tuple[list[str], list[list[float]], list[floa
         finite_number(value) for value in intercepts
     ):
         raise ValueError("Saved model contains invalid or nonfinite weights.")
+    if "feature_owners" in model:
+        owners = model["feature_owners"]
+        if not isinstance(owners, dict) or not set(names).issubset(owners):
+            raise ValueError("Saved model has invalid feature ownership.")
+        for name, owner in owners.items():
+            if (not isinstance(name, str)
+                    or not isinstance(owner, list)
+                    or len(owner) not in (1, 2)
+                    or not all(isinstance(part, str) for part in owner)
+                    or owner[0] not in schema):
+                raise ValueError("Saved model has invalid feature ownership.")
+            categorical = schema[owner[0]]["kind"] == "category"
+            if (categorical and (len(owner) != 2 or name != f"{owner[0]}={owner[1]}")) or (
+                not categorical and (len(owner) != 1 or name != owner[0])
+            ):
+                raise ValueError("Saved model has invalid feature ownership.")
     return names, coefficients, intercepts, classes
