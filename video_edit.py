@@ -42,8 +42,10 @@ def _number(value: float, minimum: float, maximum: float, name: str) -> float:
 
 
 def _run(arguments: list[str], output: Path, timeout: int = 7200) -> dict:
+    # A header-only MP4 has nonzero size even when no media was produced.
     command = [imageio_ffmpeg.get_ffmpeg_exe(), "-nostdin", "-hide_banner",
-               "-loglevel", "error", "-n", *arguments, str(output)]
+               "-loglevel", "error", "-abort_on", "empty_output", "-n",
+               *arguments, str(output)]
     output_existed = output.exists()
     try:
         result = subprocess.run(command, capture_output=True, text=True,

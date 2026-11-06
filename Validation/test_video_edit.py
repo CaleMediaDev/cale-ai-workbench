@@ -93,6 +93,21 @@ def _clip(path, color):
                    check=True, capture_output=True)
 
 
+def test_trim_beyond_source_end_rejects_and_removes_empty_container(tmp_path):
+    source = tmp_path / "source.mp4"
+    output = tmp_path / "empty.mp4"
+    _clip(source, "red")
+    original = source.read_bytes()
+
+    with pytest.raises(RuntimeError):
+        video_edit.edit_video(
+            str(source), str(output), start_seconds=2, duration_seconds=1)
+
+    assert not output.exists()
+    assert video_edit._destination(str(output), []) == output
+    assert source.read_bytes() == original
+
+
 def test_agent_can_trim_join_and_replace_soundtrack(tmp_path):
     first, second = tmp_path / "one.mp4", tmp_path / "two.mp4"
     _clip(first, "red")
