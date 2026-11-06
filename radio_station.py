@@ -458,8 +458,9 @@ class Service:
                 if self.station:
                     self._choose(self.station)
                 return
-            self.paused = not self.paused
-            (self.player.pause if self.paused else self.player.resume)()
+            paused = not self.paused
+            (self.player.pause if paused else self.player.resume)()
+            self.paused = paused
 
     def stop(self):
         self.commands.put(("stop", None))
