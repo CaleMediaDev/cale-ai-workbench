@@ -79,6 +79,26 @@ def test_completed_media_job_only_counts_when_its_output_still_exists(tmp_path):
     assert not readiness_checklist._successful_job(jobs, "status")
 
 
+def test_successful_job_skips_a_record_that_disappears_during_enumeration(tmp_path):
+    jobs = tmp_path / "image-jobs"
+    jobs.mkdir()
+    disappearing = jobs / "disappearing.json"
+    disappearing.write_text("{}")
+    output = tmp_path / "image.png"
+    output.write_bytes(b"x" * 120)
+    (jobs / "complete.json").write_text(json.dumps({
+        "status": "complete", "output_path": str(output)}))
+    original_stat = Path.stat
+
+    def stat_with_disappearing_record(path, *args, **kwargs):
+        if path == disappearing:
+            raise FileNotFoundError(str(path))
+        return original_stat(path, *args, **kwargs)
+
+    with patch.object(Path, "stat", stat_with_disappearing_record):
+        assert readiness_checklist._successful_job(jobs, "status")
+
+
 def test_optional_checks_only_count_for_the_current_install(tmp_path):
     state = tmp_path / "LongTasks"
     state.mkdir()
