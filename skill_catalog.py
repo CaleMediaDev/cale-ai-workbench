@@ -85,7 +85,11 @@ def sync(root: str | Path) -> dict:
             preserved += 1
             continue
         if target.exists():
-            current = _hash(target.read_bytes())
+            try:
+                current = _hash(target.read_bytes())
+            except PermissionError:
+                preserved += 1
+                continue
             if current == _hash(data):
                 managed[key] = current
                 continue
