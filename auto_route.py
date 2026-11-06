@@ -297,7 +297,7 @@ def _task_intent(messages):
 def is_game_task(messages):
     """Apply game-model gates only when the user's task concerns a game."""
     intent = _task_intent(messages)[0]
-    return bool(re.search(r"\b(game|shooter|platformer|arcade)\b", intent, re.I))
+    return bool(re.search(r"\b(games?|shooter|platformer|arcade)\b", intent, re.I))
 
 
 def task_size(messages):
