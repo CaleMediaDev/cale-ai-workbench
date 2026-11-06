@@ -305,6 +305,33 @@ def test_local_dom_contract_handles_form_control_named_local_name(tmp_path):
         native_browser.close()
 
 
+def test_local_dom_contract_handles_form_control_named_form(tmp_path):
+    pytest.importorskip("playwright")
+    (tmp_path / "index.html").write_text(
+        '<!doctype html><title>Named form control</title><body>'
+        '<form id="editor" name="record">'
+        '<input id="field" name="form">'
+        '</form></body>', encoding="utf-8")
+    try:
+        opened = native_agent.execute_tool(
+            tmp_path, "browser_open_project", {"path": "index.html"})
+        if opened.startswith("Tool error:") and "Executable doesn't exist" in opened:
+            pytest.skip("Chromium runtime is not installed in this test environment")
+        assert json.loads(opened)["title"] == "Named form control"
+        page = native_browser._page(tmp_path)
+        assert page.evaluate(
+            "document.querySelector('form').form === document.querySelector('input')")
+
+        snapshot = json.loads(native_browser.execute(tmp_path, "snapshot", {}))
+        targets = {row["id"]: row for row in snapshot["dom_contract"]["targets"]}
+        expected_form = {"id": "editor", "name": "record"}
+        assert targets["editor"]["form"] == expected_form
+        assert targets["field"]["form"] == expected_form
+        assert not snapshot["dom_contract"]["stale"]
+    finally:
+        native_browser.close()
+
+
 def test_local_dom_contract_handles_svg_non_string_type_property(tmp_path):
     pytest.importorskip("playwright")
     (tmp_path / "index.html").write_text(
