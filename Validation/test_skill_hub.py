@@ -119,6 +119,30 @@ class SkillHubTests(unittest.TestCase):
                     self.assertEqual(set(skill_hub.SEEN), {identifier})
                     self.assertEqual(skill_hub.INSPECTED, {})
 
+    def test_search_preserves_combining_marks_in_topics(self):
+        identifier = "skills-sh/example/matching"
+        for query, topic, unrelated in (
+            ("\u0130", "i\u0307 tool", "Interface"),
+            ("q\u0307", "Q\u0307 tool", "Quality"),
+        ):
+            with self.subTest(query=repr(query)):
+                skill_hub.SEEN.clear()
+                payload = json.dumps([
+                    {
+                        "identifier": "skills-sh/example/unrelated",
+                        "name": unrelated,
+                    },
+                    {"identifier": identifier, "name": topic},
+                ])
+                with patch.object(skill_hub, "_run", return_value=payload):
+                    result = skill_hub.search(query)
+                self.assertEqual(
+                    [match["identifier"] for match in result["matches"]],
+                    [identifier],
+                )
+                self.assertEqual(set(skill_hub.SEEN), {identifier})
+                self.assertEqual(skill_hub.INSPECTED, {})
+
     def test_search_does_not_match_stringified_metadata(self):
         identifier = "skills-sh/example/none-checker"
         payload = json.dumps([

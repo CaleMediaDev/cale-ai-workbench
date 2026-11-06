@@ -56,7 +56,17 @@ def search(query: str, source: str = "skills-sh", limit: int = 5) -> dict:
     if not isinstance(rows, list):
         raise RuntimeError("The skill registry returned an invalid result.")
     safe = []
-    terms = re.findall(r"[^\W_]+", unicodedata.normalize("NFC", query.casefold()))
+    terms = []
+    term = ""
+    for char in unicodedata.normalize("NFC", query.casefold()):
+        if char.isalnum() or (term and unicodedata.category(char).startswith("M")):
+            term += char
+        else:
+            if term:
+                terms.append(term)
+                term = ""
+    if term:
+        terms.append(term)
     for row in rows[:limit]:
         if not isinstance(row, dict):
             continue
