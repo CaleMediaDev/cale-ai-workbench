@@ -327,7 +327,7 @@ def route(text: str, active_tasks: list[dict]) -> str:
         return "note"
     if active_tasks and re.match(
         r"^(?:make|fix|update|improve|revise|redo|adjust)\b", command
-    ) and any(task["title"].strip() and task["title"].casefold() in command
+    ) and any(task["title"].strip() and task["title"].casefold() in command.casefold()
               for task in active_tasks):
         return "note"
     if music_request(text):
