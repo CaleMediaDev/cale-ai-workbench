@@ -3087,8 +3087,9 @@ def test_wait_chat_ignores_untrusted_github_diagnostics(failure):
     assert 'GitHub HTTP' not in messages[0]
 
 
-def test_public_confirmation_keeps_existing_527_saved_payload_policy():
-    assert donation._publication_policy()=='2f2342462a62b4057d69608630bc596a2ecdf9e3dc4c28d2d757104510578ced'
+def test_new_validator_requires_fresh_policy_for_527_saved_payload():
+    # The new pre-publication AST check intentionally invalidates old approval.
+    assert donation._publication_policy()!='2f2342462a62b4057d69608630bc596a2ecdf9e3dc4c28d2d757104510578ced'
 
 
 def test_public404_exposes_saved_proposal_without_announcing_delivery(outbox_host):
@@ -3654,3 +3655,159 @@ def test_stale_url_hydration_cannot_resurrect_after_empty_cache_submission(outbo
     assert expected not in parent.status_message()
     assert "pending_proposal_url" not in parent._events
     assert len(host.calls) == 1 and len(host.remote.prs) == 1
+
+
+@pytest.mark.parametrize("header,decorator", [
+    ("import pytest", "pytest.mark.parametrize('request', [1])"),
+    ("import pytest as pt", "pt.mark.parametrize('prompt, request', [(1, 2)])"),
+    ("from pytest import mark", "mark.parametrize(['prompt', 'request'], [(1, 2)])"),
+    ("from pytest import mark as checks", "checks.parametrize(('request',), [(1,)])"),
+    ("import pytest", "pytest.mark.parametrize(argnames='request', argvalues=[1])"),
+    ("import pytest", "pytest.mark.parametrize(argnames=['request'], argvalues=[1])"),
+])
+def test_proposal_rejects_new_reserved_pytest_literal_parameter(header, decorator):
+    before = header + "\n# append test\n"
+    after = before + "@" + decorator + "\ndef test_neutral(request):\n    assert request\n"
+    proposal = {"title":"Neutral fix", "summary":"Adds a neutral regression.", "changes":[
+        {"path":"Validation/test_example.py", "before":before, "after":after}]}
+    with pytest.raises(ValueError, match="Pytest reserves 'request'"):
+        donation.validate_proposal(json.dumps(proposal), {"Validation/test_example.py":before})
+
+
+@pytest.mark.parametrize("body", [
+    "import pytest\n@pytest.mark.parametrize('prompt', [1])\ndef test_neutral(prompt): pass\n",
+    "import pytest\ndef test_neutral(request):\n    assert request.node\n",
+    "import pytest\n@pytest.mark.parametrize('REQUEST', [1])\ndef test_neutral(REQUEST): pass\n",
+    "import pytest\n@pytest.mark.parametrize(NAMES, [1])\ndef test_neutral(request): pass\n",
+    "import pytest\n@pytest.mark.parametrize([' request '], [1])\ndef test_neutral(): pass\n",
+    "import other_module as pytest\n@pytest.mark.parametrize('request', [1])\ndef test_neutral(request): pass\n",
+    "from pytest import mark\n@factory().mark.parametrize('request', [1])\ndef test_neutral(request): pass\n",
+    "import pytest\npytest = other_object\n@pytest.mark.parametrize('request', [1])\ndef test_neutral(request): pass\n",
+    "import pytest\ndef outer(pytest):\n    @pytest.mark.parametrize('request', [1])\n    def test_neutral(request): pass\n",
+])
+def test_proposal_reserved_pytest_gate_preserves_other_or_unverified_forms(body):
+    before = "# original\n"
+    proposal = {"title":"Neutral fix", "summary":"Adds a neutral regression.", "changes":[
+        {"path":"Validation/test_example.py", "before":before, "after":body}]}
+    assert donation.validate_proposal(json.dumps(proposal), {"Validation/test_example.py":before})[1]
+
+
+def test_proposal_reserved_pytest_gate_tracks_qualified_scope_and_decorator():
+    before = "import pytest\nclass TestLegacy:\n    @pytest.mark.parametrize('request', [1])\n    def test_old(self, request):\n        pass\n# neutral marker\n"
+    path = "Validation/test_example.py"
+    def validate(after):
+        proposal={"title":"Neutral fix", "summary":"Changes a neutral marker.", "changes":[
+            {"path":path, "before":before, "after":after}]}
+        return donation.validate_proposal(json.dumps(proposal), {path:before})
+    assert validate(before.replace("# neutral marker", "# unrelated edit"))[1]
+    assert validate(before.replace("        pass", "        assert request"))[1]
+    with pytest.raises(ValueError, match="Pytest reserves"):
+        validate(before.replace("class TestLegacy", "class TestNew"))
+    with pytest.raises(ValueError, match="Pytest reserves"):
+        validate(before.replace("[1]", "[2]"))
+    with pytest.raises(ValueError, match="Pytest reserves"):
+        validate(before.replace("# neutral marker", "class TestNew:\n    @pytest.mark.parametrize('request', [1])\n    def test_old(self, request): pass"))
+
+
+def test_proposal_reserved_pytest_gate_still_allows_syntax_repairs():
+    before="def broken(\n"
+    after="def repaired(request):\n    return request\n"
+    proposal={"title":"Repair syntax", "summary":"Repairs malformed Python without running it.", "changes":[
+        {"path":"Validation/test_example.py", "before":before, "after":after}]}
+    assert donation.validate_proposal(json.dumps(proposal), {"Validation/test_example.py":before})[1]
+
+
+@pytest.mark.parametrize("scope", ["module_helper", "non_test_class", "nested_function", "class_without_tests"])
+def test_proposal_reserved_pytest_gate_preserves_uncollected_helpers(scope):
+    decorator = "@pytest.mark.parametrize('request', [1])\n"
+    bodies = {
+        "module_helper": decorator + "def helper(request): pass\n",
+        "non_test_class": "class Helpers:\n    " + decorator + "    def test_value(self, request): pass\n",
+        "nested_function": "def outer():\n    " + decorator + "    def test_inner(request): pass\n",
+        "class_without_tests": decorator + "class TestEmpty: pass\n",
+    }
+    before = "import pytest\n# original\n"
+    after = "import pytest\n" + bodies[scope]
+    proposal={"title":"Neutral helper", "summary":"Adds an uncollected helper.", "changes":[
+        {"path":"Validation/test_example.py", "before":before, "after":after}]}
+    assert donation.validate_proposal(json.dumps(proposal), {"Validation/test_example.py":before})[1]
+
+
+@pytest.mark.parametrize("location", ["production", "test_without_pytest", "test_with_pytest", "unknown_decorator", "literal_reserved_deep_values"])
+def test_proposal_reserved_pytest_gate_handles_parse_valid_deep_ast(location):
+    import ast
+    expression = "+".join(["1"] * 1200)
+    if location == "unknown_decorator":
+        body = "import pytest\n@pytest." + "other." * 1200 + "parametrize('prompt', [1])\ndef test_value(prompt): pass\n"
+    elif location == "literal_reserved_deep_values":
+        body = "import pytest\n@pytest.mark.parametrize('request', [" + expression + "])\ndef test_value(request): pass\n"
+    else:
+        body = ("import pytest\n" if location == "test_with_pytest" else "") + "value = " + expression + "\n"
+    assert ast.parse(body)  # Valid Python AST; no donated expression is evaluated.
+    sources={"Validation/test_example.py":"# original\n"}
+    path="example.py" if location=="production" else "Validation/test_example.py"
+    sources[path]="# original\n"
+    changes=[{"path":path,"before":"# original\n","after":body}]
+    if path=="example.py":
+        changes.append({"path":"Validation/test_example.py","before":"# original\n","after":"# neutral regression edit\n"})
+    proposal={"title":"Neutral AST", "summary":"Parses a bounded deep expression.", "changes":changes}
+    if location=="literal_reserved_deep_values":
+        with pytest.raises(ValueError,match="Pytest reserves"):
+            donation.validate_proposal(json.dumps(proposal),sources)
+    else:
+        assert donation.validate_proposal(json.dumps(proposal),sources)[1]
+
+
+def test_proposal_reserved_pytest_gate_is_limited_to_validation_test_files():
+    sources={"example.py":"# original\n", "Validation/test_example.py":"# original\n"}
+    body="import pytest\n@pytest.mark.parametrize('request', [1])\ndef test_exposed(request): pass\n"
+    changes=[{"path":"example.py","before":"# original\n","after":body},
+             {"path":"Validation/test_example.py","before":"# original\n","after":"# neutral regression edit\n"}]
+    assert donation.validate_proposal(json.dumps({"title":"Neutral source","summary":"Changes production source.","changes":changes}),sources)[1]
+
+
+def test_proposal_reserved_pytest_gate_checks_default_collected_class_decorator():
+    before="import pytest\n# original\n"
+    after="import pytest\n@pytest.mark.parametrize('request', [1])\nclass TestValues:\n    def test_value(self, request): pass\n"
+    value={"title":"Neutral class","summary":"Adds a default collected test class.","changes":[
+        {"path":"Validation/test_example.py","before":before,"after":after}]}
+    with pytest.raises(ValueError,match="Pytest reserves"):
+        donation.validate_proposal(json.dumps(value),{"Validation/test_example.py":before})
+
+
+def test_proposal_reserved_pytest_gate_leaves_constructor_class_unverified():
+    before="import pytest\n# original\n"
+    after="import pytest\n@pytest.mark.parametrize('request', [1])\nclass TestHelper:\n    def __init__(self): pass\n    def test_value(self, request): pass\n"
+    value={"title":"Neutral helper","summary":"Adds a class pytest does not collect by default.","changes":[
+        {"path":"Validation/test_example.py","before":before,"after":after}]}
+    assert donation.validate_proposal(json.dumps(value),{"Validation/test_example.py":before})[1]
+
+
+def test_publication_policy_binds_reserved_pytest_helper_implementation():
+    expected = donation._publication_policy()
+    with patch.object(donation, "_reserved_pytest_parameters", lambda tree: {}):
+        assert donation._publication_policy() != expected
+    assert donation._publication_policy() == expected
+
+
+def test_cached_reserved_pytest_payload_needs_fresh_validation_without_reposting(outbox_host):
+    host = outbox_host
+    bad = json.loads(json.dumps(PROPOSAL))
+    bad["changes"][1]["after"] = TEST + "import pytest\n@pytest.mark.parametrize('request', [1])\ndef test_value(request): pass\n"
+    result = {**RESULT, "choices":[{"message":{"content":json.dumps(bad)}}]}
+    host.remote.fork_failures = 1
+    # Simulate a saved approval made before the reserved-name rule existed.
+    with patch.object(donation, "_reserved_pytest_parameters", lambda tree: donation.Counter()), \
+            patch.dict(globals(), {"RESULT":result}):
+        host.tick()
+    with closing(donation.connection(host.root)) as conn:
+        phase, payload = conn.execute("SELECT phase,payload FROM publication_outbox").fetchone()
+        assert payload and json.loads(payload)["proposal"] == bad
+    mutations = sum(body is not None for _, body in host.remote.calls)
+    with patch.object(donation.time, "time", return_value=outbox_expire(host.root)):
+        host.tick()
+    assert len(host.calls) == 1 and donation.total_tokens(host.root) == 50
+    assert not host.remote.prs
+    assert sum(body is not None for _, body in host.remote.calls) == mutations
+    with closing(donation.connection(host.root)) as conn:
+        assert conn.execute("SELECT phase,length(payload) FROM publication_outbox").fetchone() == ("stale",0)

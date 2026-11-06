@@ -10,6 +10,7 @@ run alongside it. Full Blast runs up to six reviews when ChatGPT is opted in.
 from __future__ import annotations
 
 import ast
+from collections import Counter
 import base64
 import hashlib
 import json
@@ -682,6 +683,98 @@ def allowed_path(path: str) -> bool:
                      and parsed.name.startswith("test_") and parsed.suffix == ".py")))
 
 
+def _reserved_pytest_parameters(tree):
+    """Find literal reserved argnames, not arbitrary decorators or dynamic code."""
+    bindings = Counter()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Name) and isinstance(node.ctx, (ast.Store, ast.Del)):
+            bindings[node.id] += 1
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            bindings[node.name] += 1
+        elif isinstance(node, ast.arg):
+            bindings[node.arg] += 1
+        elif isinstance(node, ast.ExceptHandler) and node.name:
+            bindings[node.name] += 1
+        elif isinstance(node, (ast.Import, ast.ImportFrom)):
+            for alias in node.names:
+                bindings[alias.asname or (alias.name.split(".")[0] if isinstance(node, ast.Import) else alias.name)] += 1
+    decorators = set()
+    for node in tree.body:
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                name = alias.asname or alias.name
+                if alias.name == "pytest" and bindings[name] == 1:
+                    decorators.add((name, "mark", "parametrize"))
+        elif isinstance(node, ast.ImportFrom) and node.module == "pytest" and node.level == 0:
+            for alias in node.names:
+                name = alias.asname or alias.name
+                if alias.name == "mark" and bindings[name] == 1:
+                    decorators.add((name, "parametrize"))
+
+    if not decorators:
+        return Counter()
+
+    def path(node):
+        names = []
+        while isinstance(node, ast.Attribute):
+            names.append(node.attr)
+            node = node.value
+        return (node.id, *reversed(names)) if isinstance(node, ast.Name) else ()
+
+    def key(node):
+        # Flat structural tokens retain decorator changes without ast.dump's
+        # recursive traversal of otherwise valid, deeply nested expressions.
+        tokens, pending = [], [node]
+        while pending:
+            value = pending.pop()
+            if isinstance(value, ast.AST):
+                fields = list(ast.iter_fields(value))
+                tokens.append(("ast", type(value).__name__, tuple(name for name, _ in fields)))
+                pending.extend(child for _, child in reversed(fields))
+            elif isinstance(value, list):
+                tokens.append(("list", len(value)))
+                pending.extend(reversed(value))
+            else:
+                tokens.append(("value", type(value).__name__, repr(value)))
+        return tuple(tokens)
+
+    found = Counter()
+    pending = [(node, ()) for node in reversed(tree.body)]
+    while pending:
+        node, scope = pending.pop()
+        if isinstance(node, ast.ClassDef):
+            if (not node.name.startswith("Test")
+                    or any(isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef))
+                           and child.name in {"__init__", "__new__"} for child in node.body)
+                    or not any(isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef))
+                               and child.name.startswith("test") for child in node.body)):
+                continue
+            scope = (*scope, (type(node).__name__, node.name))
+            pending.extend((child, scope) for child in reversed(node.body))
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            if not node.name.startswith("test"):
+                continue
+            scope = (*scope, (type(node).__name__, node.name))
+            # Nested functions are not default pytest collection targets.
+        else:
+            continue
+        for decorator in node.decorator_list:
+            if not isinstance(decorator, ast.Call) or path(decorator.func) not in decorators:
+                continue
+            names = decorator.args[0] if decorator.args else next(
+                (keyword.value for keyword in decorator.keywords if keyword.arg == "argnames"), None)
+            if isinstance(names, ast.Constant) and isinstance(names.value, str):
+                literal = [name.strip() for name in names.value.split(",")]
+            elif isinstance(names, (ast.List, ast.Tuple)) and all(
+                    isinstance(item, ast.Constant) and isinstance(item.value, str) for item in names.elts):
+                literal = [item.value for item in names.elts]
+            else:
+                continue  # Unknown expressions are not statically verified.
+            if "request" in literal:
+                found[(scope, key(decorator))] += 1
+    return found
+
+
 def validate_proposal(text: str, sources: dict[str, str]) -> tuple[dict, dict[str, str]]:
     """Apply bounded exact edits in memory and parse changed Python; run no code."""
     if not isinstance(text, str):
@@ -721,7 +814,14 @@ def validate_proposal(text: str, sources: dict[str, str]) -> tuple[dict, dict[st
         if len(body) > 200_000:
             raise ValueError("Contribution file is too large")
         if path.endswith(".py"):
-            ast.parse(body, filename=path)
+            changed = ast.parse(body, filename=path)
+            if path.startswith("Validation/test_"):
+                try:
+                    original = _reserved_pytest_parameters(ast.parse(sources[path], filename=path))
+                except SyntaxError:
+                    original = Counter()  # A proposal may repair previously invalid Python.
+                if _reserved_pytest_parameters(changed) - original:
+                    raise ValueError("Pytest reserves 'request'; choose another literal parametrization name.")
     return proposal, edited
 
 
@@ -1226,7 +1326,7 @@ def _publication_policy():
                           for value in code.co_consts)
         return code.replace(co_consts=constants, co_filename="<publication-policy>",
                             co_firstlineno=1, co_linetable=b"")
-    functions = (allowed_path, validate_proposal, scope_fingerprint,
+    functions = (allowed_path, validate_proposal, _reserved_pytest_parameters, scope_fingerprint,
                  DurablePublication.fresh, DurablePublication.guard,
                  DurablePublication.request, DurablePublication.publish,
                  DurablePublication._confirm_result)
