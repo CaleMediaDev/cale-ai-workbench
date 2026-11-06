@@ -70,6 +70,31 @@ def test_overflowing_installer_identity_does_not_crash_stall_detection(tmp_path,
             assert setup_recovery._stalled(progress) is True
 
 
+def test_nonfinite_installer_identity_does_not_hide_a_stopped_installer(tmp_path, monkeypatch):
+    monkeypatch.setattr(setup_recovery, "ROOT", tmp_path)
+    monkeypatch.setattr(setup_recovery.time, "time", lambda: 10000)
+    monkeypatch.setattr(setup_recovery, "_retry_runner_running", lambda: False)
+    worker = MagicMock()
+    worker.cmdline.return_value = [
+        "powershell.exe", "-File", str(tmp_path / "extracted" / "Install-Backend.ps1"),
+        "-Destination", str(tmp_path),
+    ]
+    worker.create_time.return_value = 5000
+    with patch("psutil.Process", return_value=worker), patch(
+        "psutil.process_iter", return_value=[]
+    ):
+        for field in ("installer_started", "updated"):
+            for value in ("NaN", "Infinity", "-Infinity"):
+                progress = {
+                    "status": "working", "pid": 4321,
+                    "installer_started": 0, "updated": 1,
+                    field: value,
+                }
+                assert setup_recovery._installer_running(progress) is False
+                if field == "installer_started":
+                    assert setup_recovery._stalled(progress) is True
+
+
 def test_replacement_installer_is_detected_before_it_updates_progress(tmp_path, monkeypatch):
     state = tmp_path / "LongTasks"
     state.mkdir()

@@ -66,6 +66,8 @@ def _installer_running(progress: dict) -> bool:
                         created = process.create_time()
                         started = float(progress.get("installer_started") or 0)
                         updated = float(progress.get("updated") or 0)
+                        if not all(math.isfinite(value) for value in (created, started, updated)):
+                            continue
                         # The process can spend minutes initializing PowerShell
                         # and waiting for the install lock before writing its
                         # first progress record. A process created *after* the
