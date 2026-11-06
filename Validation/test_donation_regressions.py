@@ -75,6 +75,18 @@ class CalculatorPrecisionTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             run_helper(definition, {"x": 0})
 
+    def test_ellipsis_is_rejected_before_sibling_evaluation(self):
+        for expression in (
+            "1 / 0 + ...",
+            "... + 1 / 0",
+            "1 / 0 + (2 * ...)",
+            "... + 1",
+        ):
+            with self.subTest(expression=expression):
+                self.assertIsNone(calculate(expression))
+        self.assertEqual(calculate("1 / 0 + 2"), "Cannot divide by zero.")
+        self.assertEqual(calculate("1 + 2.5"), "1 + 2.5 = 3.5")
+
     def test_unsupported_tuple_is_rejected_before_sibling_evaluation(self):
         for expression in (
             "1 / 0 + ()",
