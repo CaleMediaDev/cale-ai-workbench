@@ -402,6 +402,30 @@ def test_fixed_layout_preserves_anamorphic_display_proportions(tmp_path, operati
     assert (white_rows[0] + white_rows[-1]) / 2 == pytest.approx(539.5, abs=2)
 
 
+def test_trim_arguments_preserve_fractional_seconds_at_large_offsets(tmp_path, monkeypatch):
+    source = tmp_path / "source.mp4"
+    output = tmp_path / "trimmed.mp4"
+    source.write_bytes(b"source video")
+    start, duration = 43210.25, 12345.67
+    calls = []
+
+    def capture(arguments, destination):
+        calls.append(arguments)
+        assert destination == output
+        return {"path": str(destination), "bytes": 1}
+
+    monkeypatch.setattr(video_edit, "_run", capture)
+    video_edit.edit_video(
+        str(source), str(output), start_seconds=start, duration_seconds=duration)
+
+    assert len(calls) == 1
+    arguments = calls[0]
+    assert float(arguments[arguments.index("-ss") + 1]) == start
+    assert float(arguments[arguments.index("-t") + 1]) == duration
+    assert arguments.index("-ss") < arguments.index("-i")
+    assert arguments.index("-t") < arguments.index("-i")
+
+
 def test_edit_video_extreme_speed_chains_atempo(tmp_path):
     """Speed 0.25 and 4.0 should work by chaining atempo filters."""
     clip = tmp_path / "clip.mp4"

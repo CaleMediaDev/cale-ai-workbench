@@ -92,12 +92,12 @@ def edit_video(source_path: str, output_path: str, start_seconds: float = 0,
     sizes = {"original": None, "wide": (1920, 1080), "vertical": (1080, 1920), "square": (1080, 1080)}
     if layout not in sizes:
         raise ValueError("Layout must be original, wide, vertical or square.")
-    args = ["-ss", f"{start:g}"]
+    args = ["-ss", str(start)]
     if duration is not None:
         # Input -t limits the source interval. Output -t would truncate a
         # slowed clip and let a sped-up clip read beyond the requested trim.
         # https://ffmpeg.org/ffmpeg.html#Main-options
-        args += ["-t", f"{duration:g}"]
+        args += ["-t", str(duration)]
     args += ["-i", str(source)]
     filters = []
     if rate != 1:
