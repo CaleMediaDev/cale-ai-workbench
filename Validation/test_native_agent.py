@@ -8673,3 +8673,21 @@ def test_public_prompt_active_condition_is_pure_and_preserves_requirements(tmp_p
     assert 'With no active step, finish that request with normal tools' in text
     assert 'checked components do not prove whole-task completion' in text
     assert not (Path(item['folder']) / '.local-ai' / 'memory.sqlite3').exists()
+
+
+def test_large_prompt_keeps_budget_with_installed_paths_and_skill_catalog(tmp_path):
+    """Install paths/catalog text must not consume the original-request budget."""
+    item = project(tmp_path / ("installed-project-" + "x" * 45))
+    item["brief"] = "Start: " + "many requirements " * 7000 + "Finish: verify everything."
+    skills = [{"id": "skill:local-guidance", "description": "Helpful local skill. " * 42}]
+    interpreter = "C:/Users/example/AppData/Local/CaleMedia/AIWorkbench/Toolbox/python/Scripts/python.exe"
+    with patch("capability_index.search", return_value=skills), patch.object(native_agent.sys, "executable", interpreter):
+        text = native_agent.prompt(item)
+    assert len(text) < 10000
+    assert "Start:" in text and "Finish: verify everything." in text
+    assert ".local-ai/ORIGINAL-REQUEST-sample.md" in text
+    assert skills[0]["description"] in text
+    assert interpreter in text
+    assert str(item["folder"]) in text
+    assert "Match explicitly requested output paths exactly." in text
+    assert "do not invoke another LLM server" in text

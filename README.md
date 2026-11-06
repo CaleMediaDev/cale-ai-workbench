@@ -10,10 +10,12 @@ Created by [Cale Media](https://calemedia.com).
 2. Click **Install** and watch the progress bar. Accounts are optional; you can connect them while models download.
 3. Click **Open Cale AI** and describe what you want in chat.
 
-Release 0.5.551 keeps voice updates readable when an AI returns a list or object instead of text, using the existing fallback sentence. [Validation and limits](benchmarks/results/reviewed-voice-content-551-20261106.json).
+Release 0.5.552 shortens repeated worker guidance while retaining the original request, leaving more briefing space for installed paths and skill descriptions. [Validation and limits](benchmarks/results/concise-installed-briefing-552-20261106.json).
 
 <details>
 <summary>Feature history and validation</summary>
+
+Release 0.5.551 keeps voice updates readable when an AI returns a list or object instead of text, using the existing fallback sentence. [Validation and limits](benchmarks/results/reviewed-voice-content-551-20261106.json).
 
 Release 0.5.550 restores the compact prompt for large requests while retaining the completed-step context fix and original requirements. [Validation and limits](benchmarks/results/compact-task-guidance-550-20261106.json).
 

@@ -1,0 +1,33 @@
+{
+  "release": "0.5.552",
+  "base": "cfb75e46b56d9930ad18540e532c67b1cc912769",
+  "sha256": {
+    "native_agent.py": "573fd2a92ba2fbe4092dae4de3e4e3deeecdacb3a7ef6d6a75ebbf954f243eb5",
+    "Validation/test_native_agent.py": "1e3da57aff8d8223128d8ff7c2e5db948b5ae4ac43ac5398c1e697d2b49c37de"
+  },
+  "validation": {
+    "affected_modules": {
+      "exit_code": 0,
+      "source_bytes_unchanged": true,
+      "passed": 2,
+      "skipped": 0,
+      "scope": "Original large-request prompt + installed-path/catalog control; not full native module."
+    }
+  },
+  "reproduction": {
+    "installed_551": "Full self-check 1 failed,4305 passed,42 summary skips,529 subtests; original prompt bound failed10006<10000.",
+    "installed_log_sha256": "9b48c1820b7cd9e0c72e15f74b045682f22b10e1b28903ad4befe236572a9f37",
+    "new_control_old_source": "Fails original10000-character bound at10115.",
+    "new_control_old_source_log_sha256": "712ac973746129aefbbb09a484c30bd5c809394aaac5b5f92ebed7a60d45e370",
+    "after": "Original and new controls2PASS2.52s; existing assertions unchanged.",
+    "green_log_sha256": "5c3f66ca50ec128e6fafe6340e780934917209fbe248e13c1f2317167925d44d",
+    "peer_review_sha256": "d522ef4dce3dc32bba55b35a812a0d0654b4683ac618579d4ccaec2cd4f0ec46"
+  },
+  "change": "Three guidance phrases shortened229sourcecharacters; no request/context/tool/execution changes.",
+  "preserved": "No changes to original request excerpt, context limits, tool schemas, routing or actual project data.",
+  "limits": [
+    "No full552self-check claim. Exact installer qualification required before publication.",
+    "Prompt still includes actual paths/catalog text; this is not a universal total-length guarantee for arbitrary rules/paths.",
+    "Experimental V3 worker/routing/typed-replay changes are excluded."
+  ]
+}
