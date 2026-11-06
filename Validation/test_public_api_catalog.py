@@ -143,6 +143,7 @@ def test_catalog_preserves_stale_snapshot_on_incompatible_encoding(tmp_path):
          patch.object(public_api_catalog, "urlopen") as open_url:
         response = open_url.return_value.__enter__.return_value
         response.read.return_value = downloaded
+        response.headers = {}
         data, fresh = public_api_catalog._catalog()
 
     open_url.assert_called_once()
@@ -166,6 +167,7 @@ def test_catalog_preserves_stale_snapshot_on_invalid_json_constant(tmp_path, con
          patch.object(public_api_catalog, "urlopen") as open_url:
         response = open_url.return_value.__enter__.return_value
         response.read.return_value = downloaded
+        response.headers = {}
         data, fresh = public_api_catalog._catalog()
 
     open_url.assert_called_once()
@@ -189,6 +191,7 @@ def test_catalog_preserves_stale_snapshot_on_numeric_overflow(tmp_path, number):
          patch.object(public_api_catalog, "urlopen") as open_url:
         response = open_url.return_value.__enter__.return_value
         response.read.return_value = downloaded
+        response.headers = {}
         data, fresh = public_api_catalog._catalog()
 
     open_url.assert_called_once()
@@ -240,6 +243,7 @@ def test_catalog_recovers_from_fresh_oversized_cache(tmp_path):
          patch.object(public_api_catalog, "urlopen") as open_url:
         response = open_url.return_value.__enter__.return_value
         response.read.return_value = downloaded
+        response.headers = {}
         data, fresh = public_api_catalog._catalog()
 
     assert read_sizes == [limit + 1]
@@ -262,6 +266,7 @@ def test_catalog_recovers_from_fresh_malformed_cache(tmp_path):
          patch.object(public_api_catalog, "urlopen") as open_url:
         response = open_url.return_value.__enter__.return_value
         response.read.return_value = downloaded
+        response.headers = {}
         data, fresh = public_api_catalog._catalog()
 
     open_url.assert_called_once()
@@ -284,6 +289,7 @@ def test_catalog_recovers_from_excessively_nested_cache(tmp_path):
          patch.object(public_api_catalog, "urlopen") as open_url:
         response = open_url.return_value.__enter__.return_value
         response.read.return_value = downloaded
+        response.headers = {}
         data, fresh = public_api_catalog._catalog()
 
     open_url.assert_called_once()
@@ -316,6 +322,7 @@ def test_catalog_freshness_belongs_to_snapshot_read(tmp_path):
          patch.object(public_api_catalog.json, "loads", side_effect=decode), \
          patch.object(public_api_catalog, "urlopen") as open_url:
         open_url.return_value.__enter__.return_value.read.return_value = downloaded
+        open_url.return_value.__enter__.return_value.headers = {}
         data, fresh = public_api_catalog._catalog()
 
     open_url.assert_called_once()
@@ -351,6 +358,7 @@ def test_catalog_overlapping_refreshes_do_not_share_temporary_files(tmp_path):
          patch.object(type(cache), "write_bytes", new=overlapping_write):
         response = open_url.return_value.__enter__.return_value
         response.read.side_effect = [outer_raw, inner_raw]
+        response.headers = {}
         data, fresh = public_api_catalog._catalog()
 
     assert open_url.call_count == 2
@@ -373,6 +381,7 @@ def test_catalog_uses_download_when_cache_replacement_fails(tmp_path):
          patch.object(type(cache), "replace", side_effect=PermissionError("Cache is read-only")) as replace:
         response = open_url.return_value.__enter__.return_value
         response.read.return_value = downloaded
+        response.headers = {}
         data, fresh = public_api_catalog._catalog()
 
     open_url.assert_called_once()
@@ -398,6 +407,7 @@ def test_catalog_recovers_from_deterministic_decoder_recursion(tmp_path):
         public_api_catalog.json, "loads", side_effect=decode
     ), patch.object(public_api_catalog, "urlopen") as open_url:
         open_url.return_value.__enter__.return_value.read.return_value = downloaded
+        open_url.return_value.__enter__.return_value.headers = {}
         data, fresh = public_api_catalog._catalog()
     assert data == snapshot and fresh is True
     assert cache.read_bytes() == downloaded
@@ -413,6 +423,7 @@ def test_catalog_rejects_nested_download_before_replacing_valid_snapshot(tmp_pat
         public_api_catalog.time, "time", return_value=expired
     ), patch.object(public_api_catalog, "urlopen") as open_url:
         open_url.return_value.__enter__.return_value.read.return_value = b"[[{}]]"
+        open_url.return_value.__enter__.return_value.headers = {}
         data, fresh = public_api_catalog._catalog()
     assert data == snapshot and fresh is False
     assert cache.read_bytes() == original
@@ -431,6 +442,7 @@ def test_invalid_nested_download_never_stages_or_replaces_last_good_catalog(tmp_
             public_api_catalog.tempfile, "TemporaryDirectory") as staging, patch.object(
             type(cache), "replace") as replacing:
         opened.return_value.__enter__.return_value.read.return_value = downloaded
+        opened.return_value.__enter__.return_value.headers = {}
         data, fresh = public_api_catalog._catalog()
     assert data == json.loads(original) and fresh is False
     assert cache.read_bytes() == original
@@ -457,6 +469,7 @@ def test_numeric_constant_words_inside_json_strings_remain_valid_data(tmp_path):
     raw = json.dumps(payload).encode()
     with patch.object(public_api_catalog, "CACHE", cache), patch.object(public_api_catalog, "urlopen") as opened:
         opened.return_value.__enter__.return_value.read.return_value = raw
+        opened.return_value.__enter__.return_value.headers = {}
         data, fresh = public_api_catalog._catalog()
     assert data == payload and fresh is True
     assert cache.read_bytes() == raw
@@ -468,6 +481,7 @@ def test_invalid_first_download_does_not_create_catalog_cache(tmp_path, constant
     raw = ('[{"name":"invalid first download","value":' + constant + '}]').encode()
     with patch.object(public_api_catalog, "CACHE", cache), patch.object(public_api_catalog, "urlopen") as opened:
         opened.return_value.__enter__.return_value.read.return_value = raw
+        opened.return_value.__enter__.return_value.headers = {}
         with pytest.raises(RuntimeError, match="unavailable while offline"):
             public_api_catalog._catalog()
     assert not cache.parent.exists()
