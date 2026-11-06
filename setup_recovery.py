@@ -205,12 +205,12 @@ def recover() -> bool:
     except OSError:
         return False
     with lock:
-        lock.seek(0, 2)
-        if lock.tell() == 0:
-            lock.write(b"1")
-            lock.flush()
-        lock.seek(0)
         try:
+            lock.seek(0, 2)
+            if lock.tell() == 0:
+                lock.write(b"1")
+                lock.flush()
+            lock.seek(0)
             msvcrt.locking(lock.fileno(), msvcrt.LK_NBLCK, 1)
         except OSError:
             return False
