@@ -413,11 +413,13 @@ def _query_words(query: str) -> list[str]:
     """Keep a combining mark with its base word before SQLite tokenization.
 
     Splitting cafe followed by an accent into two AND terms cannot match the
-    single unicode61 token stored in the index. Quotes/operators remain data.
+    single unicode61 token stored in the index. Private-use characters are also
+    token characters in unicode61. Quotes/operators remain data.
     """
     words, current = [], []
     for character in query:
-        if character.isalnum() or current and unicodedata.category(character).startswith("M"):
+        category = unicodedata.category(character)
+        if character.isalnum() or category == "Co" or current and category.startswith("M"):
             current.append(character)
         elif current:
             words.append("".join(current))

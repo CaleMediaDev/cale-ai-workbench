@@ -167,6 +167,16 @@ class ProjectMemoryContributionTests(unittest.TestCase):
                 self.assertEqual([row["id"] for row in found], [saved["id"]])
 
 
+    def test_search_preserves_unicode61_private_use_token_characters(self):
+        term = "alpha\ue000beta"
+        saved = memory.save(self.folder, "note", "Private-use token", term)
+        memory.save(self.folder, "note", "Separate tokens", "alpha beta")
+
+        found = memory.search(self.folder, term, kind="note")
+
+        self.assertEqual([row["id"] for row in found], [saved["id"]])
+
+
     def test_fallback_filters_single_term_hits_before_result_limit(self):
         for number in range(6):
             memory.save(self.folder, "note", f"Alpha {number}", "Short entry.")
