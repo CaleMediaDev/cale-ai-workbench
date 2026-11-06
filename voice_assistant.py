@@ -165,7 +165,7 @@ def _heavy_gpu_active() -> bool:
                 if (0 <= time.time() - saved < 8000 and process.is_running()
                         and process.create_time() <= saved + 2):
                     return True
-            except (OSError, ValueError, psutil.Error):
+            except (OSError, ValueError, OverflowError, psutil.Error):
                 continue
     return False
 
