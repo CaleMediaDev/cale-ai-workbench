@@ -2,6 +2,8 @@
 
 **A Windows assistant that builds with tools, saves its progress, and runs local models.**
 
+Release 0.5.536 includes 14 reviewed donation fixes for local memory, file handling, routing, voice setup, image recovery, music tools and gauges. One unsafe proposal was rejected; decoder compatibility coverage is explicit. [Validation and limits](benchmarks/results/reviewed-donations-536-20261106.json).
+
 Release 0.5.535 adds browser-computed accessible role/name checks, preserves them during saved-check repairs, and keeps the tool catalog within the existing small-context regression budgets. [Validation and limits](benchmarks/results/accessibility-checker-535-20261105.json).
 
 Release 0.5.534 reduces self-check progress database overhead by reusing its owned writer connection. Each update still commits separately, and completion gates remain intact. [Validation and limits](benchmarks/results/selfcheck-writer-534-20261105.json).

@@ -1,0 +1,851 @@
+{
+  "release": "0.5.536",
+  "source_before_release_docs": "cac3703455817a3c14c05acf71d9d22c4f379f1a",
+  "cutoff": 786,
+  "sha256": {
+    "Validation/test_auto_route.py": "6c92098c094614c66c4ce72266f037f4363818e9235cdf38c91ce68f2dd109bb",
+    "Validation/test_chrome_connector.py": "c5c74e2213f36cf3c338f2872f619c0efc983796cf5e6a8f9e8102e3ae141183",
+    "Validation/test_core_tool_health.py": "382cbf8ecbd47315d5684e927647d5f5a148472d8d7486d19499d38a798e52da",
+    "Validation/test_model_fitness.py": "f1acfa6c196761784efadfa3d52c1dc495c917955e44e5b8e2ce809fbcd753bc",
+    "Validation/test_music_analysis.py": "2df437a8bb19b4a29106fcae2aac466c6c0575ae510b826fc3c35393b481865d",
+    "Validation/test_music_edit.py": "fe3e14c9ac4c01089723bbad7452b6633d396b4fda275a3aec8eb7f6b799a3f3",
+    "Validation/test_music_lyrics.py": "83334451783ab544d9205f69fba0a2621fde8f8199d149d18de4b3ce5c550a98",
+    "Validation/test_music_stems.py": "44d2d79a97179df0fc200f9d13dc6891f74825d591cc470d4debd04e346f36bd",
+    "Validation/test_natural_voice.py": "07bc65c81b814ed0bd3161786354e2647bfbc79e8192a55f61826b0452443498",
+    "Validation/test_project_documents.py": "509ce0399e147e451b39c1f43fc8c25a1df8275c2bd59ad607586fb7d12f5c45",
+    "Validation/test_quick_image.py": "8510e579ec88f950b11e0d9032f96b94e0332804943b3c8f034858707e0736a5",
+    "Validation/test_routing_memory.py": "db95f2b01c2c030fbc988eaed040ab784bab32779e56121dd5464594e9f6ce5d",
+    "Validation/test_site_crawler.py": "eaa2dd7d0e652a0cbbf75000608450b6b8481cd30f9819be5da3705cfeb2615e",
+    "Validation/test_system_gauges.py": "991ebac1839930bbbbda6f3c2000422235f525c35bf2f3cbe5da0e962a238905",
+    "auto_route.py": "03d9de34cdc7fac09d1e0df501ea3738abd53b1fee89b551d4c29a972972e3a0",
+    "chrome_connector.py": "9f86addecab9fca7655b8cc89756dbc5df202e5c50fff54494cde23d81e76a7d",
+    "core_tool_health.py": "872a8628dd859b85f7b08534a65c6ad1511983d76e305a0ba3e94931be901128",
+    "model_fitness.py": "8f34310de82adcc7e8e1c45af6a1fd2397a345530b56b8359d6a45695ccdf828",
+    "music_analysis.py": "2f9507bafbf12af50e3f8bdd7ae2deebb00d6706164f7427e3a4657401b9276f",
+    "music_edit.py": "88c40c7f119cad8eb9b60960365c4dcf58c69a89f53bab9056984978c610a1e5",
+    "music_lyrics.py": "71f6536ee73e92e33702994de3338339857f0f092d6221c19e37b20ccc8eb067",
+    "music_stems.py": "93f73b8cdcea67d014a9499265d3532e93635aba019d9584ef3ef8fbdb8a057c",
+    "natural_voice.py": "c704256e36fade92835f073303e25c6a1964a32e5841b8a405eeafb877b99709",
+    "project_documents.py": "18197dd84c21856a0a36f87ff33fe97f8b9e7511834940b2cbef20aaab20de88",
+    "project_memory.py": "f44e9898dc9812aa654aa3c3b0f206fdc4ef03d777c5a8afb667a7bd18c8e32d",
+    "quick_image.py": "d7f4771a638ae157a88612354dfae47140d4978a7ac428f26cff6831d3e24837",
+    "site_crawler.py": "874b35b5a708fbb474ec194b06bb81765813491a892eceecad4a3f4604f36fbd",
+    "system_gauges.py": "81cc2760b3b85f99e125f1275af57ca8e93223c667e4984e66662c62347c1c3a"
+  },
+  "validation": {
+    "affected_modules": {
+      "exit_code": 0,
+      "seconds": 12.546535899979062,
+      "sha256": {
+        "Validation/test_auto_route.py": "6c92098c094614c66c4ce72266f037f4363818e9235cdf38c91ce68f2dd109bb",
+        "Validation/test_chrome_connector.py": "c5c74e2213f36cf3c338f2872f619c0efc983796cf5e6a8f9e8102e3ae141183",
+        "Validation/test_core_tool_health.py": "382cbf8ecbd47315d5684e927647d5f5a148472d8d7486d19499d38a798e52da",
+        "Validation/test_model_fitness.py": "f1acfa6c196761784efadfa3d52c1dc495c917955e44e5b8e2ce809fbcd753bc",
+        "Validation/test_music_analysis.py": "2df437a8bb19b4a29106fcae2aac466c6c0575ae510b826fc3c35393b481865d",
+        "Validation/test_music_edit.py": "fe3e14c9ac4c01089723bbad7452b6633d396b4fda275a3aec8eb7f6b799a3f3",
+        "Validation/test_music_lyrics.py": "83334451783ab544d9205f69fba0a2621fde8f8199d149d18de4b3ce5c550a98",
+        "Validation/test_music_stems.py": "44d2d79a97179df0fc200f9d13dc6891f74825d591cc470d4debd04e346f36bd",
+        "Validation/test_natural_voice.py": "07bc65c81b814ed0bd3161786354e2647bfbc79e8192a55f61826b0452443498",
+        "Validation/test_project_documents.py": "509ce0399e147e451b39c1f43fc8c25a1df8275c2bd59ad607586fb7d12f5c45",
+        "Validation/test_quick_image.py": "8510e579ec88f950b11e0d9032f96b94e0332804943b3c8f034858707e0736a5",
+        "Validation/test_routing_memory.py": "db95f2b01c2c030fbc988eaed040ab784bab32779e56121dd5464594e9f6ce5d",
+        "Validation/test_site_crawler.py": "eaa2dd7d0e652a0cbbf75000608450b6b8481cd30f9819be5da3705cfeb2615e",
+        "Validation/test_system_gauges.py": "991ebac1839930bbbbda6f3c2000422235f525c35bf2f3cbe5da0e962a238905",
+        "auto_route.py": "03d9de34cdc7fac09d1e0df501ea3738abd53b1fee89b551d4c29a972972e3a0",
+        "chrome_connector.py": "9f86addecab9fca7655b8cc89756dbc5df202e5c50fff54494cde23d81e76a7d",
+        "core_tool_health.py": "872a8628dd859b85f7b08534a65c6ad1511983d76e305a0ba3e94931be901128",
+        "model_fitness.py": "8f34310de82adcc7e8e1c45af6a1fd2397a345530b56b8359d6a45695ccdf828",
+        "music_analysis.py": "2f9507bafbf12af50e3f8bdd7ae2deebb00d6706164f7427e3a4657401b9276f",
+        "music_edit.py": "88c40c7f119cad8eb9b60960365c4dcf58c69a89f53bab9056984978c610a1e5",
+        "music_lyrics.py": "71f6536ee73e92e33702994de3338339857f0f092d6221c19e37b20ccc8eb067",
+        "music_stems.py": "93f73b8cdcea67d014a9499265d3532e93635aba019d9584ef3ef8fbdb8a057c",
+        "natural_voice.py": "c704256e36fade92835f073303e25c6a1964a32e5841b8a405eeafb877b99709",
+        "project_documents.py": "18197dd84c21856a0a36f87ff33fe97f8b9e7511834940b2cbef20aaab20de88",
+        "project_memory.py": "f44e9898dc9812aa654aa3c3b0f206fdc4ef03d777c5a8afb667a7bd18c8e32d",
+        "quick_image.py": "d7f4771a638ae157a88612354dfae47140d4978a7ac428f26cff6831d3e24837",
+        "site_crawler.py": "874b35b5a708fbb474ec194b06bb81765813491a892eceecad4a3f4604f36fbd",
+        "system_gauges.py": "81cc2760b3b85f99e125f1275af57ca8e93223c667e4984e66662c62347c1c3a"
+      },
+      "source_bytes_unchanged": true,
+      "modules": [
+        "Validation/test_auto_route.py",
+        "Validation/test_chrome_connector.py",
+        "Validation/test_core_tool_health.py",
+        "Validation/test_model_fitness.py",
+        "Validation/test_music_analysis.py",
+        "Validation/test_music_edit.py",
+        "Validation/test_music_lyrics.py",
+        "Validation/test_music_stems.py",
+        "Validation/test_natural_voice.py",
+        "Validation/test_project_documents.py",
+        "Validation/test_quick_image.py",
+        "Validation/test_routing_memory.py",
+        "Validation/test_site_crawler.py",
+        "Validation/test_system_gauges.py"
+      ],
+      "log_tail": "................................................................................................... [ 23%]\n........................................s............................... [ 40%]\n........................................................................ [ 57%]\n......................................................s................................................................................. [ 89%]\n...........................................                              [100%]\n=========================== short test summary info ===========================\nSKIPPED [1] Validation\\test_model_fitness.py:104: This JSON decoder accepts the bounded nested marker\nSKIPPED [1] Validation\\test_music_stems.py:425: Symbolic links are unavailable\n420 passed, 2 skipped, 53 subtests passed in 11.47s\n",
+      "limits": [
+        "Fourteen accepted modules only; not an installed full-suite or end-to-end media quality check.",
+        "786 parser compatibility proved separately on actual3.11; current3.13 explicitly skips its bounded nesting case."
+      ]
+    }
+  },
+  "merged": [
+    {
+      "headRefOid": "d76af6520fad8f802f85f73e34e6904a52cdc780",
+      "isDraft": false,
+      "mergeCommit": {
+        "oid": "d0b5ee836bab921604be9de1aa170efd70854760"
+      },
+      "mergedAt": "2026-11-06T01:01:06Z",
+      "number": 773,
+      "state": "MERGED",
+      "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/773"
+    },
+    {
+      "headRefOid": "edbab0e90729dc2348e9a2fa2223de20d0209a2e",
+      "isDraft": false,
+      "mergeCommit": {
+        "oid": "633039a09d870334adfdb255cd802308424ed0f7"
+      },
+      "mergedAt": "2026-11-06T01:01:12Z",
+      "number": 774,
+      "state": "MERGED",
+      "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/774"
+    },
+    {
+      "headRefOid": "4712c3a002e4c1aaaaef9e45895823a8a1e9508f",
+      "isDraft": false,
+      "mergeCommit": {
+        "oid": "48481f1df0df78f407a6a4553a45916b0dd81a99"
+      },
+      "mergedAt": "2026-11-06T01:01:16Z",
+      "number": 775,
+      "state": "MERGED",
+      "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/775"
+    },
+    {
+      "headRefOid": "58c11cc9b506483fb86283395f8f723b3dd53686",
+      "isDraft": false,
+      "mergeCommit": {
+        "oid": "abe6d90bab641a0c876f8f185b03889572bf8c45"
+      },
+      "mergedAt": "2026-11-06T01:01:21Z",
+      "number": 776,
+      "state": "MERGED",
+      "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/776"
+    },
+    {
+      "headRefOid": "1db3d3d89390fa05c7177b554f3ef4c6bd5b07b5",
+      "isDraft": false,
+      "mergeCommit": {
+        "oid": "891f276ccb0f1103412d371588c95dcce5cae6d2"
+      },
+      "mergedAt": "2026-11-06T01:01:27Z",
+      "number": 777,
+      "state": "MERGED",
+      "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/777"
+    },
+    {
+      "headRefOid": "0630494840e75d7271ccef776b3b6c5c9a8fd433",
+      "isDraft": false,
+      "mergeCommit": {
+        "oid": "4f77cbad0a1f88682bcfc359b34134cfd8672c23"
+      },
+      "mergedAt": "2026-11-06T01:01:32Z",
+      "number": 778,
+      "state": "MERGED",
+      "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/778"
+    },
+    {
+      "headRefOid": "dfcd803b5cfe9db3d72bfab544f5a4a3424196d8",
+      "isDraft": false,
+      "mergeCommit": {
+        "oid": "a70142c5d75d42fea44969647ff948baa4caf8b2"
+      },
+      "mergedAt": "2026-11-06T01:01:38Z",
+      "number": 779,
+      "state": "MERGED",
+      "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/779"
+    },
+    {
+      "headRefOid": "2bbfee54c744911287a6b741276e0e6ed99cf1f0",
+      "isDraft": false,
+      "mergeCommit": {
+        "oid": "1a19250d5b8fd47132fcf6c92fcf19ccd6717ab8"
+      },
+      "mergedAt": "2026-11-06T01:01:44Z",
+      "number": 780,
+      "state": "MERGED",
+      "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/780"
+    },
+    {
+      "headRefOid": "4ee74b51844cf1079a966a3da8cf921d52e4076a",
+      "isDraft": false,
+      "mergeCommit": {
+        "oid": "a25dc2b500652a220f6d0835f68c6b12aa768e80"
+      },
+      "mergedAt": "2026-11-06T01:01:49Z",
+      "number": 781,
+      "state": "MERGED",
+      "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/781"
+    },
+    {
+      "headRefOid": "768bfcf6280ee18b31d7369560c8f86c5214f9ee",
+      "isDraft": false,
+      "mergeCommit": {
+        "oid": "16700b91f4c0992a146225e3ca06e0aacd5ecd26"
+      },
+      "mergedAt": "2026-11-06T01:01:54Z",
+      "number": 782,
+      "state": "MERGED",
+      "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/782"
+    },
+    {
+      "headRefOid": "4f31793f50f2935dc7f2eaaf3c26eb8d399cf502",
+      "isDraft": false,
+      "mergeCommit": {
+        "oid": "06b07a2ad3decc2ca4f9c05b39b010a2b76edc97"
+      },
+      "mergedAt": "2026-11-06T01:02:01Z",
+      "number": 783,
+      "state": "MERGED",
+      "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/783"
+    },
+    {
+      "headRefOid": "c58aabd86fbab96e376a69ad0f72bcba3663e0b5",
+      "isDraft": false,
+      "mergeCommit": {
+        "oid": "9ddd85734855da865eb5c9d20c337d3987f4ea3d"
+      },
+      "mergedAt": "2026-11-06T01:02:06Z",
+      "number": 784,
+      "state": "MERGED",
+      "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/784"
+    },
+    {
+      "headRefOid": "2bafc0ad16dd691b2c75afb6be7b068b579b5cc5",
+      "isDraft": false,
+      "mergeCommit": {
+        "oid": "86ebfaeb6da4ff592f0a98dafd00ead1754a7d53"
+      },
+      "mergedAt": "2026-11-06T01:02:11Z",
+      "number": 785,
+      "state": "MERGED",
+      "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/785"
+    },
+    {
+      "headRefOid": "fe099be9452bc6a0bcd300ba85bdc1c51d78498d",
+      "isDraft": false,
+      "mergeCommit": {
+        "oid": "f138216f173344bf93e5f694e2dfbb3092f9e70d"
+      },
+      "mergedAt": "2026-11-06T01:02:17Z",
+      "number": 786,
+      "state": "MERGED",
+      "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/786"
+    }
+  ],
+  "test_correction_commit": "cac3703455817a3c14c05acf71d9d22c4f379f1a",
+  "independent_reviews": {
+    "773-776": {
+      "baseline": "5f4ef6ef5ebe9a9d953a899549ff8a7f09d8fec4",
+      "scope": "Exact pinned PR production bytes and existing Validation modules in owned isolated archive; no integration or installed changes.",
+      "verdicts": [
+        {
+          "number": 772,
+          "head": "b04c11c56a5f6940032e3c84a1e05015cc6adfc8",
+          "base": "5f4ef6ef5ebe9a9d953a899549ff8a7f09d8fec4",
+          "paths": [
+            "Validation/test_cale_voice.py",
+            "cale_voice.py"
+          ],
+          "hashes": {
+            "Validation/test_cale_voice.py": "0f7f60b08895e2b7090c3789f673e858a41593d5bf7134ae4a56c03c30380538",
+            "cale_voice.py": "8fb36c5f33724164e05e16591476a03be3f1315e2adfe695846dca6c16fe97c2"
+          },
+          "verdict": "reject",
+          "reason": "Reject: new cleanup looks up an exited launcher PID through psutil without process birth binding; PID reuse can target unrelated descendants. Mocked child ownership is not a real ownership proof. No actual process cleanup probe performed.",
+          "checks": [
+            {
+              "mode": "baseline",
+              "exit_code": 1,
+              "seconds": 1.001,
+              "command": [
+                "C:\\Users\\tahoe\\Documents\\Codex\\2026-10-31\\can\\outputs\\Hermes-Agent\\Toolbox\\python\\Scripts\\python.exe",
+                "-B",
+                "-m",
+                "pytest",
+                "Validation/test_cale_voice.py",
+                "-q",
+                "-r",
+                "s",
+                "-p",
+                "no:cacheprovider",
+                "-k",
+                "speech_cleans_up_exited_launcher"
+              ],
+              "summary": "                                                       [100%]\r\n================================== FAILURES ===================================\r\n______ test_speech_cleans_up_exited_launcher_before_starting_replacement ______\r\n\r\ntmp_path = WindowsPath('C:/Users/tahoe/AppData/Local/Temp/pytest-of-tahoe/pytest-3082/test_speech_cleans_up_exited_l0')\r\n\r\n    def test_speech_cleans_up_exited_launcher_before_starting_replacement(tmp_path):\r\n        launcher = Mock(pid=100)\r\n        launcher.poll.return_value = 0\r\n        replacement = Mock()\r\n        replacement.poll.return_value = None\r\n        child = Mock()\r\n    \r\n        def start_replacement(*args, **kwargs):\r\n            assert cale_voice._worker is None\r\n            child.terminate.assert_called_once_with()\r\n            wait.assert_called_once_with([child], timeout=3)\r\n            return replacement\r\n    \r\n        with (patch.object(cale_voice, \"ROOT\", tmp_path),\r\n              patch.object(cale_voice, \"ready\", return_value=True),\r\n              patch.object(cale_voice, \"_worker\", launcher),\r\n              patch.object(cale_voice, \"_idle_timer\", None),\r\n              patch.object(cale_voice, \"_generation\", 0),\r\n              patch(\"psutil.Process\") as process,\r\n              patch(\"psutil.wait_procs\", return_value=([child], [])) as wait,\r\n              patch.object(cale_voice.subprocess, \"Popen\", side_effect=start_replacement) as launch,\r\n              patch.object(cale_voice, \"_line_with_timeout\",\r\n                           side_effect=['{\"ready\": true}', '{\"path\": \"speech.wav\"}']),\r\n              patch.object(cale_voice.threading, \"Timer\")):\r\n            process.return_value.children.return_value = [child]\r\n>           answer = cale_voice.speak(\"Hello\", tmp_path / \"speech.wav\", play=False)\r\n                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\r\n\r\nValidation\\test_cale_voice.py:146: \r\n_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _\r\ncale_voice.py:507: in speak\r\n    _worker = subprocess.Popen(\r\nC:\\Users\\tahoe\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\unittest\\mock.py:1169: in __call__\r\n    return self._mock_call(*args, **kwargs)\r\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\r\nC:\\Users\\tahoe\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\unittest\\mock.py:1173: in _mock_call\r\n    return self._execute_mock_call(*args, **kwargs)\r\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\r\nC:\\Users\\tahoe\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\unittest\\mock.py:1234: in _execute_mock_call\r\n    result = effect(*args, **kwargs)\r\n             ^^^^^^^^^^^^^^^^^^^^^^^\r\n_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _\r\n\r\nargs = (['C:\\\\Users\\\\tahoe\\\\Documents\\\\Codex\\\\2026-10-31\\\\can\\\\outputs\\\\review-pr-772-776-20261106\\\\snapshot\\\\Media\\\\python\\\\...s\\\\tahoe\\\\AppData\\\\Local\\\\Temp\\\\pytest-of-tahoe\\\\pytest-3082\\\\test_speech_cleans_up_exited_l0\\\\cale_voice_worker.py'],)\r\nkwargs = {'stdin': -1, 'stdout': -1, 'stderr': <_io.TextIOWrapper name='C:\\\\Users\\\\tahoe\\\\AppData\\\\Local\\\\Temp\\\\pytest-of-tahoe...3082\\\\test_speech_cleans_up_exited_l0\\\\LongTasks\\\\cale-voice-worker.log' mode='a' encoding='utf-8'>, 'text': True, ...}\r\n\r\n    def start_replacement(*args, **kwargs):\r\n>       assert cale_voice._worker is None\r\nE       AssertionError: assert <Mock id='2703723532304'> is None\r\nE        +  where <Mock id='2703723532304'> = cale_voice._worker\r\n\r\nValidation\\test_cale_voice.py:129: AssertionError\r\n1 failed, 80 deselected in 0.49s\r\n"
+            },
+            {
+              "mode": "head",
+              "exit_code": 0,
+              "seconds": 6.687,
+              "command": [
+                "C:\\Users\\tahoe\\Documents\\Codex\\2026-10-31\\can\\outputs\\Hermes-Agent\\Toolbox\\python\\Scripts\\python.exe",
+                "-B",
+                "-m",
+                "pytest",
+                "Validation/test_cale_voice.py",
+                "-q",
+                "-r",
+                "s",
+                "-p",
+                "no:cacheprovider"
+              ],
+              "summary": "........................................................................ [ 88%]\r\n.........                                                                [100%]\r\n81 passed in 6.12s\r\n"
+            }
+          ]
+        },
+        {
+          "number": 773,
+          "head": "d76af6520fad8f802f85f73e34e6904a52cdc780",
+          "base": "5f4ef6ef5ebe9a9d953a899549ff8a7f09d8fec4",
+          "paths": [
+            "Validation/test_routing_memory.py",
+            "project_memory.py"
+          ],
+          "hashes": {
+            "Validation/test_routing_memory.py": "d6c2adfaa20b56ae33321e55030e633e643a100f29faa99dd5b9ed9a6ae2e0ec",
+            "project_memory.py": "983caece77366feb4f13a0c814c122b087ce22ddc3dd72f8aad0777182d8e9ab"
+          },
+          "verdict": "accept",
+          "reason": "Accept: preserve private-use characters as unicode61 token characters; genuine SQLite search regression distinguishes one private-use token from separate words.",
+          "checks": [
+            {
+              "mode": "baseline",
+              "exit_code": 1,
+              "seconds": 1.387,
+              "command": [
+                "C:\\Users\\tahoe\\Documents\\Codex\\2026-10-31\\can\\outputs\\Hermes-Agent\\Toolbox\\python\\Scripts\\python.exe",
+                "-B",
+                "-m",
+                "pytest",
+                "Validation/test_routing_memory.py",
+                "-q",
+                "-r",
+                "s",
+                "-p",
+                "no:cacheprovider",
+                "-k",
+                "unicode61_private_use"
+              ],
+              "summary": "F                                                                        [100%]\r\n================================== FAILURES ===================================\r\n_ ProjectMemoryContributionTests.test_search_preserves_unicode61_private_use_token_characters _\r\n\r\nself = <test_routing_memory.ProjectMemoryContributionTests testMethod=test_search_preserves_unicode61_private_use_token_characters>\r\n\r\n    def test_search_preserves_unicode61_private_use_token_characters(self):\r\n        term = \"alpha\\ue000beta\"\r\n        saved = memory.save(self.folder, \"note\", \"Private-use token\", term)\r\n        memory.save(self.folder, \"note\", \"Separate tokens\", \"alpha beta\")\r\n    \r\n        found = memory.search(self.folder, term, kind=\"note\")\r\n    \r\n>       self.assertEqual([row[\"id\"] for row in found], [saved[\"id\"]])\r\nE       AssertionError: Lists differ: ['e4840a0aca954e308f990e9714ce4fb6'] != ['842650f127cf4f45b0b6e2b27b979466']\r\nE       \r\nE       First differing element 0:\r\nE       'e4840a0aca954e308f990e9714ce4fb6'\r\nE       '842650f127cf4f45b0b6e2b27b979466'\r\nE       \r\nE       - ['e4840a0aca954e308f990e9714ce4fb6']\r\nE       + ['842650f127cf4f45b0b6e2b27b979466']\r\n\r\nValidation\\test_routing_memory.py:177: AssertionError\r\n1 failed, 12 deselected in 0.60s\r\n"
+            },
+            {
+              "mode": "head",
+              "exit_code": 0,
+              "seconds": 3.267,
+              "command": [
+                "C:\\Users\\tahoe\\Documents\\Codex\\2026-10-31\\can\\outputs\\Hermes-Agent\\Toolbox\\python\\Scripts\\python.exe",
+                "-B",
+                "-m",
+                "pytest",
+                "Validation/test_routing_memory.py",
+                "-q",
+                "-r",
+                "s",
+                "-p",
+                "no:cacheprovider"
+              ],
+              "summary": ".............                                                          [100%]\r\n13 passed, 2 subtests passed in 2.66s\r\n"
+            }
+          ]
+        },
+        {
+          "number": 774,
+          "head": "edbab0e90729dc2348e9a2fa2223de20d0209a2e",
+          "base": "5f4ef6ef5ebe9a9d953a899549ff8a7f09d8fec4",
+          "paths": [
+            "Validation/test_chrome_connector.py",
+            "chrome_connector.py"
+          ],
+          "hashes": {
+            "Validation/test_chrome_connector.py": "87adfe4d8e20b58ca146daa9787d32fd994c11714c73b1df172e8b8da283d525",
+            "chrome_connector.py": "1a3c50765fd40d3aa2f11749617ae65138e520ecb5e150851f498b349e27a83a"
+          },
+          "verdict": "accept",
+          "reason": "Accept: decline duplicate or misplaced YAML version directives without TAG directives. Actual Hermes pure and C parsers reject all three negative examples; both accept valid prologue.",
+          "checks": [
+            {
+              "mode": "baseline",
+              "exit_code": 1,
+              "seconds": 0.809,
+              "command": [
+                "C:\\Users\\tahoe\\Documents\\Codex\\2026-10-31\\can\\outputs\\Hermes-Agent\\Toolbox\\python\\Scripts\\python.exe",
+                "-B",
+                "-m",
+                "pytest",
+                "Validation/test_chrome_connector.py",
+                "-q",
+                "-r",
+                "s",
+                "-p",
+                "no:cacheprovider",
+                "-k",
+                "repeated_or_misplaced_yaml"
+              ],
+              "summary": "FFF                                                                      [100%]\r\n================================== FAILURES ===================================\r\n_ test_installed_version_rejects_repeated_or_misplaced_yaml_directives[%YAML 1.2\\n%YAML 1.2\\n---\\nversion: 0.2.6\\n] _\r\n\r\ntmp_path = WindowsPath('C:/Users/tahoe/AppData/Local/Temp/pytest-of-tahoe/pytest-3085/test_installed_version_rejects0')\r\nmonkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x0000021A5D5676F0>\r\ncontents = '%YAML 1.2\\n%YAML 1.2\\n---\\nversion: 0.2.6\\n'\r\n\r\n    @pytest.mark.parametrize(\"contents\", [\r\n        \"%YAML 1.2\\n%YAML 1.2\\n---\\nversion: 0.2.6\\n\",\r\n        \"---\\n%YAML 1.2\\nversion: 0.2.6\\n\",\r\n        \"name: hermes-connector\\n%YAML 1.2\\nversion: 0.2.6\\n\",\r\n    ])\r\n    def test_installed_version_rejects_repeated_or_misplaced_yaml_directives(\r\n        tmp_path, monkeypatch, contents\r\n    ):\r\n        monkeypatch.setattr(chrome_connector, \"PLUGIN\", tmp_path)\r\n        (tmp_path / \"plugin.yaml\").write_text(contents, encoding=\"utf-8\")\r\n    \r\n>       assert chrome_connector.installed_version() == \"\"\r\nE       AssertionError: assert '0.2.6' == ''\r\nE         \r\nE         + 0.2.6\r\n\r\nValidation\\test_chrome_connector.py:148: AssertionError\r\n_ test_installed_version_rejects_repeated_or_misplaced_yaml_directives[---\\n%YAML 1.2\\nversion: 0.2.6\\n] _\r\n\r\ntmp_path = WindowsPath('C:/Users/tahoe/AppData/Local/Temp/pytest-of-tahoe/pytest-3085/test_installed_version_rejects1')\r\nmonkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x0000021A5D564E90>\r\ncontents = '---\\n%YAML 1.2\\nversion: 0.2.6\\n'\r\n\r\n    @pytest.mark.parametrize(\"contents\", [\r\n        \"%YAML 1.2\\n%YAML 1.2\\n---\\nversion: 0.2.6\\n\",\r\n        \"---\\n%YAML 1.2\\nversion: 0.2.6\\n\",\r\n        \"name: hermes-connector\\n%YAML 1.2\\nversion: 0.2.6\\n\",\r\n    ])\r\n    def test_installed_version_rejects_repeated_or_misplaced_yaml_directives(\r\n        tmp_path, monkeypatch, contents\r\n    ):\r\n        monkeypatch.setattr(chrome_connector, \"PLUGIN\", tmp_path)\r\n        (tmp_path / \"plugin.yaml\").write_text(contents, encoding=\"utf-8\")\r\n    \r\n>       assert chrome_connector.installed_version() == \"\"\r\nE       AssertionError: assert '0.2.6' == ''\r\nE         \r\nE         + 0.2.6\r\n\r\nValidation\\test_chrome_connector.py:148: AssertionError\r\n_ test_installed_version_rejects_repeated_or_misplaced_yaml_directives[name: hermes-connector\\n%YAML 1.2\\nversion: 0.2.6\\n] _\r\n\r\ntmp_path = WindowsPath('C:/Users/tahoe/AppData/Local/Temp/pytest-of-tahoe/pytest-3085/test_installed_version_rejects2')\r\nmonkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x0000021A5DE567B0>\r\ncontents = 'name: hermes-connector\\n%YAML 1.2\\nversion: 0.2.6\\n'\r\n\r\n    @pytest.mark.parametrize(\"contents\", [\r\n        \"%YAML 1.2\\n%YAML 1.2\\n---\\nversion: 0.2.6\\n\",\r\n        \"---\\n%YAML 1.2\\nversion: 0.2.6\\n\",\r\n        \"name: hermes-connector\\n%YAML 1.2\\nversion: 0.2.6\\n\",\r\n    ])\r\n    def test_installed_version_rejects_repeated_or_misplaced_yaml_directives(\r\n        tmp_path, monkeypatch, contents\r\n    ):\r\n        monkeypatch.setattr(chrome_connector, \"PLUGIN\", tmp_path)\r\n        (tmp_path / \"plugin.yaml\").write_text(contents, encoding=\"utf-8\")\r\n    \r\n>       assert chrome_connector.installed_version() == \"\"\r\nE       AssertionError: assert '0.2.6' == ''\r\nE         \r\nE         + 0.2.6\r\n\r\nValidation\\test_chrome_connector.py:148: AssertionError\r\n3 failed, 57 deselected in 0.27s\r\n"
+            },
+            {
+              "mode": "head",
+              "exit_code": 0,
+              "seconds": 1.386,
+              "command": [
+                "C:\\Users\\tahoe\\Documents\\Codex\\2026-10-31\\can\\outputs\\Hermes-Agent\\Toolbox\\python\\Scripts\\python.exe",
+                "-B",
+                "-m",
+                "pytest",
+                "Validation/test_chrome_connector.py",
+                "-q",
+                "-r",
+                "s",
+                "-p",
+                "no:cacheprovider"
+              ],
+              "summary": "............................................................             [100%]\r\n60 passed in 0.84s\r\n"
+            }
+          ]
+        },
+        {
+          "number": 775,
+          "head": "4712c3a002e4c1aaaaef9e45895823a8a1e9508f",
+          "base": "5f4ef6ef5ebe9a9d953a899549ff8a7f09d8fec4",
+          "paths": [
+            "Validation/test_auto_route.py",
+            "auto_route.py"
+          ],
+          "hashes": {
+            "Validation/test_auto_route.py": "9135bc0751f86d39ebe3127faf8a36f3e9575468b90f58a4c9dc0599618440c5",
+            "auto_route.py": "f4898ee25d5a9db3efa4ce3cfdcc5ae3d7e8fc695e93fc121b4f92ec7dcc0323"
+          },
+          "verdict": "accept",
+          "reason": "Accept: artifact work phrased as a short question uses balanced tier while ordinary procedural questions retain quick tier.",
+          "checks": [
+            {
+              "mode": "baseline",
+              "exit_code": 1,
+              "seconds": 1.291,
+              "command": [
+                "C:\\Users\\tahoe\\Documents\\Codex\\2026-10-31\\can\\outputs\\Hermes-Agent\\Toolbox\\python\\Scripts\\python.exe",
+                "-B",
+                "-m",
+                "pytest",
+                "Validation/test_auto_route.py",
+                "-q",
+                "-r",
+                "s",
+                "-p",
+                "no:cacheprovider",
+                "-k",
+                "short_questions_requesting_supplied_artifact"
+              ],
+              "summary": ".                                                                     [100%]\r\n================================== FAILURES ===================================\r\n_ AutoRouteTests.test_short_questions_requesting_supplied_artifact_work_use_middle_tier (source='attached') _\r\n\r\nself = <test_auto_route.AutoRouteTests testMethod=test_short_questions_requesting_supplied_artifact_work_use_middle_tier>\r\n\r\n    def test_short_questions_requesting_supplied_artifact_work_use_middle_tier(self):\r\n        for source in (\"attached\", \"uploaded\", \"selected\"):\r\n            request = f\"What are the key findings? Summarize the {source} PDF.\"\r\n            with self.subTest(source=source):\r\n>               self.assertEqual(\r\n                    task_size([{\"role\": \"user\", \"content\": request}]),\r\n                    \"balanced\",\r\n                )\r\nE               AssertionError: 'quick' != 'balanced'\r\nE               - quick\r\nE               + balanced\r\n\r\nValidation\\test_auto_route.py:183: AssertionError\r\n_ AutoRouteTests.test_short_questions_requesting_supplied_artifact_work_use_middle_tier (source='uploaded') _\r\n\r\nself = <test_auto_route.AutoRouteTests testMethod=test_short_questions_requesting_supplied_artifact_work_use_middle_tier>\r\n\r\n    def test_short_questions_requesting_supplied_artifact_work_use_middle_tier(self):\r\n        for source in (\"attached\", \"uploaded\", \"selected\"):\r\n            request = f\"What are the key findings? Summarize the {source} PDF.\"\r\n            with self.subTest(source=source):\r\n>               self.assertEqual(\r\n                    task_size([{\"role\": \"user\", \"content\": request}]),\r\n                    \"balanced\",\r\n                )\r\nE               AssertionError: 'quick' != 'balanced'\r\nE               - quick\r\nE               + balanced\r\n\r\nValidation\\test_auto_route.py:183: AssertionError\r\n_ AutoRouteTests.test_short_questions_requesting_supplied_artifact_work_use_middle_tier (source='selected') _\r\n\r\nself = <test_auto_route.AutoRouteTests testMethod=test_short_questions_requesting_supplied_artifact_work_use_middle_tier>\r\n\r\n    def test_short_questions_requesting_supplied_artifact_work_use_middle_tier(self):\r\n        for source in (\"attached\", \"uploaded\", \"selected\"):\r\n            request = f\"What are the key findings? Summarize the {source} PDF.\"\r\n            with self.subTest(source=source):\r\n>               self.assertEqual(\r\n                    task_size([{\"role\": \"user\", \"content\": request}]),\r\n                    \"balanced\",\r\n                )\r\nE               AssertionError: 'quick' != 'balanced'\r\nE               - quick\r\nE               + balanced\r\n\r\nValidation\\test_auto_route.py:183: AssertionError\r\n3 failed, 1 passed, 55 deselected in 0.75s\r\n"
+            },
+            {
+              "mode": "head",
+              "exit_code": 0,
+              "seconds": 2.367,
+              "command": [
+                "C:\\Users\\tahoe\\Documents\\Codex\\2026-10-31\\can\\outputs\\Hermes-Agent\\Toolbox\\python\\Scripts\\python.exe",
+                "-B",
+                "-m",
+                "pytest",
+                "Validation/test_auto_route.py",
+                "-q",
+                "-r",
+                "s",
+                "-p",
+                "no:cacheprovider"
+              ],
+              "summary": "........................................................                                            [100%]\r\n56 passed, 45 subtests passed in 1.65s\r\n"
+            }
+          ]
+        },
+        {
+          "number": 776,
+          "head": "58c11cc9b506483fb86283395f8f723b3dd53686",
+          "base": "5f4ef6ef5ebe9a9d953a899549ff8a7f09d8fec4",
+          "paths": [
+            "Validation/test_music_analysis.py",
+            "music_analysis.py"
+          ],
+          "hashes": {
+            "Validation/test_music_analysis.py": "b6f2de2e2beaae7636fbf2f6669eb9c9dd0bf030cef8780eefa82c0b2f2585d9",
+            "music_analysis.py": "547fe86a6c79f2b7d650cc0dd146f6c44cabf11178a48fffe16ba645cd1d4ca7"
+          },
+          "verdict": "accept",
+          "reason": "Accept: equally scored triads return unknown instead of arbitrary lexicographic chord; uniquely supported major/minor controls retain detection.",
+          "checks": [
+            {
+              "mode": "baseline",
+              "exit_code": 1,
+              "seconds": 0.899,
+              "command": [
+                "C:\\Users\\tahoe\\Documents\\Codex\\2026-10-31\\can\\outputs\\Hermes-Agent\\Toolbox\\python\\Scripts\\python.exe",
+                "-B",
+                "-m",
+                "pytest",
+                "Validation/test_music_analysis.py",
+                "-q",
+                "-r",
+                "s",
+                "-p",
+                "no:cacheprovider",
+                "-k",
+                "equally_supported_triads"
+              ],
+              "summary": "F                                                                        [100%]\r\n================================== FAILURES ===================================\r\n___________ test_chord_detection_declines_equally_supported_triads ____________\r\n\r\n    def test_chord_detection_declines_equally_supported_triads():\r\n        for pitch in range(12):\r\n            chroma = np.zeros(12)\r\n            chroma[pitch] = 1.0\r\n>           assert music_analysis._best_chord(chroma) is None\r\nE           AssertionError: assert 'G# major' is None\r\nE            +  where 'G# major' = <function _best_chord at 0x000001C747EA3600>(array([1., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.]))\r\nE            +    where <function _best_chord at 0x000001C747EA3600> = music_analysis._best_chord\r\n\r\nValidation\\test_music_analysis.py:19: AssertionError\r\n1 failed, 11 deselected in 0.39s\r\n"
+            },
+            {
+              "mode": "head",
+              "exit_code": 0,
+              "seconds": 0.775,
+              "command": [
+                "C:\\Users\\tahoe\\Documents\\Codex\\2026-10-31\\can\\outputs\\Hermes-Agent\\Toolbox\\python\\Scripts\\python.exe",
+                "-B",
+                "-m",
+                "pytest",
+                "Validation/test_music_analysis.py",
+                "-q",
+                "-r",
+                "s",
+                "-p",
+                "no:cacheprovider"
+              ],
+              "summary": "............                                                             [100%]\r\n12 passed in 0.28s\r\n"
+            }
+          ]
+        }
+      ],
+      "accepted_head_module_totals": {
+        "passed": 141,
+        "subtests_passed": 47,
+        "skipped": 0
+      },
+      "limits": [
+        "772 mocked suite passes but production ownership blocker remains.",
+        "No real speech, music inference, camera, GPU, accounts, services or remote mutations.",
+        "YAML version extraction remains a deliberately narrow subset, not a general YAML validator.",
+        "Separate full modules were tested; no combined integration tree or full application suite claimed."
+      ],
+      "yaml_parser_proof": "yaml-parser-proof.json"
+    },
+    "777-781": {
+      "base": "5f4ef6ef5ebe9a9d953a899549ff8a7f09d8fec4",
+      "scope": "exact heads777-781; isolated local clone only",
+      "verdict": "accept all five exact heads",
+      "results": [
+        {
+          "number": 777,
+          "head": "1db3d3d89390fa05c7177b554f3ef4c6bd5b07b5",
+          "test_module": "Validation/test_quick_image.py",
+          "baseline_exit": 1,
+          "candidate_exit": 0,
+          "baseline_tail": "_ _ _ _ _ _ _ _ _\n\nsize = (2, 2), error_only = False\n\n    def _decompression_bomb_check(\n        size: tuple[int, int], *, error_only: bool = False\n    ) -> None:\n        if MAX_IMAGE_PIXELS is None:\n            return\n    \n        pixels = max(1, size[0]) * max(1, size[1])\n    \n        if pixels > 2 * MAX_IMAGE_PIXELS:\n            msg = (\n                f\"Image size ({pixels} pixels) exceeds limit of {2 * MAX_IMAGE_PIXELS} \"\n                \"pixels, could be decompression bomb DOS attack.\"\n            )\n>           raise DecompressionBombError(msg)\nE           PIL.Image.DecompressionBombError: Image size (4 pixels) exceeds limit of 2 pixels, could be decompression bomb DOS attack.\n\n..\\Hermes-Agent\\Toolbox\\python\\Lib\\site-packages\\PIL\\Image.py:3590: DecompressionBombError\n=========================== short test summary info ===========================\nFAILED Validation/test_quick_image.py::test_recovery_retries_oversized_png_without_aborting_other_jobs\n1 failed, 17 deselected in 0.43s\n",
+          "candidate_tail": "..................                                                       [100%]\n18 passed in 0.69s\n",
+          "seconds": 2.77,
+          "diff_sha256": "262f0145b29a63870643e1c393aba7d3bbe5ca41c76362fce12440ebc6a2575c",
+          "verdict": "accept",
+          "analysis": "Accept. Catch only Pillow decompression-bomb errors as invalid image output, preserving recovery of subsequent jobs. Does not disable Pillow limits or accept oversized images."
+        },
+        {
+          "number": 778,
+          "head": "0630494840e75d7271ccef776b3b6c5c9a8fd433",
+          "test_module": "Validation/test_natural_voice.py",
+          "baseline_exit": 1,
+          "candidate_exit": 0,
+          "baseline_tail": ">               natural_voice.install()\n\nValidation\\test_natural_voice.py:218: \n_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _\nnatural_voice.py:58: in install\n    with lock_file as lock:\n         ^^^^^^^^^\nValidation\\test_natural_voice.py:199: in write\n    raise failure\nnatural_voice.py:63: in install\n    lock.flush()\n_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _\n\nself = <test_natural_voice.NaturalVoiceTests.test_failed_lock_write_does_not_raise_again_during_close.<locals>.FullDisk object at 0x00000180C6183B50>\ndata = <memory at 0x00000180C606EA40>\n\n    def write(self, data):\n>       raise failure\nE       OSError: [Errno 28] No space for lock byte\n\nValidation\\test_natural_voice.py:199: OSError\n=========================== short test summary info ===========================\nFAILED Validation/test_natural_voice.py::NaturalVoiceTests::test_failed_lock_write_does_not_raise_again_during_close\n1 failed, 14 deselected in 0.34s\n",
+          "candidate_tail": "...............                                                    [100%]\n15 passed, 6 subtests passed in 0.32s\n",
+          "seconds": 2.4,
+          "diff_sha256": "2a2e5b3e1ec1d6257aa529343893dcfdbbef3b699208ede8f4bdfa70c2f0da43",
+          "verdict": "accept",
+          "analysis": "Accept. Unbuffered lock-byte writes prevent failed buffered flush retry during close. Existing lock acquisition/status/error tests remain intact; no retry/permission bypass."
+        },
+        {
+          "number": 779,
+          "head": "dfcd803b5cfe9db3d72bfab544f5a4a3424196d8",
+          "test_module": "Validation/test_site_crawler.py",
+          "baseline_exit": 1,
+          "candidate_exit": 0,
+          "baseline_tail": "n(url=url, config=settings)\n             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _\n\nself = <test_site_crawler.test_crawler_library_exception_preserves_queued_pages.<locals>.FakeCrawler object at 0x0000023A7698C980>\nurl = 'https://example.com/broken'\nconfig = namespace(check_robots_txt=True, page_timeout=30000, wait_until='domcontentloaded', exclude_external_links=True, verbose=False)\n\n    async def arun(self, url, config):\n        seen.append(url)\n        if url == broken:\n>           raise BrowserError(\"Browser page failed\")\nE           test_site_crawler.test_crawler_library_exception_preserves_queued_pages.<locals>.BrowserError: Browser page failed\n\nValidation\\test_site_crawler.py:264: BrowserError\n=========================== short test summary info ===========================\nFAILED Validation/test_site_crawler.py::test_crawler_library_exception_preserves_queued_pages\n1 failed, 28 deselected in 1.33s\n",
+          "candidate_tail": ".............................                                            [100%]\n29 passed in 1.45s\n",
+          "seconds": 4.76,
+          "diff_sha256": "dcfc0b87fa15a04afc56a90755134c2de778a9307e54f12943909b3a9d54c8c1",
+          "verdict": "accept",
+          "analysis": "Accept. Crawler-library Exception is normalized only around arun, allowing bounded queue traversal to continue through outer page-error handling. BaseException cancellation remains propagating."
+        },
+        {
+          "number": 780,
+          "head": "2bbfee54c744911287a6b741276e0e6ed99cf1f0",
+          "test_module": "Validation/test_system_gauges.py",
+          "baseline_exit": 1,
+          "candidate_exit": 0,
+          "baseline_tail": "one)\n        monkeypatch.setattr(system_gauges, \"_gpu_percent\", lambda: None)\n        monkeypatch.setattr(system_gauges, \"_drive_space\", lambda: (None, None))\n        monkeypatch.setattr(system_gauges.time, \"monotonic\", lambda: clock[0])\n    \n        sampler = system_gauges.HardwareSampler()\n        first = sampler.sample()\n        assert first[\"net_down_mbps\"] is None\n        assert first[\"net_up_mbps\"] is None\n        clock[0] = 20.0\n        second = sampler.sample()\n        # Counter snapshots occur at 13 and 20 seconds, not 10 and 20.\n>       assert second[\"net_down_mbps\"] == pytest.approx(8)\nE       assert 5.6 == 8 \u00b1 8.0e-06\nE         \nE         comparison failed\nE         Obtained: 5.6\nE         Expected: 8 \u00b1 8.0e-06\n\nValidation\\test_system_gauges.py:223: AssertionError\n=========================== short test summary info ===========================\nFAILED Validation/test_system_gauges.py::test_network_rate_uses_timestamp_after_counter_acquisition\n1 failed, 19 deselected in 0.29s\n",
+          "candidate_tail": "....................                                                     [100%]\n20 passed in 0.15s\n",
+          "seconds": 3.31,
+          "diff_sha256": "a801f7814d8bcfb9add3cc873e5627a6c83ba3078063f00b42850699c98be269",
+          "verdict": "accept",
+          "analysis": "Accept. Independent monotonic timestamp follows network counter acquisition. Existing fake clocks updated for the additional monotonic call; no rate assertion relaxed. Independent variable disk/network delays also pass."
+        },
+        {
+          "number": 781,
+          "head": "4ee74b51844cf1079a966a3da8cf921d52e4076a",
+          "test_module": "Validation/test_music_stems.py",
+          "baseline_exit": 1,
+          "candidate_exit": 0,
+          "baseline_tail": "e\")\n        ), patch.object(\n            music_stems.subprocess, \"run\", side_effect=render\n        ), patch.object(\n            music_stems.os, \"link\", side_effect=OSError(errno.ENOTSUP, \"unsupported\")\n        ), patch.object(Path, \"open\", new=open_with_short_writes):\n            with pytest.raises(OSError, match=\"full buffer|simulated disk full\"):\n                music_stems.separate_stems(str(source), str(output))\n    \n>       assert list(output.iterdir()) == []\nE       AssertionError: assert [WindowsPath(...stems/a.wav')] == []\nE         \nE         Left contains one more item: WindowsPath('C:/Users/tahoe/AppData/Local/Temp/pytest-of-tahoe/pytest-3072/test_fallback_short_disk_write0/stems/a.wav')\nE         Use -v to get more diff\n\nValidation\\test_music_stems.py:368: AssertionError\n=========================== short test summary info ===========================\nFAILED Validation/test_music_stems.py::test_fallback_short_disk_write_removes_partial_output\n1 failed, 24 deselected in 0.63s\n",
+          "candidate_tail": "............s............                                                [100%]\n24 passed, 1 skipped in 1.51s\n",
+          "seconds": 3.8,
+          "diff_sha256": "fafc8359de7bfabea2ac44f060a81b40b27243fe8cd0b3891c503ecb1a34118b",
+          "verdict": "accept",
+          "analysis": "Accept. Exclusive fallback copy uses unbuffered writes so written-prefix digest/length matches actual disk writes; no-replace creation and conservative ownership/content rollback retained. Existing external-edit/replacement preservation controls pass."
+        }
+      ],
+      "totals": {
+        "baseline_new_regressions_failed": 5,
+        "candidate_modules_passed": 106,
+        "candidate_subtests_passed": 6,
+        "candidate_skipped": 1
+      },
+      "skip": "Existing music-stems symbolic-link test skips when Windows symlink creation is unavailable. No new skip or relaxed test introduced.",
+      "independent_edges": [
+        {
+          "number": 777,
+          "exit_code": 0,
+          "output": "valid/corrupt/oversized/restored-policy controls PASS\n"
+        },
+        {
+          "number": 779,
+          "exit_code": 0,
+          "output": "CancelledError/KeyboardInterrupt propagate; no saved pages PASS\n"
+        },
+        {
+          "number": 780,
+          "exit_code": 0,
+          "output": "varying disk+network acquisition delays preserve exact8/16Mbps PASS\n"
+        }
+      ],
+      "source_review": "Each PR changes only its one runtime module plus its existing test module; no cross-PR file overlap. Own isolated worktree clean after testing.",
+      "limits": [
+        "No live image/music inference, real browser crawling, runtime installation, device or model calls. Media/browser execution replaced with owned test fakes.",
+        "No throughput or whole-application quality claim.",
+        "No integration, private, installed or original project source changed; no remote mutations."
+      ]
+    },
+    "782-786": {
+      "recorded_utc": "2026-11-06T00:58:32.416868+00:00",
+      "base": "5f4ef6ef5ebe9a9d953a899549ff8a7f09d8fec4",
+      "checkout": "C:\\Users\\tahoe\\Documents\\Codex\\2026-10-31\\can\\outputs\\review-pr782786-20261106",
+      "cutoff": 786,
+      "range": [
+        782,
+        786
+      ],
+      "results": [
+        {
+          "number": 782,
+          "head": "768bfcf6280ee18b31d7369560c8f86c5214f9ee",
+          "module": "project_documents",
+          "head_tests": {
+            "exit": 0,
+            "seconds": 4.617,
+            "log": "C:\\Users\\tahoe\\Documents\\Codex\\2026-10-31\\can\\outputs\\open-pr-review-20261106\\pr782786-evidence\\782-head-module.txt",
+            "pytest_summary": "17 passed in 3.64s"
+          },
+          "baseline_tests": {
+            "exit": 1,
+            "seconds": 1.283,
+            "log": "C:\\Users\\tahoe\\Documents\\Codex\\2026-10-31\\can\\outputs\\open-pr-review-20261106\\pr782786-evidence\\782-baseline.txt",
+            "pytest_summary": "1 failed, 16 deselected in 0.54s"
+          },
+          "disposition": "accept",
+          "reason": "Plain-text newline translation corrupts character pagination/cache; newline=\"\" preserves original characters, v4 safely invalidates old translated cache and derived rows.",
+          "overlap": "No shared production/test file with other four PRs in this batch.",
+          "files": {
+            "project_documents.py": {
+              "sha256": "84225816b70e99405538f29056165d65e51b333ab0c4e0a2cb8a1aa5adef499f",
+              "bytes": 7651
+            },
+            "Validation/test_project_documents.py": {
+              "sha256": "b0e246e02bf2121ab38e33e980365e34412e4d97a1f64a4b5ebfb21921e76c07",
+              "bytes": 22911
+            }
+          }
+        },
+        {
+          "number": 783,
+          "head": "4f31793f50f2935dc7f2eaaf3c26eb8d399cf502",
+          "module": "music_lyrics",
+          "head_tests": {
+            "exit": 0,
+            "seconds": 3.656,
+            "log": "C:\\Users\\tahoe\\Documents\\Codex\\2026-10-31\\can\\outputs\\open-pr-review-20261106\\pr782786-evidence\\783-head-module.txt",
+            "pytest_summary": "73 passed in 2.75s"
+          },
+          "baseline_tests": {
+            "exit": 1,
+            "seconds": 2.244,
+            "log": "C:\\Users\\tahoe\\Documents\\Codex\\2026-10-31\\can\\outputs\\open-pr-review-20261106\\pr782786-evidence\\783-baseline.txt",
+            "pytest_summary": "6 failed, 67 deselected in 1.39s"
+          },
+          "disposition": "accept",
+          "reason": "Strict JSON serialization now rejects nonfinite metadata before directory/files are created; normal language/transcript retry retains existing atomic/no-overwrite behavior.",
+          "overlap": "No shared production/test file with other four PRs in this batch.",
+          "files": {
+            "music_lyrics.py": {
+              "sha256": "a426ec6e6d026bcf04ddde02c2f4cc70d4ce5c53b6ef5a592597126ee9c332ef",
+              "bytes": 4999
+            },
+            "Validation/test_music_lyrics.py": {
+              "sha256": "95743275fb5da03d00a223eb04f2037c67b7f6d5bf0ca394ec2fad7db793dcb1",
+              "bytes": 18709
+            }
+          }
+        },
+        {
+          "number": 784,
+          "head": "c58aabd86fbab96e376a69ad0f72bcba3663e0b5",
+          "module": "music_edit",
+          "head_tests": {
+            "exit": 0,
+            "seconds": 2.43,
+            "log": "C:\\Users\\tahoe\\Documents\\Codex\\2026-10-31\\can\\outputs\\open-pr-review-20261106\\pr782786-evidence\\784-head-module.txt",
+            "pytest_summary": "32 passed in 1.62s"
+          },
+          "baseline_tests": {
+            "exit": 1,
+            "seconds": 2.16,
+            "log": "C:\\Users\\tahoe\\Documents\\Codex\\2026-10-31\\can\\outputs\\open-pr-review-20261106\\pr782786-evidence\\784-baseline.txt",
+            "pytest_summary": "2 failed, 30 deselected in 1.30s"
+          },
+          "disposition": "accept",
+          "reason": "FFmpeg duration parser rejects exponent-form timings; Decimal(str(value)) fixed-form retains numeric precision while satisfying its duration grammar.",
+          "overlap": "No shared production/test file with other four PRs in this batch.",
+          "files": {
+            "music_edit.py": {
+              "sha256": "8269ff88da591136ba4cf5720ff618bea0dc89031c713997d04ddf8698660aeb",
+              "bytes": 7250
+            },
+            "Validation/test_music_edit.py": {
+              "sha256": "c3ac80f6c4691bfd1984c982086e0d3d8d1a0d9cceb42e23b386ab5124158324",
+              "bytes": 19801
+            }
+          }
+        },
+        {
+          "number": 785,
+          "head": "2bafc0ad16dd691b2c75afb6be7b068b579b5cc5",
+          "module": "core_tool_health",
+          "head_tests": {
+            "exit": 0,
+            "seconds": 1.078,
+            "log": "C:\\Users\\tahoe\\Documents\\Codex\\2026-10-31\\can\\outputs\\open-pr-review-20261106\\pr782786-evidence\\785-head-module.txt",
+            "pytest_summary": "21 passed in 0.37s"
+          },
+          "baseline_tests": {
+            "exit": 1,
+            "seconds": 0.975,
+            "log": "C:\\Users\\tahoe\\Documents\\Codex\\2026-10-31\\can\\outputs\\open-pr-review-20261106\\pr782786-evidence\\785-baseline.txt",
+            "pytest_summary": "2 failed, 19 deselected in 0.31s"
+          },
+          "disposition": "accept",
+          "reason": "Relative managed environment facts could select arbitrary CWD interpreter and cache healthy state; absolute-path validation retains legitimate installed paths.",
+          "overlap": "No shared production/test file with other four PRs in this batch.",
+          "files": {
+            "core_tool_health.py": {
+              "sha256": "9396a7ec2f8493d7d03c25052b778dba6ba6e4af9196de6b62d70fdaf02bf8e9",
+              "bytes": 8227
+            },
+            "Validation/test_core_tool_health.py": {
+              "sha256": "f6acfba88e37889f311653a0d55e8a81961f797efc22dbab1df01bdf1980f774",
+              "bytes": 22079
+            }
+          }
+        },
+        {
+          "number": 786,
+          "head": "fe099be9452bc6a0bcd300ba85bdc1c51d78498d",
+          "module": "model_fitness",
+          "head_tests": {
+            "exit": 0,
+            "seconds": 1.353,
+            "log": "C:\\Users\\tahoe\\Documents\\Codex\\2026-10-31\\can\\outputs\\open-pr-review-20261106\\pr782786-evidence\\786-head-module.txt",
+            "pytest_summary": "31 passed in 0.69s"
+          },
+          "baseline_tests": {
+            "exit": 0,
+            "seconds": 0.944,
+            "log": "C:\\Users\\tahoe\\Documents\\Codex\\2026-10-31\\can\\outputs\\open-pr-review-20261106\\pr782786-evidence\\786-baseline.txt",
+            "pytest_summary": "1 passed, 30 deselected in 0.26s"
+          },
+          "disposition": "accept_with_test_correction",
+          "reason": "Nested JSON can raise RecursionError on Python3.11; catch permits bounded fallback marker and subsequent canonical marker recovery.3.13target accepts all bounded depth probes, so original supplied test was ineffective there.",
+          "overlap": "No shared production/test file with other four PRs in this batch.",
+          "files": {
+            "model_fitness.py": {
+              "sha256": "91ec31ae56a77459204abf7404690744911621a0ffe7eb7c8d85d87309323ea3",
+              "bytes": 21584,
+              "corrected_sha256": "91ec31ae56a77459204abf7404690744911621a0ffe7eb7c8d85d87309323ea3"
+            },
+            "Validation/test_model_fitness.py": {
+              "sha256": "d3aa48fdffe163f42bf0acfa0e555252825eeefd74ba1898e422180e82dee2fd",
+              "bytes": 30204,
+              "corrected_sha256": "3489107cb9cfb35a6d96563aed23e2553c879df5ed26fa3ef2b01f794454f784"
+            }
+          },
+          "correction": {
+            "commit": "cf96781e1e7a4b6b1bc2b5aa1ab42e180bb5955e",
+            "patch": "C:\\Users\\tahoe\\Documents\\Codex\\2026-10-31\\can\\outputs\\open-pr-review-20261106\\pr782786-evidence\\786-test-correction.patch",
+            "patch_sha256": "1a09655f3a6b8d3889c539de8d437dd5608516228eb4253d0714116821df70db",
+            "summary": "30 passed, 1 skipped in 0.69s",
+            "behavior": "Test explicitly skips if genuine bounded fixture decodes; no mocked JSON errors, recursionlimit changes or package installs. Production unchanged.",
+            "python311_proof": "C:\\Users\\tahoe\\Documents\\Codex\\2026-10-31\\can\\outputs\\open-pr-review-20261106\\pr782786-evidence\\786-python311-proof.json",
+            "scope": "Real3.11.9 C JSON parser plus real production method; psutil Process interface fake exactly as supplied. pytest/psutil absent, NOT full3.11 module qualification or3.13 error reproduction."
+          }
+        }
+      ],
+      "additional_evidence": {
+        "784_real_ffmpeg": "C:\\Users\\tahoe\\Documents\\Codex\\2026-10-31\\can\\outputs\\open-pr-review-20261106\\pr782786-evidence\\784-real-ffmpeg-proof.json",
+        "786_real_python311": "C:\\Users\\tahoe\\Documents\\Codex\\2026-10-31\\can\\outputs\\open-pr-review-20261106\\pr782786-evidence\\786-python311-proof.json",
+        "786_target_python313_probe": {
+          "version": "3.13.6",
+          "depths": [
+            1100,
+            1500,
+            1800,
+            2000,
+            2047
+          ],
+          "all_decoded": true,
+          "max_bytes": 4095
+        }
+      },
+      "limits": [
+        "Isolated local clone only; no integration/private/installed/Original edits; no pushes, merges, comments, releases or live service controls.",
+        "No model inference, GPU/camera/audio playback or user data. Music tests and independent tiny FFmpeg proof use owned synthetic silent WAV only.",
+        "No full installed self-check rerun or fullapplication quality claim.",
+        "786 original target baseline passed and is preserved honestly. Correction uses explicit skip where error cannot occur; stdlib-only3.11 proof is limited as stated."
+      ]
+    }
+  },
+  "rejected": {
+    "772": "Adds dead-PID child cleanup without birth ownership; mocked children do not establish orphan recovery. No OS probe or production control used."
+  },
+  "limits": [
+    "Fourteen changed module suites only, not a fresh installation or end-to-end voice/music quality result.",
+    "786 has real Python 3.11 C-decoder compatibility evidence; its bounded marker is accepted on3.13 and explicitly skipped there. Full3.11 suite dependencies were absent; none were installed.",
+    "772 was rejected, not silently integrated. Existing exited-worker ownership needs separate design.",
+    "Installed 535 self-check continues independently. Private native-agent fixes are excluded."
+  ]
+}
