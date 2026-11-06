@@ -169,7 +169,9 @@ def separate_stems(source_path: str, output_dir: str) -> dict:
                             raise
                         publication = None
                         try:
-                            with destination.open("xb") as output:
+                            # Track actual disk writes, not bytes accepted by a buffer:
+                            # a failed flush could otherwise leave an untracked prefix.
+                            with destination.open("xb", buffering=0) as output:
                                 publication = _StemPublication(destination, os.fstat(output.fileno()), hashlib.sha256(), 0, output)
                                 published.append(publication)
                                 with path.open("rb") as input_file:

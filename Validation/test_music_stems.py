@@ -321,6 +321,54 @@ def test_publication_without_hard_links_is_retryable(tmp_path, interrupt_copy):
     assert source.read_bytes() == b"music"
 
 
+def test_fallback_short_disk_write_removes_partial_output(tmp_path):
+    import errno
+    import io
+    from contextlib import nullcontext
+    from types import SimpleNamespace
+
+    source = tmp_path / "song.mp3"
+    source.write_bytes(b"music")
+    output = tmp_path / "stems"
+    original_open = Path.open
+
+    class ShortWriteFile(io.FileIO):
+        def write(self, data):
+            if self.tell() == 0:
+                return super().write(data[:2])
+            raise OSError("simulated disk full")
+
+    def open_with_short_writes(path, mode="r", buffering=-1, **kwargs):
+        if mode == "xb" and path.parent == output:
+            raw = ShortWriteFile(path, mode)
+            # Reproduce normal buffering when the caller does not disable it.
+            return io.BufferedWriter(raw) if buffering == -1 else raw
+        return original_open(path, mode, buffering=buffering, **kwargs)
+
+    def render(args, **_kwargs):
+        staging = Path(args[-1])
+        (staging / "a.wav").write_bytes(b"first stem")
+        (staging / "b.wav").write_bytes(b"second stem")
+        return SimpleNamespace(returncode=0)
+
+    with patch.object(
+        music_stems.music_backend, "_setup_lock", side_effect=nullcontext
+    ), patch.object(
+        music_stems.music_backend, "_music_gpu_lease", side_effect=nullcontext
+    ), patch.object(
+        music_stems, "install", return_value=Path("python.exe")
+    ), patch.object(
+        music_stems.subprocess, "run", side_effect=render
+    ), patch.object(
+        music_stems.os, "link", side_effect=OSError(errno.ENOTSUP, "unsupported")
+    ), patch.object(Path, "open", new=open_with_short_writes):
+        with pytest.raises(OSError, match="full buffer|simulated disk full"):
+            music_stems.separate_stems(str(source), str(output))
+
+    assert list(output.iterdir()) == []
+    assert source.read_bytes() == b"music"
+
+
 def test_publication_preserves_file_created_during_inference(tmp_path):
     from contextlib import nullcontext
     from types import SimpleNamespace
