@@ -219,12 +219,13 @@ class ContextWindowTests(unittest.TestCase):
                   patch.object(context_window, "physical_ram_bytes", return_value=128 * 2**30),
                   patch.object(context_window, "model_bytes", return_value=52 * 2**30)):
                 self.assertEqual(context_window.sync(root, "main"), 262144)
+            expected_original = original.replace(
+                "context_length: 65536  # tokens",
+                "context_length: 262144  # tokens",
+            )
             self.assertEqual(
                 config.read_text(encoding="utf-8"),
-                original.replace(
-                    "context_length: 65536  # tokens",
-                    "context_length: 262144  # tokens",
-                ),
+                expected_original
             )
             post.assert_called_once_with("/api/show", {"model": "main"})
 
