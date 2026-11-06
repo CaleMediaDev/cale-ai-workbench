@@ -256,6 +256,24 @@ def test_installed_version_does_not_merge_yaml_documents(tmp_path, monkeypatch, 
         chrome_connector.pairing_code()
 
 
+@pytest.mark.parametrize("second_entry", [
+    "version: 9.9.9",
+    "'version': 9.9.9",
+    '"version": null',
+    "version: [9, 9, 9]",
+])
+def test_installed_version_rejects_duplicate_root_version_keys(
+    tmp_path, monkeypatch, second_entry
+):
+    monkeypatch.setattr(chrome_connector, "PLUGIN", tmp_path)
+    (tmp_path / "plugin.yaml").write_text(
+        "  name: hermes-connector\n  version: 0.2.6\n  " + second_entry + "\n",
+        encoding="utf-8",
+    )
+
+    assert chrome_connector.installed_version() == ""
+
+
 def test_wrong_companion_version_cannot_pair(tmp_path, monkeypatch):
     plugin = tmp_path / "plugin"
     plugin.mkdir()
