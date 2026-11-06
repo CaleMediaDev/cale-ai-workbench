@@ -42,6 +42,7 @@ async def crawl_site(project: Path, start_url: str, max_pages: int = 5) -> dict:
     host = urlsplit(start).hostname.lower()
     limit = max(1, min(int(max_pages), 20))
     queue, queued, visited = deque([start]), {start}, set()
+    saved_destinations = set()
     pages, errors = [], []
     settings = CrawlerRunConfig(
         check_robots_txt=True, page_timeout=30000, wait_until="domcontentloaded",
@@ -50,7 +51,7 @@ async def crawl_site(project: Path, start_url: str, max_pages: int = 5) -> dict:
     async with AsyncWebCrawler(config=BrowserConfig(headless=True, verbose=False)) as crawler:
         while queue and len(visited) < limit:
             url = queue.popleft()
-            if url in visited:
+            if url in visited or url in saved_destinations:
                 continue
             visited.add(url)
             try:
@@ -80,6 +81,7 @@ async def crawl_site(project: Path, start_url: str, max_pages: int = 5) -> dict:
                 body = f"# Source: {url}\n\nCrawled: {datetime.now(timezone.utc).isoformat()}\n\n{markdown}\n"
                 path.write_text(body, encoding="utf-8")
                 project_memory.index_file(project, path)
+                saved_destinations.add(base_url)
                 pages.append({"url": url, "file": str(path), "characters": len(markdown)})
                 links = result.links if isinstance(result.links, dict) else {}
                 internal_links = links.get("internal", [])
