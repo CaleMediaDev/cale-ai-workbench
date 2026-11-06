@@ -15,6 +15,7 @@ class ContextWindowTests(unittest.TestCase):
         listings = (
             b'{"models": []}',
             b'{"models": [{"name": "other:latest", "size": 9663676416}]}',
+            b'{"models": [{"name": "main:latest"}]}',
         )
         for listing in listings:
             with self.subTest(listing=listing):
