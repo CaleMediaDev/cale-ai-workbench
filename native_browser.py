@@ -364,7 +364,7 @@ def execute(folder: Path, action: str, arguments: dict) -> str:
               }
               if(!label && (!local || el.matches('a,button,[role="button"]'))) label = el.innerText || '';
               if(!label && !local) label = el.value || '';
-              return {ref, tag: el.tagName.toLowerCase(), role: el.getAttribute('role') || '',
+              return {ref, tag: el instanceof HTMLFormElement ? 'form' : el.tagName.toLowerCase(), role: el.getAttribute('role') || '',
                 label: label.trim().slice(0, 120),
                 href: (el.getAttribute('href') || '').slice(0, 180)};
             });
