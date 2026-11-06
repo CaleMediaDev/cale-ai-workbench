@@ -1075,6 +1075,19 @@ def test_reused_progress_writer_rolls_back_header_when_node_insert_fails(tmp_pat
             next(lifecycle)
 
 
+def test_deeply_nested_owned_context_leaves_plugin_inactive(tmp_path, monkeypatch):
+    # Use an isolated module so this probe cannot replace the suite's live plugin.
+    state, context, owned = progress_writer_fixture(tmp_path)
+    raw = "[" * 3000 + "0" + "]" * 3000
+    assert len(raw) <= 8000
+    monkeypatch.setenv(owned._LIVE_ENV, raw)
+    with patch.object(owned, "_LiveSelfCheck") as writer:
+        owned.pytest_configure(SimpleNamespace(
+            invocation_params=SimpleNamespace(dir=tmp_path), args=["Validation"]))
+    assert owned._LIVE_PLUGIN is None
+    writer.assert_not_called()
+
+
 def test_configure_failure_closes_new_progress_writer(tmp_path, monkeypatch):
     state, context, diagnostics = progress_writer_fixture(tmp_path)
     context['root'] = str(tmp_path)
