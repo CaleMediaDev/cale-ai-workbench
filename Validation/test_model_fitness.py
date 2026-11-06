@@ -96,6 +96,12 @@ def test_avatar_headroom_ignores_nested_json_and_recovers(tmp_path, monkeypatch)
     nested = "[" * depth + "0" + "]" * depth
     if len(nested) > 4096:
         pytest.skip("Decoder recursion limit exceeds the marker size limit")
+    try:
+        json.loads(nested)
+    except RecursionError:
+        pass
+    else:
+        pytest.skip("This JSON decoder accepts the bounded nested marker")
 
     state = tmp_path / "LongTasks"
     state.mkdir()
