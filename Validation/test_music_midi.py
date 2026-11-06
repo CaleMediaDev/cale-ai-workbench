@@ -252,6 +252,46 @@ def test_transcription_does_not_treat_directory_as_midi(tmp_path, has_midi_file)
     assert source.read_bytes() == b"audio"
 
 
+@pytest.mark.parametrize("has_midi_file", [False, True])
+def test_transcription_does_not_publish_staged_symlinks(tmp_path, has_midi_file):
+    source = tmp_path / "guitar.wav"
+    source.write_bytes(b"original audio")
+    target = tmp_path / "notes"
+
+    def render(args, **_kwargs):
+        staging = Path(args[-1])
+        data = staging / "data"
+        data.mkdir()
+        payload = data / "payload"
+        payload.write_bytes(b"MThd generated")
+        try:
+            (staging / "a.mid").symlink_to(payload)
+            (staging / "extra.csv").symlink_to(payload)
+            (staging / "extra.txt").symlink_to(payload)
+        except (OSError, NotImplementedError):
+            pytest.skip("Symlink creation is unavailable")
+        if has_midi_file:
+            (staging / "z.mid").write_bytes(b"MThd genuine")
+        return type("Done", (), {"returncode": 0})()
+
+    with patch.object(music_midi.music_backend, "_setup_lock", return_value=nullcontext()), \
+         patch.object(music_midi, "install", return_value=Path("python.exe")), \
+         patch.object(music_midi.subprocess, "run", side_effect=render):
+        if has_midi_file:
+            result = music_midi.transcribe_to_midi(str(source), str(target))
+            destination = target / "z.mid"
+            assert result["midi_path"] == str(destination)
+            assert result["files"] == [str(destination)]
+            assert destination.read_bytes() == b"MThd genuine"
+            assert list(target.iterdir()) == [destination]
+        else:
+            with pytest.raises(RuntimeError, match="without a MIDI file"):
+                music_midi.transcribe_to_midi(str(source), str(target))
+            assert list(target.iterdir()) == []
+
+    assert source.read_bytes() == b"original audio"
+
+
 def test_transcription_ignores_directory_matching_note_csv(tmp_path):
     source = tmp_path / "guitar.wav"
     source.write_bytes(b"audio")

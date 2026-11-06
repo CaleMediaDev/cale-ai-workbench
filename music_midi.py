@@ -126,14 +126,17 @@ def transcribe_to_midi(source_path: str, output_dir: str) -> dict:
             raise RuntimeError((result.stderr or result.stdout)[-1200:] or "Audio-to-MIDI failed.")
         midi = sorted(
             path for path in staging.glob("*.mid")
-            if path.is_file() and path.stat().st_size > 0
+            if not path.is_symlink() and path.is_file() and path.stat().st_size > 0
         )
         if not midi:
             raise RuntimeError("Basic Pitch finished without a MIDI file.")
         for notes in staging.glob("*.csv"):
-            if notes.is_file():
+            if not notes.is_symlink() and notes.is_file():
                 normalize_note_events(notes)
-        files = sorted(path for path in staging.iterdir() if path.is_file() and path.stat().st_size > 0)
+        files = sorted(
+            path for path in staging.iterdir()
+            if not path.is_symlink() and path.is_file() and path.stat().st_size > 0
+        )
         published = []
         try:
             for path in files:
