@@ -176,6 +176,19 @@ class AutoRouteTests(unittest.TestCase):
             "quick",
         )
 
+    def test_short_questions_requesting_supplied_artifact_work_use_middle_tier(self):
+        for source in ("attached", "uploaded", "selected"):
+            request = f"What are the key findings? Summarize the {source} PDF."
+            with self.subTest(source=source):
+                self.assertEqual(
+                    task_size([{"role": "user", "content": request}]),
+                    "balanced",
+                )
+        self.assertEqual(
+            task_size([{"role": "user", "content": "How do I create a folder?"}]),
+            "quick",
+        )
+
     def test_short_tool_tasks_do_not_use_fast_tier(self):
         for request in (
             "Read the attached PDF and summarize it.",
