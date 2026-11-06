@@ -340,6 +340,62 @@ def test_save_rejects_nonfinite_metadata_before_writing(tmp_path, language, exis
     assert (target / "lyrics.txt").read_text(encoding="utf-8") == "Hello world\n"
 
 
+def test_save_rollback_continues_after_unlink_failure(tmp_path):
+    from contextlib import contextmanager
+    from unittest.mock import Mock
+
+    source = tmp_path / "song.wav"
+    source.write_bytes(b"original")
+    vocal = tmp_path / "vocals.wav"
+    vocal.write_bytes(b"isolated")
+    target = tmp_path / "lyrics"
+    target.mkdir()
+    keep = target / "keep.txt"
+    keep.write_bytes(b"keep")
+    timings = target / "lyrics.json"
+    real_open = Path.open
+    real_unlink = Path.unlink
+    cleanup_attempts = []
+
+    @contextmanager
+    def failing_open(path, *args, **kwargs):
+        with real_open(path, *args, **kwargs) as output:
+            if path == timings and args == ("xb",):
+                proxy = Mock(wraps=output)
+
+                def partial_write(content):
+                    output.write(content[:5])
+                    raise OSError("simulated write failure")
+
+                proxy.write.side_effect = partial_write
+                yield proxy
+            else:
+                yield output
+
+    def failing_unlink(path, *args, **kwargs):
+        cleanup_attempts.append(path)
+        if path == timings:
+            raise PermissionError("simulated cleanup failure")
+        return real_unlink(path, *args, **kwargs)
+
+    with patch.object(Path, "open", failing_open), patch.object(
+        Path, "unlink", failing_unlink
+    ):
+        with pytest.raises(OSError, match="simulated write failure"):
+            music_lyrics.save(source, vocal, target, {"segments": [
+                {"start": 1.0, "end": 2.0, "text": "Hello world"},
+            ]})
+
+    assert cleanup_attempts == [
+        timings, target / "lyrics.srt", target / "lyrics.txt"
+    ]
+    assert sorted(path.name for path in target.iterdir()) == ["keep.txt", "lyrics.json"]
+    assert len(timings.read_bytes()) == 5
+    assert keep.read_bytes() == b"keep"
+    assert source.read_bytes() == b"original"
+    assert vocal.read_bytes() == b"isolated"
+
+
 def test_save_rejects_infinite_end_without_leaving_partial_output(tmp_path):
     source = tmp_path / "song.wav"
     source.write_bytes(b"original")

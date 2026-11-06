@@ -101,7 +101,11 @@ def save(source: Path, vocal: Path, target: Path, transcription: dict) -> dict:
     except BaseException:
         # Include the current file: a failed write may have saved only a prefix.
         for path in reversed(created):
-            path.unlink(missing_ok=True)
+            try:
+                path.unlink(missing_ok=True)
+            except OSError:
+                # Still clean up other outputs and preserve the write failure.
+                pass
         raise
     return {"source": str(source), "vocal_path": str(vocal),
             "lyrics_path": str(text), "captions_path": str(captions),
