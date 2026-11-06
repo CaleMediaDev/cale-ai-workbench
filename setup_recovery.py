@@ -199,8 +199,12 @@ def recover() -> bool:
     import msvcrt
 
     lock_path = STATE / "base-install-repair.lock"
-    lock_path.parent.mkdir(parents=True, exist_ok=True)
-    with lock_path.open("a+b") as lock:
+    try:
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+        lock = lock_path.open("a+b")
+    except OSError:
+        return False
+    with lock:
         lock.seek(0, 2)
         if lock.tell() == 0:
             lock.write(b"1")
