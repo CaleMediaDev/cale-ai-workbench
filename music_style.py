@@ -36,6 +36,19 @@ SPARSE_VOCAL_STYLE = re.compile(
     r"short (?:repetitive )?(?:vocal )?(?:hooks?|chants?)|vocal chops?|"
     r"vocal hooks?|very little (?:conventional )?singing)\b", re.I,
 )
+# These phrases explicitly constrain the performance, even when it has a
+# singer/rapper. Chops or one hook alone can also accompany complete verses.
+SHORT_VOCAL_PERFORMANCE = re.compile(
+    r"\b(?:minimal lyrics|nonsense vocals|short repetitive (?:vocal )?(?:hooks?|chants?)|"
+    r"very little (?:conventional )?singing)\b", re.I,
+)
+# A rejected section is not evidence that the current request wants verses.
+_VOCAL_SECTION = r"(?:(?:a|any)\s+)?(?:(?:full|long|short|sung|rapped)\s+)?(?:verses?|chorus(?:es)?)"
+NEGATED_VOCAL_SECTIONS = re.compile(
+    rf"\b(?:{NEGATION}|never|must not|shall not|should not|do not|don't)\s+"
+    rf"(?:(?:include|add|sing|rap|write|perform|use|have)\s+)?{_VOCAL_SECTION}"
+    rf"(?:\s*(?:,|/|\band\b|\bor\b)\s*{_VOCAL_SECTION})*\b", re.I,
+)
 LEAD_VOCALS = re.compile(
     r"\b(?:lead vocals?|sung verses?|singing|singer|rap|rapping|rapper|rapped)\b", re.I,
 )
@@ -86,8 +99,20 @@ def requested_bpm(prompt: str) -> int | None:
 
 
 def sparse_vocal_style(prompt: str) -> bool:
-    """Identify songs whose voices are short hooks rather than full verses."""
-    return bool(SPARSE_VOCAL_STYLE.search(prompt))
+    """Choose short-performance guidance without cancelling a requested lead.
+
+    Generic chops/hooks can accompany verses. Explicitly minimal performance
+    stays sparse; only the cleaned current request controls this decision.
+    """
+    request, _, _ = _clean_negations(prompt.split("Past user feedback", 1)[0])
+    # Plain short hooks are also a performance limit, unless actual verses
+    # or a chorus are requested alongside them. One hook can accompany verses.
+    short_hooks = re.search(r"\bshort (?:vocal )?(?:hooks?|chants?)\b", request, re.I)
+    sections = NEGATED_VOCAL_SECTIONS.sub("", request)
+    has_sections = re.search(r"\b(?:verses?|chorus(?:es)?)\b", sections, re.I)
+    return bool(SHORT_VOCAL_PERFORMANCE.search(request) or
+                (short_hooks and not has_sections) or
+                (SPARSE_VOCAL_STYLE.search(request) and not LEAD_VOCALS.search(request)))
 
 
 def requires_sustained_vocals(prompt: str, lyrics: str = "",
@@ -158,7 +183,7 @@ def enhance(prompt: str, instrumental: bool = False) -> str:
     # Chops can accompany a requested lead; they do not cancel that lead.
     # Inspect only the cleaned current request, not exclusions or old feedback.
     current = cleaned.split("Past user feedback", 1)[0]
-    sparse = sparse_vocal_style(current) and not re.search(r"\blead\s+vocals?\b", current, re.I)
+    sparse = sparse_vocal_style(current)
     if sustained and intent == "female":
         cue = ("Distinct short female vocal hooks and chopped phrases between instrumental drops"
                if sparse else

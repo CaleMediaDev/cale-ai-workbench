@@ -478,3 +478,82 @@ def test_lead_cue_from_old_feedback_does_not_override_current_chopped_texture():
     assert caption.startswith("Sparse chopped vocal syllables")
     assert "clear sung verses and chorus" not in caption
     assert not music_style.requires_sustained_vocals(caption)
+
+
+
+def test_requested_singer_and_verses_keep_chops_as_accompanying_texture():
+    for gender in ("female", "male"):
+        for lead in ("rapper", "singer", "sung verses", "rapped verses"):
+            for texture in ("vocal chops", "vocal hooks"):
+                request = f"Heavy dubstep with {texture} and {gender} {lead}"
+                assert not music_style.sparse_vocal_style(request)
+                assert music_style.requires_sustained_vocals(request)
+                caption = music_style.enhance(request)
+                assert f"{gender} lead vocals throughout" in caption
+                assert f"short {gender} vocal hooks" not in caption
+                assert texture in caption
+                assert music_style.enhance(caption) == caption
+
+
+def test_explicit_short_performance_keeps_singer_and_sparse_audibility_route():
+    for gender in ("female", "male"):
+        for role in ("singer", "rapper", "lead vocals"):
+            for limit in ("minimal lyrics", "very little conventional singing",
+                          "short repetitive vocal hooks"):
+                request = f"Heavy dubstep with {gender} {role}, {limit}, and instrumental drops"
+                assert music_style.sparse_vocal_style(request)
+                # This legacy gate also enables lyric/audibility checking;
+                # the shared sparse helper selects the shorter policy there.
+                assert music_style.requires_sustained_vocals(request)
+                caption = music_style.enhance(request)
+                assert f"short {gender} vocal hooks" in caption
+                assert "clear sung verses and chorus" not in caption
+                assert music_style.sparse_vocal_style(caption)
+                assert music_style.requires_sustained_vocals(caption)
+                assert music_style.enhance(caption) == caption
+
+
+def test_one_short_hook_does_not_shorten_requested_verses():
+    for gender, role in (("male", "rapper"), ("female", "singer")):
+        request = f"{gender} {role} with two verses and a short vocal hook"
+        assert not music_style.sparse_vocal_style(request)
+        assert music_style.requires_sustained_vocals(request)
+        assert f"{gender} lead vocals throughout" in music_style.enhance(request)
+
+
+def test_current_performance_length_ignores_past_short_or_full_feedback():
+    for request, old, sparse in (
+        ("Female singer with vocal chops and sung verses", "Use minimal lyrics and short repetitive hooks", False),
+        ("Female singing voice with very little conventional singing", "Use full lead vocals and sung verses", True),
+    ):
+        feedback = "\nPast user feedback: " + old
+        assert music_style.sparse_vocal_style(request + feedback) is sparse
+        expected = music_style.enhance(request)
+        assert music_style.enhance(request + feedback) == expected + feedback
+        assert music_style.enhance(expected + feedback) == expected + feedback
+
+
+
+def test_short_hooks_preserve_sparse_performance_unless_verses_are_requested():
+    for gender, role in (("female", "singing voice"), ("male", "rapper")):
+        for hooks in ("short vocal hooks", "short chants"):
+            request = f"{gender} {role} with {hooks} and massive instrumental drops"
+            assert music_style.sparse_vocal_style(request)
+            assert music_style.requires_sustained_vocals(request)
+            caption = music_style.enhance(request)
+            assert f"short {gender} vocal hooks" in caption
+            assert "clear sung verses and chorus" not in caption
+            assert music_style.enhance(caption) == caption
+            for excluded in ("no verses or chorus", "without any verses", "do not sing verses",
+                             "never include a chorus"):
+                limited = request + ", " + excluded
+                assert music_style.sparse_vocal_style(limited)
+                assert f"short {gender} vocal hooks" in music_style.enhance(limited)
+            for sections in ("two verses", "a chorus", "no verses, but add a chorus"):
+                full = request + ", " + sections
+                assert not music_style.sparse_vocal_style(full)
+                assert music_style.requires_sustained_vocals(full)
+                full_caption = music_style.enhance(full)
+                assert f"{gender} lead vocals throughout" in full_caption
+                assert f"short {gender} vocal hooks" not in full_caption
+                assert music_style.enhance(full_caption) == full_caption
