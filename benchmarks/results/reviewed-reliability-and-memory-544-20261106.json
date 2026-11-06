@@ -1,0 +1,704 @@
+{
+  "release": "0.5.544",
+  "reviewed_source": "7bb9f16364ef8b233aa7ba0c9dfc6a3e96cea542",
+  "review": {
+    "base": "db155f31437d91817227151155642335d79f7e60",
+    "state": "merged_verified",
+    "cutoff": 919,
+    "proposals": [
+      {
+        "number": 910,
+        "state": "open",
+        "draft": true,
+        "head": "fefa7a209cece0e8afb52d043d233bfbd7c4d575",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/910",
+        "branch": "cale-donation-40404870d80f4827",
+        "original_reviewed_head": "fefa7a209cece0e8afb52d043d233bfbd7c4d575",
+        "disposition": "accept exacthead",
+        "reason": "Bare positive numeric evidence no longer matches a directly signed negative number; source/report provenance remains unchanged.",
+        "prior_baseline_head_evidence": "../review-pr-910-919-evidence/verdicts.json",
+        "headRefOid": "fefa7a209cece0e8afb52d043d233bfbd7c4d575"
+      },
+      {
+        "number": 912,
+        "state": "open",
+        "draft": true,
+        "head": "c7a6da3714481741f6ed8d17fb8c56b6848e7f64",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/912",
+        "branch": "cale-donation-4de1b706f41b4091",
+        "original_reviewed_head": "c7a6da3714481741f6ed8d17fb8c56b6848e7f64",
+        "disposition": "accept exacthead",
+        "reason": "A form element owns its own DOM form metadata even when an input shadows its form named property.",
+        "prior_baseline_head_evidence": "../review-pr-910-919-evidence/verdicts.json",
+        "headRefOid": "c7a6da3714481741f6ed8d17fb8c56b6848e7f64"
+      },
+      {
+        "number": 913,
+        "state": "open",
+        "draft": true,
+        "head": "6bb722a53daf32fc27ec04f74c978b7d6df56ab5",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/913",
+        "branch": "cale-donation-a76b155eb9694b77",
+        "original_reviewed_head": "6bb722a53daf32fc27ec04f74c978b7d6df56ab5",
+        "disposition": "accept exacthead",
+        "reason": "PCM WAV block alignment must match channel\u00d7sample-byte frame size before publishing audio.",
+        "prior_baseline_head_evidence": "../review-pr-910-919-evidence/verdicts.json",
+        "headRefOid": "6bb722a53daf32fc27ec04f74c978b7d6df56ab5"
+      },
+      {
+        "number": 914,
+        "state": "open",
+        "draft": true,
+        "head": "15ba132fc3b405696b9ceba09eb8a95a70256a64",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/914",
+        "branch": "cale-donation-66a13271e51f4e86",
+        "original_reviewed_head": "15ba132fc3b405696b9ceba09eb8a95a70256a64",
+        "disposition": "accept exacthead",
+        "reason": "Deep control JSON parser recursion defers diagnostics as unknown instead of escaping a safe boundary.",
+        "prior_baseline_head_evidence": "../review-pr-910-919-evidence/verdicts.json",
+        "headRefOid": "15ba132fc3b405696b9ceba09eb8a95a70256a64"
+      },
+      {
+        "number": 915,
+        "state": "open",
+        "draft": true,
+        "head": "c09390cb56b43bfd8aebc8b906684ba7015899a1",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/915",
+        "branch": "cale-donation-bf1a2040ba37482d",
+        "original_reviewed_head": "74791cc0437c64c625a32ef08c0fccbd9a73af4a",
+        "disposition": "accept; corrected FF head",
+        "reason": "Accept only paired helper: retire stale alias identities and conservatively evict unprovable late cleanup identities without touching raw source files.",
+        "prior_baseline_head_evidence": "../review-pr-910-919-evidence/verdicts.json",
+        "headRefOid": "c09390cb56b43bfd8aebc8b906684ba7015899a1"
+      },
+      {
+        "number": 916,
+        "state": "open",
+        "draft": true,
+        "head": "b07fd4374ce4da412a894ff406c6d5239620326a",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/916",
+        "branch": "cale-donation-90689528083c4842",
+        "original_reviewed_head": "648ae56c3a91bb4fd583cdbb168c18fd254a940f",
+        "disposition": "accept; corrected FF head",
+        "reason": "Accept only paired canonical payload: strict checked_model rejects nonfinite metrics before publication while tuple ownership is canonicalized to its unchanged JSON list representation.",
+        "prior_baseline_head_evidence": "../review-pr-910-919-evidence/verdicts.json",
+        "headRefOid": "b07fd4374ce4da412a894ff406c6d5239620326a"
+      },
+      {
+        "number": 917,
+        "state": "open",
+        "draft": true,
+        "head": "df2c35089d8332fbce8f62d81592434734455d18",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/917",
+        "branch": "cale-donation-5e57d02a54b246e2",
+        "original_reviewed_head": "df2c35089d8332fbce8f62d81592434734455d18",
+        "disposition": "accept exacthead",
+        "reason": "Permission-denied parent metadata is preserved and other independent managed skills still synchronize.",
+        "prior_baseline_head_evidence": "../review-pr-910-919-evidence/verdicts.json",
+        "headRefOid": "df2c35089d8332fbce8f62d81592434734455d18"
+      },
+      {
+        "number": 918,
+        "state": "open",
+        "draft": true,
+        "head": "6897c245ac1dadc9e68bc7ccc239fd45c3f7689b",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/918",
+        "branch": "cale-donation-facf8978370946a9",
+        "original_reviewed_head": "6897c245ac1dadc9e68bc7ccc239fd45c3f7689b",
+        "disposition": "accept exacthead",
+        "reason": "Explicit resume task phrases become bounded controls, with wake requirement/fullmatch preserved.",
+        "prior_baseline_head_evidence": "../review-pr-910-919-evidence/verdicts.json",
+        "headRefOid": "6897c245ac1dadc9e68bc7ccc239fd45c3f7689b"
+      },
+      {
+        "number": 919,
+        "state": "open",
+        "draft": true,
+        "head": "4ec5509bfccbc0ae18c0e206ce037f5656ab4dc9",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/919",
+        "branch": "cale-donation-fef09a36f86a4184",
+        "original_reviewed_head": "4ec5509bfccbc0ae18c0e206ce037f5656ab4dc9",
+        "disposition": "accept exacthead",
+        "reason": "Duplicate backend tool names fail bounded discovery rather than overwriting schema mappings.",
+        "prior_baseline_head_evidence": "../review-pr-910-919-evidence/verdicts.json",
+        "headRefOid": "4ec5509bfccbc0ae18c0e206ce037f5656ab4dc9"
+      }
+    ],
+    "paths": [
+      "Validation/test_document_check.py",
+      "Validation/test_music_edit.py",
+      "Validation/test_native_browser.py",
+      "Validation/test_routing_memory.py",
+      "Validation/test_self_diagnostics.py",
+      "Validation/test_skill_catalog.py",
+      "Validation/test_table_ml.py",
+      "Validation/test_toolbox_mcp.py",
+      "Validation/test_voice_assistant.py",
+      "document_check.py",
+      "music_edit.py",
+      "native_browser.py",
+      "project_memory.py",
+      "self_diagnostics.py",
+      "skill_catalog.py",
+      "table_ml.py",
+      "toolbox_mcp.py",
+      "voice_assistant.py"
+    ],
+    "bound_paths": [
+      "Validation/test_document_check.py",
+      "Validation/test_music_edit.py",
+      "Validation/test_native_browser.py",
+      "Validation/test_project_memory.py",
+      "Validation/test_routing_memory.py",
+      "Validation/test_self_diagnostics.py",
+      "Validation/test_skill_catalog.py",
+      "Validation/test_table_ml.py",
+      "Validation/test_toolbox_mcp.py",
+      "Validation/test_voice_assistant.py",
+      "document_check.py",
+      "music_edit.py",
+      "native_browser.py",
+      "project_memory.py",
+      "self_diagnostics.py",
+      "skill_catalog.py",
+      "table_ml.py",
+      "toolbox_mcp.py",
+      "voice_assistant.py"
+    ],
+    "modules": [
+      "Validation/test_document_check.py",
+      "Validation/test_music_edit.py",
+      "Validation/test_native_browser.py",
+      "Validation/test_project_memory.py",
+      "Validation/test_routing_memory.py",
+      "Validation/test_self_diagnostics.py",
+      "Validation/test_skill_catalog.py",
+      "Validation/test_table_ml.py",
+      "Validation/test_toolbox_mcp.py",
+      "Validation/test_voice_assistant.py"
+    ],
+    "supplemental_nodes": [],
+    "rejected": {
+      "911": "Actual concurrent replacement deletion; closed exact head; separate maintainer543 fix shipped."
+    },
+    "qualification_receipt": "C:\\Users\\tahoe\\Documents\\Codex\\2026-10-31\\can\\outputs\\review-pr-910-919-on-543-evidence\\receipt.json",
+    "tested_blob_ids": {
+      "Validation/test_document_check.py": "97c3731969a70b70f1ffbe0e44963b99827a1f05",
+      "Validation/test_music_edit.py": "760f9cbd1d0d689fbed0078ad15df0143e11c8fa",
+      "Validation/test_native_browser.py": "afc6d6e7199534c080bde91bf7707460c3394105",
+      "Validation/test_project_memory.py": "5effc291643f26ca50ad670cbc93ec29bd679b2f",
+      "Validation/test_routing_memory.py": "43b7f7400f5d576a6fea3ae776075a038e6765c4",
+      "Validation/test_self_diagnostics.py": "a59303cbcc599cb91b38c3f0eaf9d145bf789650",
+      "Validation/test_skill_catalog.py": "8d20edc087016ea7bfb4fbb28100cf93fa03721b",
+      "Validation/test_table_ml.py": "6258d698f8ca502fb3c00dc6b84e4ad3905528f0",
+      "Validation/test_toolbox_mcp.py": "ea2d9b1dca30144a48f6c8b27d11ad77a9d81a4f",
+      "Validation/test_voice_assistant.py": "98d31785082ba0b7f4e8fd6f5f84219eb95c633f",
+      "document_check.py": "2df4e40cd01ef8a584b4e2c60ddf503c28e476d3",
+      "music_edit.py": "c72d1b9dae76c190abf2fe4541ebd3851d51cad9",
+      "native_browser.py": "17cf0dc442119c9a8d79f1ad41180260ca509943",
+      "project_memory.py": "2c89ee96b374064215b9aa73d9798e5681bd9e3c",
+      "self_diagnostics.py": "f861557adda0d38557dce082b7b1ee0d42e54afe",
+      "skill_catalog.py": "e8f1358d8f215e4dbf32f1d73f1fc0bc56479b78",
+      "table_ml.py": "102e79f07c9e3d683ea5596588e468be4f6a97df",
+      "toolbox_mcp.py": "9702fe2872b688a5a636db277b2909656c07f7ee",
+      "voice_assistant.py": "62f0639ce155757aad8b093212ea037c4f201387"
+    },
+    "tested_stash": "dd01b644bdde9ce8a1f253af95501cdaab4596cc",
+    "merged": [
+      {
+        "headRefOid": "fefa7a209cece0e8afb52d043d233bfbd7c4d575",
+        "isDraft": false,
+        "labels": [],
+        "mergeCommit": {
+          "oid": "53c413bfc7fc629e626c5cc0c94dbde866a9aaaf"
+        },
+        "mergedAt": "2026-11-06T06:33:57Z",
+        "number": 910,
+        "state": "MERGED",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/910"
+      },
+      {
+        "headRefOid": "c7a6da3714481741f6ed8d17fb8c56b6848e7f64",
+        "isDraft": false,
+        "labels": [],
+        "mergeCommit": {
+          "oid": "1ffdafea5d071400325395fc51380888bb19893d"
+        },
+        "mergedAt": "2026-11-06T06:34:02Z",
+        "number": 912,
+        "state": "MERGED",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/912"
+      },
+      {
+        "headRefOid": "6bb722a53daf32fc27ec04f74c978b7d6df56ab5",
+        "isDraft": false,
+        "labels": [],
+        "mergeCommit": {
+          "oid": "1a0be22e3b5d73cbeb5f45a0ece44403714ac80a"
+        },
+        "mergedAt": "2026-11-06T06:34:07Z",
+        "number": 913,
+        "state": "MERGED",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/913"
+      },
+      {
+        "headRefOid": "15ba132fc3b405696b9ceba09eb8a95a70256a64",
+        "isDraft": false,
+        "labels": [],
+        "mergeCommit": {
+          "oid": "4ae1794bf3e9578815b04ea8de0020386161898f"
+        },
+        "mergedAt": "2026-11-06T06:34:12Z",
+        "number": 914,
+        "state": "MERGED",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/914"
+      },
+      {
+        "headRefOid": "c09390cb56b43bfd8aebc8b906684ba7015899a1",
+        "isDraft": false,
+        "labels": [],
+        "mergeCommit": {
+          "oid": "aa6ad2f5123fa1c22bb9bded902174de34695ed4"
+        },
+        "mergedAt": "2026-11-06T06:34:17Z",
+        "number": 915,
+        "state": "MERGED",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/915"
+      },
+      {
+        "headRefOid": "b07fd4374ce4da412a894ff406c6d5239620326a",
+        "isDraft": false,
+        "labels": [],
+        "mergeCommit": {
+          "oid": "7943c72908d14f0ccb87543170268e264183fcac"
+        },
+        "mergedAt": "2026-11-06T06:34:22Z",
+        "number": 916,
+        "state": "MERGED",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/916"
+      },
+      {
+        "headRefOid": "df2c35089d8332fbce8f62d81592434734455d18",
+        "isDraft": false,
+        "labels": [],
+        "mergeCommit": {
+          "oid": "73953d2056c89d559476ec5635df1c9522e34f06"
+        },
+        "mergedAt": "2026-11-06T06:34:27Z",
+        "number": 917,
+        "state": "MERGED",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/917"
+      },
+      {
+        "headRefOid": "6897c245ac1dadc9e68bc7ccc239fd45c3f7689b",
+        "isDraft": false,
+        "labels": [],
+        "mergeCommit": {
+          "oid": "9b393dbaa198abdbf5a4c54415c50f56081f9d26"
+        },
+        "mergedAt": "2026-11-06T06:34:32Z",
+        "number": 918,
+        "state": "MERGED",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/918"
+      },
+      {
+        "headRefOid": "4ec5509bfccbc0ae18c0e206ce037f5656ab4dc9",
+        "isDraft": false,
+        "labels": [],
+        "mergeCommit": {
+          "oid": "7bb9f16364ef8b233aa7ba0c9dfc6a3e96cea542"
+        },
+        "mergedAt": "2026-11-06T06:34:37Z",
+        "number": 919,
+        "state": "MERGED",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/919"
+      }
+    ],
+    "validation": {
+      "exit_code": 0,
+      "source_bytes_unchanged": true,
+      "modules": [
+        "Validation/test_document_check.py",
+        "Validation/test_music_edit.py",
+        "Validation/test_native_browser.py",
+        "Validation/test_project_memory.py",
+        "Validation/test_routing_memory.py",
+        "Validation/test_self_diagnostics.py",
+        "Validation/test_skill_catalog.py",
+        "Validation/test_table_ml.py",
+        "Validation/test_toolbox_mcp.py",
+        "Validation/test_voice_assistant.py"
+      ],
+      "supplemental_nodes": [],
+      "log_tail": "reative\\\\frontend-ui-engineering\\\\SKILL.md'\nSKIPPED [1] Validation\\test_skill_catalog.py:137: Symlinks unavailable: [WinError 1314] A required privilege is not held by the client: 'C:\\\\Users\\\\tahoe\\\\AppData\\\\Local\\\\Temp\\\\tmpkpit8j1b\\\\private' -> 'C:\\\\Users\\\\tahoe\\\\AppData\\\\Local\\\\Temp\\\\tmpkpit8j1b\\\\data\\\\skills\\\\creative\\\\frontend-ui-engineering'\nSKIPPED [1] Validation\\test_skill_catalog.py:56: Symlinks unavailable: [WinError 1314] A required privilege is not held by the client: 'C:\\\\Users\\\\tahoe\\\\AppData\\\\Local\\\\Temp\\\\tmpbzr_bv9r\\\\external-skills' -> 'C:\\\\Users\\\\tahoe\\\\AppData\\\\Local\\\\Temp\\\\tmpbzr_bv9r\\\\data\\\\skills'\nSKIPPED [1] Validation\\test_skill_catalog.py:343: Symlinks unavailable: [WinError 1314] A required privilege is not held by the client: 'C:\\\\Users\\\\tahoe\\\\AppData\\\\Local\\\\Temp\\\\tmp9d87ozu9\\\\external.md' -> 'C:\\\\Users\\\\tahoe\\\\AppData\\\\Local\\\\Temp\\\\tmp9d87ozu9\\\\vendor\\\\agent-skills\\\\frontend-ui-engineering\\\\SKILL.md'\nSKIPPED [1] Validation\\test_skill_catalog.py:231: Symlinks unavailable: [WinError 1314] A required privilege is not held by the client: 'C:\\\\Users\\\\tahoe\\\\AppData\\\\Local\\\\Temp\\\\tmpy5swd_24\\\\external-bundle' -> 'C:\\\\Users\\\\tahoe\\\\AppData\\\\Local\\\\Temp\\\\tmpy5swd_24\\\\vendor\\\\agent-skills'\nSKIPPED [1] Validation\\test_skill_catalog.py:316: Symlinks unavailable: [WinError 1314] A required privilege is not held by the client: 'C:\\\\Users\\\\tahoe\\\\AppData\\\\Local\\\\Temp\\\\tmpcagchh94\\\\external-reference.md' -> 'C:\\\\Users\\\\tahoe\\\\AppData\\\\Local\\\\Temp\\\\tmpcagchh94\\\\vendor\\\\agent-skills\\\\references\\\\accessibility-checklist.md'\nSKIPPED [1] Validation\\test_skill_catalog.py:287: Symlinks unavailable: [WinError 1314] A required privilege is not held by the client: 'C:\\\\Users\\\\tahoe\\\\AppData\\\\Local\\\\Temp\\\\tmpza2z2wr8\\\\external-references' -> 'C:\\\\Users\\\\tahoe\\\\AppData\\\\Local\\\\Temp\\\\tmpza2z2wr8\\\\vendor\\\\agent-skills\\\\references'\nSKIPPED [1] Validation\\test_skill_catalog.py:255: Symlinks unavailable: [WinError 1314] A required privilege is not held by the client: 'C:\\\\Users\\\\tahoe\\\\AppData\\\\Local\\\\Temp\\\\tmpy2rc7wo4\\\\external-skill' -> 'C:\\\\Users\\\\tahoe\\\\AppData\\\\Local\\\\Temp\\\\tmpy2rc7wo4\\\\vendor\\\\agent-skills\\\\frontend-ui-engineering'\nSKIPPED [1] Validation\\test_skill_catalog.py:207: Symlinks unavailable: [WinError 1314] A required privilege is not held by the client: 'C:\\\\Users\\\\tahoe\\\\AppData\\\\Local\\\\Temp\\\\tmp8ies8bvs\\\\external-vendor' -> 'C:\\\\Users\\\\tahoe\\\\AppData\\\\Local\\\\Temp\\\\tmp8ies8bvs\\\\vendor'\nSKIPPED [1] Validation\\test_toolbox_mcp.py:1696: Symlinks unavailable: [WinError 1314] A required privilege is not held by the client: 'C:\\\\Users\\\\tahoe\\\\Documents\\\\Codex\\\\2026-10-31\\\\can\\\\outputs\\\\review-pr-910-919-on-543-evidence\\\\pytest-combined-543\\\\test_game_libraries_reject_red0\\\\outside' -> 'C:\\\\Users\\\\tahoe\\\\Documents\\\\Codex\\\\2026-10-31\\\\can\\\\outputs\\\\review-pr-910-919-on-543-evidence\\\\pytest-combined-543\\\\test_game_libraries_reject_red0\\\\registered-project\\\\vendor'\n490 passed, 19 skipped, 2 warnings, 53 subtests passed in 173.50s (0:02:53)\n",
+      "sha256": {
+        "Validation/test_document_check.py": "4c9777554a1c01d0ba5444c46512f409598b95cc86d2841c122fc04b65f3e3d4",
+        "Validation/test_music_edit.py": "0fff5e82b86f1b9b53eb524defc58deeec73982bfd325975cec038501e39dd8d",
+        "Validation/test_native_browser.py": "c1a713628512257e01f4821239c44e5e277966b93441564422bc55463feec282",
+        "Validation/test_routing_memory.py": "f8ce712f2c8803fafdfd6987fd1c8ec29e95ba7b57e1f345e25996bf63db0f30",
+        "Validation/test_self_diagnostics.py": "58446240012dc2b702e9b2a97341e653851c9e8416155b130133d1dc950f1439",
+        "Validation/test_skill_catalog.py": "b313f079755fd953f962bd1c748e7806261278145cbbbf8a75d5645f95fb5660",
+        "Validation/test_table_ml.py": "5c489babf896396cfd95765aba11457606cf58085dd5f1bdb3ed5137bb0e5cf4",
+        "Validation/test_toolbox_mcp.py": "7bdfeae62750939b79b074d7e418117eb69f81bec7e424a7a6aa792c4b11bcf6",
+        "Validation/test_voice_assistant.py": "be27b0d218fcabc771afc3676c0568410685b49c19c4b263d1389788475b1dda",
+        "document_check.py": "01996468d90c663aeb3601eb2d551508ed82585a8b586f68e40b2fa6826fcbe1",
+        "music_edit.py": "8aaecb867f394e98d784c844fcb707452d6ba198c54baa41330af80baee314eb",
+        "native_browser.py": "f87c786b203755a52f98e0874ce16929c07dca7ec50da33513f4fb3c549ab673",
+        "project_memory.py": "48604bb05756ab9fe64be1e2abf3594e9502c9abed1e90f05d5a4207ed6102dd",
+        "self_diagnostics.py": "17253c207d9ad03e9b14a6fb115b1838aad9f5f10f4b984c9529357e589b03aa",
+        "skill_catalog.py": "4d3d827822116a2bc9dddbb91277b3b9c3a0c57f36d2c88e56089bcf634e9c8e",
+        "table_ml.py": "6159aafead8f5a6f507670cd55d395405e88d689a60629d3f58ff93d34e18af9",
+        "toolbox_mcp.py": "19291247ddd53dbd8e234e9e075723d418e1c1a9dcfbc22ea626085ac5043e28",
+        "voice_assistant.py": "7c219f7ef6a04932347f07880ed3da79f33bf5db0a88866a1e9901ebb71cdddf",
+        "Validation/test_project_memory.py": "0952525304a444ed8e4fc6afb045084255fa4184573cd9844785424d2a7923aa"
+      },
+      "qualification_source": "48bd3c66c7936bc54a38494ca791f3a461979bef",
+      "qualification_log_sha256": "397108c7bf5b17c7b2fe0e935905ac98917fea69606ddb59a605ca442b34402a"
+    },
+    "merged_source": "7bb9f16364ef8b233aa7ba0c9dfc6a3e96cea542",
+    "merged_bytes_match_tested": true,
+    "observed_at": 1793946883.4501915,
+    "all_accepted_labels_verified": true
+  },
+  "validation": {
+    "affected_modules": {
+      "exit_code": 0,
+      "source_bytes_unchanged": true,
+      "modules": [
+        "Validation/test_document_check.py",
+        "Validation/test_music_edit.py",
+        "Validation/test_native_browser.py",
+        "Validation/test_project_memory.py",
+        "Validation/test_routing_memory.py",
+        "Validation/test_self_diagnostics.py",
+        "Validation/test_skill_catalog.py",
+        "Validation/test_table_ml.py",
+        "Validation/test_toolbox_mcp.py",
+        "Validation/test_voice_assistant.py"
+      ],
+      "supplemental_nodes": [],
+      "log_tail": "reative\\\\frontend-ui-engineering\\\\SKILL.md'\nSKIPPED [1] Validation\\test_skill_catalog.py:137: Symlinks unavailable: [WinError 1314] A required privilege is not held by the client: 'C:\\\\Users\\\\tahoe\\\\AppData\\\\Local\\\\Temp\\\\tmpkpit8j1b\\\\private' -> 'C:\\\\Users\\\\tahoe\\\\AppData\\\\Local\\\\Temp\\\\tmpkpit8j1b\\\\data\\\\skills\\\\creative\\\\frontend-ui-engineering'\nSKIPPED [1] Validation\\test_skill_catalog.py:56: Symlinks unavailable: [WinError 1314] A required privilege is not held by the client: 'C:\\\\Users\\\\tahoe\\\\AppData\\\\Local\\\\Temp\\\\tmpbzr_bv9r\\\\external-skills' -> 'C:\\\\Users\\\\tahoe\\\\AppData\\\\Local\\\\Temp\\\\tmpbzr_bv9r\\\\data\\\\skills'\nSKIPPED [1] Validation\\test_skill_catalog.py:343: Symlinks unavailable: [WinError 1314] A required privilege is not held by the client: 'C:\\\\Users\\\\tahoe\\\\AppData\\\\Local\\\\Temp\\\\tmp9d87ozu9\\\\external.md' -> 'C:\\\\Users\\\\tahoe\\\\AppData\\\\Local\\\\Temp\\\\tmp9d87ozu9\\\\vendor\\\\agent-skills\\\\frontend-ui-engineering\\\\SKILL.md'\nSKIPPED [1] Validation\\test_skill_catalog.py:231: Symlinks unavailable: [WinError 1314] A required privilege is not held by the client: 'C:\\\\Users\\\\tahoe\\\\AppData\\\\Local\\\\Temp\\\\tmpy5swd_24\\\\external-bundle' -> 'C:\\\\Users\\\\tahoe\\\\AppData\\\\Local\\\\Temp\\\\tmpy5swd_24\\\\vendor\\\\agent-skills'\nSKIPPED [1] Validation\\test_skill_catalog.py:316: Symlinks unavailable: [WinError 1314] A required privilege is not held by the client: 'C:\\\\Users\\\\tahoe\\\\AppData\\\\Local\\\\Temp\\\\tmpcagchh94\\\\external-reference.md' -> 'C:\\\\Users\\\\tahoe\\\\AppData\\\\Local\\\\Temp\\\\tmpcagchh94\\\\vendor\\\\agent-skills\\\\references\\\\accessibility-checklist.md'\nSKIPPED [1] Validation\\test_skill_catalog.py:287: Symlinks unavailable: [WinError 1314] A required privilege is not held by the client: 'C:\\\\Users\\\\tahoe\\\\AppData\\\\Local\\\\Temp\\\\tmpza2z2wr8\\\\external-references' -> 'C:\\\\Users\\\\tahoe\\\\AppData\\\\Local\\\\Temp\\\\tmpza2z2wr8\\\\vendor\\\\agent-skills\\\\references'\nSKIPPED [1] Validation\\test_skill_catalog.py:255: Symlinks unavailable: [WinError 1314] A required privilege is not held by the client: 'C:\\\\Users\\\\tahoe\\\\AppData\\\\Local\\\\Temp\\\\tmpy2rc7wo4\\\\external-skill' -> 'C:\\\\Users\\\\tahoe\\\\AppData\\\\Local\\\\Temp\\\\tmpy2rc7wo4\\\\vendor\\\\agent-skills\\\\frontend-ui-engineering'\nSKIPPED [1] Validation\\test_skill_catalog.py:207: Symlinks unavailable: [WinError 1314] A required privilege is not held by the client: 'C:\\\\Users\\\\tahoe\\\\AppData\\\\Local\\\\Temp\\\\tmp8ies8bvs\\\\external-vendor' -> 'C:\\\\Users\\\\tahoe\\\\AppData\\\\Local\\\\Temp\\\\tmp8ies8bvs\\\\vendor'\nSKIPPED [1] Validation\\test_toolbox_mcp.py:1696: Symlinks unavailable: [WinError 1314] A required privilege is not held by the client: 'C:\\\\Users\\\\tahoe\\\\Documents\\\\Codex\\\\2026-10-31\\\\can\\\\outputs\\\\review-pr-910-919-on-543-evidence\\\\pytest-combined-543\\\\test_game_libraries_reject_red0\\\\outside' -> 'C:\\\\Users\\\\tahoe\\\\Documents\\\\Codex\\\\2026-10-31\\\\can\\\\outputs\\\\review-pr-910-919-on-543-evidence\\\\pytest-combined-543\\\\test_game_libraries_reject_red0\\\\registered-project\\\\vendor'\n490 passed, 19 skipped, 2 warnings, 53 subtests passed in 173.50s (0:02:53)\n",
+      "sha256": {
+        "Validation/test_document_check.py": "4c9777554a1c01d0ba5444c46512f409598b95cc86d2841c122fc04b65f3e3d4",
+        "Validation/test_music_edit.py": "0fff5e82b86f1b9b53eb524defc58deeec73982bfd325975cec038501e39dd8d",
+        "Validation/test_native_browser.py": "c1a713628512257e01f4821239c44e5e277966b93441564422bc55463feec282",
+        "Validation/test_routing_memory.py": "f8ce712f2c8803fafdfd6987fd1c8ec29e95ba7b57e1f345e25996bf63db0f30",
+        "Validation/test_self_diagnostics.py": "58446240012dc2b702e9b2a97341e653851c9e8416155b130133d1dc950f1439",
+        "Validation/test_skill_catalog.py": "b313f079755fd953f962bd1c748e7806261278145cbbbf8a75d5645f95fb5660",
+        "Validation/test_table_ml.py": "5c489babf896396cfd95765aba11457606cf58085dd5f1bdb3ed5137bb0e5cf4",
+        "Validation/test_toolbox_mcp.py": "7bdfeae62750939b79b074d7e418117eb69f81bec7e424a7a6aa792c4b11bcf6",
+        "Validation/test_voice_assistant.py": "be27b0d218fcabc771afc3676c0568410685b49c19c4b263d1389788475b1dda",
+        "document_check.py": "01996468d90c663aeb3601eb2d551508ed82585a8b586f68e40b2fa6826fcbe1",
+        "music_edit.py": "8aaecb867f394e98d784c844fcb707452d6ba198c54baa41330af80baee314eb",
+        "native_browser.py": "f87c786b203755a52f98e0874ce16929c07dca7ec50da33513f4fb3c549ab673",
+        "project_memory.py": "48604bb05756ab9fe64be1e2abf3594e9502c9abed1e90f05d5a4207ed6102dd",
+        "self_diagnostics.py": "17253c207d9ad03e9b14a6fb115b1838aad9f5f10f4b984c9529357e589b03aa",
+        "skill_catalog.py": "4d3d827822116a2bc9dddbb91277b3b9c3a0c57f36d2c88e56089bcf634e9c8e",
+        "table_ml.py": "6159aafead8f5a6f507670cd55d395405e88d689a60629d3f58ff93d34e18af9",
+        "toolbox_mcp.py": "19291247ddd53dbd8e234e9e075723d418e1c1a9dcfbc22ea626085ac5043e28",
+        "voice_assistant.py": "7c219f7ef6a04932347f07880ed3da79f33bf5db0a88866a1e9901ebb71cdddf",
+        "Validation/test_project_memory.py": "0952525304a444ed8e4fc6afb045084255fa4184573cd9844785424d2a7923aa"
+      },
+      "qualification_source": "48bd3c66c7936bc54a38494ca791f3a461979bef",
+      "qualification_log_sha256": "397108c7bf5b17c7b2fe0e935905ac98917fea69606ddb59a605ca442b34402a"
+    }
+  },
+  "sha256": {
+    "Validation/test_document_check.py": "4c9777554a1c01d0ba5444c46512f409598b95cc86d2841c122fc04b65f3e3d4",
+    "Validation/test_music_edit.py": "0fff5e82b86f1b9b53eb524defc58deeec73982bfd325975cec038501e39dd8d",
+    "Validation/test_native_browser.py": "c1a713628512257e01f4821239c44e5e277966b93441564422bc55463feec282",
+    "Validation/test_routing_memory.py": "f8ce712f2c8803fafdfd6987fd1c8ec29e95ba7b57e1f345e25996bf63db0f30",
+    "Validation/test_self_diagnostics.py": "58446240012dc2b702e9b2a97341e653851c9e8416155b130133d1dc950f1439",
+    "Validation/test_skill_catalog.py": "b313f079755fd953f962bd1c748e7806261278145cbbbf8a75d5645f95fb5660",
+    "Validation/test_table_ml.py": "5c489babf896396cfd95765aba11457606cf58085dd5f1bdb3ed5137bb0e5cf4",
+    "Validation/test_toolbox_mcp.py": "7bdfeae62750939b79b074d7e418117eb69f81bec7e424a7a6aa792c4b11bcf6",
+    "Validation/test_voice_assistant.py": "be27b0d218fcabc771afc3676c0568410685b49c19c4b263d1389788475b1dda",
+    "document_check.py": "01996468d90c663aeb3601eb2d551508ed82585a8b586f68e40b2fa6826fcbe1",
+    "music_edit.py": "8aaecb867f394e98d784c844fcb707452d6ba198c54baa41330af80baee314eb",
+    "native_browser.py": "f87c786b203755a52f98e0874ce16929c07dca7ec50da33513f4fb3c549ab673",
+    "project_memory.py": "48604bb05756ab9fe64be1e2abf3594e9502c9abed1e90f05d5a4207ed6102dd",
+    "self_diagnostics.py": "17253c207d9ad03e9b14a6fb115b1838aad9f5f10f4b984c9529357e589b03aa",
+    "skill_catalog.py": "4d3d827822116a2bc9dddbb91277b3b9c3a0c57f36d2c88e56089bcf634e9c8e",
+    "table_ml.py": "6159aafead8f5a6f507670cd55d395405e88d689a60629d3f58ff93d34e18af9",
+    "toolbox_mcp.py": "19291247ddd53dbd8e234e9e075723d418e1c1a9dcfbc22ea626085ac5043e28",
+    "voice_assistant.py": "7c219f7ef6a04932347f07880ed3da79f33bf5db0a88866a1e9901ebb71cdddf",
+    "Validation/test_project_memory.py": "0952525304a444ed8e4fc6afb045084255fa4184573cd9844785424d2a7923aa"
+  },
+  "qualified_candidate": {
+    "status": "QUALIFIED ISOLATED543 CANDIDATE; nine accepted PRs not merged/main not pushed; corrected915/916 FF pushed and unsafe911 closed as authorized",
+    "base": "db155f31437d91817227151155642335d79f7e60",
+    "candidate_commit": "48bd3c66c7936bc54a38494ca791f3a461979bef",
+    "branch": "review-910-919-combined-543",
+    "combined_patch": "combined-qualified.patch",
+    "combined_patch_sha256": "f66ca8153ff8ffff51d59975963e20245527e1354a00bb57d061057ef1e84c7d",
+    "rows": [
+      {
+        "number": 910,
+        "state": "open",
+        "draft": true,
+        "head": "fefa7a209cece0e8afb52d043d233bfbd7c4d575",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/910",
+        "branch": "cale-donation-40404870d80f4827",
+        "original_reviewed_head": "fefa7a209cece0e8afb52d043d233bfbd7c4d575",
+        "disposition": "accept exacthead",
+        "reason": "Bare positive numeric evidence no longer matches a directly signed negative number; source/report provenance remains unchanged.",
+        "prior_baseline_head_evidence": "../review-pr-910-919-evidence/verdicts.json"
+      },
+      {
+        "number": 912,
+        "state": "open",
+        "draft": true,
+        "head": "c7a6da3714481741f6ed8d17fb8c56b6848e7f64",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/912",
+        "branch": "cale-donation-4de1b706f41b4091",
+        "original_reviewed_head": "c7a6da3714481741f6ed8d17fb8c56b6848e7f64",
+        "disposition": "accept exacthead",
+        "reason": "A form element owns its own DOM form metadata even when an input shadows its form named property.",
+        "prior_baseline_head_evidence": "../review-pr-910-919-evidence/verdicts.json"
+      },
+      {
+        "number": 913,
+        "state": "open",
+        "draft": true,
+        "head": "6bb722a53daf32fc27ec04f74c978b7d6df56ab5",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/913",
+        "branch": "cale-donation-a76b155eb9694b77",
+        "original_reviewed_head": "6bb722a53daf32fc27ec04f74c978b7d6df56ab5",
+        "disposition": "accept exacthead",
+        "reason": "PCM WAV block alignment must match channel\u00d7sample-byte frame size before publishing audio.",
+        "prior_baseline_head_evidence": "../review-pr-910-919-evidence/verdicts.json"
+      },
+      {
+        "number": 914,
+        "state": "open",
+        "draft": true,
+        "head": "15ba132fc3b405696b9ceba09eb8a95a70256a64",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/914",
+        "branch": "cale-donation-66a13271e51f4e86",
+        "original_reviewed_head": "15ba132fc3b405696b9ceba09eb8a95a70256a64",
+        "disposition": "accept exacthead",
+        "reason": "Deep control JSON parser recursion defers diagnostics as unknown instead of escaping a safe boundary.",
+        "prior_baseline_head_evidence": "../review-pr-910-919-evidence/verdicts.json"
+      },
+      {
+        "number": 915,
+        "state": "open",
+        "draft": true,
+        "head": "c09390cb56b43bfd8aebc8b906684ba7015899a1",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/915",
+        "branch": "cale-donation-bf1a2040ba37482d",
+        "original_reviewed_head": "74791cc0437c64c625a32ef08c0fccbd9a73af4a",
+        "disposition": "accept; corrected FF head",
+        "reason": "Accept only paired helper: retire stale alias identities and conservatively evict unprovable late cleanup identities without touching raw source files.",
+        "prior_baseline_head_evidence": "../review-pr-910-919-evidence/verdicts.json"
+      },
+      {
+        "number": 916,
+        "state": "open",
+        "draft": true,
+        "head": "b07fd4374ce4da412a894ff406c6d5239620326a",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/916",
+        "branch": "cale-donation-90689528083c4842",
+        "original_reviewed_head": "648ae56c3a91bb4fd583cdbb168c18fd254a940f",
+        "disposition": "accept; corrected FF head",
+        "reason": "Accept only paired canonical payload: strict checked_model rejects nonfinite metrics before publication while tuple ownership is canonicalized to its unchanged JSON list representation.",
+        "prior_baseline_head_evidence": "../review-pr-910-919-evidence/verdicts.json"
+      },
+      {
+        "number": 917,
+        "state": "open",
+        "draft": true,
+        "head": "df2c35089d8332fbce8f62d81592434734455d18",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/917",
+        "branch": "cale-donation-5e57d02a54b246e2",
+        "original_reviewed_head": "df2c35089d8332fbce8f62d81592434734455d18",
+        "disposition": "accept exacthead",
+        "reason": "Permission-denied parent metadata is preserved and other independent managed skills still synchronize.",
+        "prior_baseline_head_evidence": "../review-pr-910-919-evidence/verdicts.json"
+      },
+      {
+        "number": 918,
+        "state": "open",
+        "draft": true,
+        "head": "6897c245ac1dadc9e68bc7ccc239fd45c3f7689b",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/918",
+        "branch": "cale-donation-facf8978370946a9",
+        "original_reviewed_head": "6897c245ac1dadc9e68bc7ccc239fd45c3f7689b",
+        "disposition": "accept exacthead",
+        "reason": "Explicit resume task phrases become bounded controls, with wake requirement/fullmatch preserved.",
+        "prior_baseline_head_evidence": "../review-pr-910-919-evidence/verdicts.json"
+      },
+      {
+        "number": 919,
+        "state": "open",
+        "draft": true,
+        "head": "4ec5509bfccbc0ae18c0e206ce037f5656ab4dc9",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/919",
+        "branch": "cale-donation-fef09a36f86a4184",
+        "original_reviewed_head": "4ec5509bfccbc0ae18c0e206ce037f5656ab4dc9",
+        "disposition": "accept exacthead",
+        "reason": "Duplicate backend tool names fail bounded discovery rather than overwriting schema mappings.",
+        "prior_baseline_head_evidence": "../review-pr-910-919-evidence/verdicts.json"
+      },
+      {
+        "number": 911,
+        "state": "closed",
+        "head": "a1ca60d7e0b34fb8e40fb259db8583861eeab41d",
+        "accepted": false,
+        "reason": "Reject: new empty-output failure enters existing unconditional cleanup and deletes a concurrent replacement. Real tiny FFmpeg/ownedFS baseline preserves bytes, head deletes them.",
+        "original_reviewed_head": "a1ca60d7e0b34fb8e40fb259db8583861eeab41d",
+        "disposition": "reject; closed exacthead",
+        "prior_baseline_head_evidence": "../review-pr-910-919-evidence/verdicts.json"
+      }
+    ],
+    "full_combined_qualification": {
+      "modules": [
+        "Validation/test_document_check.py",
+        "Validation/test_music_edit.py",
+        "Validation/test_native_browser.py",
+        "Validation/test_project_memory.py",
+        "Validation/test_routing_memory.py",
+        "Validation/test_self_diagnostics.py",
+        "Validation/test_skill_catalog.py",
+        "Validation/test_table_ml.py",
+        "Validation/test_toolbox_mcp.py",
+        "Validation/test_voice_assistant.py"
+      ],
+      "passed": 490,
+      "skipped": 19,
+      "subtests_passed": 53,
+      "warnings": 2,
+      "warning_reason": "Two expected NumPy overflow warnings in retained table model holdout overflow/retry test",
+      "pytest_elapsed_seconds": 173.5,
+      "process_elapsed_seconds": 174.4580897000269,
+      "exitcode": 0,
+      "log": "combined-543.log",
+      "log_sha256": "397108c7bf5b17c7b2fe0e935905ac98917fea69606ddb59a605ca442b34402a",
+      "skip_scope": "18 symlink privilege/environment skips +1 POSIX-file-lock skip. Actual owned-directory junction proof for915 is preserved separately in prior review; no claim these skipped file-symlink tests ran."
+    },
+    "source_bindings": {
+      "Validation/test_document_check.py": {
+        "raw_sha256": "4c9777554a1c01d0ba5444c46512f409598b95cc86d2841c122fc04b65f3e3d4",
+        "commit_blob_sha256": "deb442221c43a7839e00b91c1d1c3244d62f8e8c4b7be5c263375df99a95a19e",
+        "normalized_worktree_equals_blob": true
+      },
+      "Validation/test_music_edit.py": {
+        "raw_sha256": "0fff5e82b86f1b9b53eb524defc58deeec73982bfd325975cec038501e39dd8d",
+        "commit_blob_sha256": "d64e781f6d4e40fc08c5884e6c6ed87414540eaea080f01973933e3df2c79990",
+        "normalized_worktree_equals_blob": true
+      },
+      "Validation/test_native_browser.py": {
+        "raw_sha256": "c1a713628512257e01f4821239c44e5e277966b93441564422bc55463feec282",
+        "commit_blob_sha256": "b1a2e2865bc1dd0e1b8171137c13bf02b06add3c109dc159ccd92e37e403e855",
+        "normalized_worktree_equals_blob": true
+      },
+      "Validation/test_routing_memory.py": {
+        "raw_sha256": "f8ce712f2c8803fafdfd6987fd1c8ec29e95ba7b57e1f345e25996bf63db0f30",
+        "commit_blob_sha256": "ead021c2664131bd3d57ee4a3762e430bdf7f1ceaaf4d67f9758a8646c8e2dbf",
+        "normalized_worktree_equals_blob": true
+      },
+      "Validation/test_self_diagnostics.py": {
+        "raw_sha256": "58446240012dc2b702e9b2a97341e653851c9e8416155b130133d1dc950f1439",
+        "commit_blob_sha256": "4de95b711e01caf0eba171e8c79ef234645691f170e9ad4f65b1b838e6ff2488",
+        "normalized_worktree_equals_blob": true
+      },
+      "Validation/test_skill_catalog.py": {
+        "raw_sha256": "b313f079755fd953f962bd1c748e7806261278145cbbbf8a75d5645f95fb5660",
+        "commit_blob_sha256": "72e73ddd3d6f9f95af2f2104861f5dc6af312ae64da8add7e6ae7f1380a129e5",
+        "normalized_worktree_equals_blob": true
+      },
+      "Validation/test_table_ml.py": {
+        "raw_sha256": "5c489babf896396cfd95765aba11457606cf58085dd5f1bdb3ed5137bb0e5cf4",
+        "commit_blob_sha256": "673b2f0c4ef77900a90ac86c2afe4231b6e88189a28502d5bc397c23ad00b8f1",
+        "normalized_worktree_equals_blob": true
+      },
+      "Validation/test_toolbox_mcp.py": {
+        "raw_sha256": "7bdfeae62750939b79b074d7e418117eb69f81bec7e424a7a6aa792c4b11bcf6",
+        "commit_blob_sha256": "5ea4aba344f70e0880841c88f9c83abe8abffb733172d83829f36cb7064f7487",
+        "normalized_worktree_equals_blob": true
+      },
+      "Validation/test_voice_assistant.py": {
+        "raw_sha256": "be27b0d218fcabc771afc3676c0568410685b49c19c4b263d1389788475b1dda",
+        "commit_blob_sha256": "c3af2a5dd8e3ee95579d0f592b00903f30705d0f35de112ce74a0e31b8f7005d",
+        "normalized_worktree_equals_blob": true
+      },
+      "document_check.py": {
+        "raw_sha256": "01996468d90c663aeb3601eb2d551508ed82585a8b586f68e40b2fa6826fcbe1",
+        "commit_blob_sha256": "5ae19146b43acb08a93dbe01d4d728d0c22dc03b1cc8586dffb85a78cf57705e",
+        "normalized_worktree_equals_blob": true
+      },
+      "music_edit.py": {
+        "raw_sha256": "8aaecb867f394e98d784c844fcb707452d6ba198c54baa41330af80baee314eb",
+        "commit_blob_sha256": "72970275d973f74f58f8905f99f1fefbe12c98a843125e34598dbeed810f792a",
+        "normalized_worktree_equals_blob": true
+      },
+      "native_browser.py": {
+        "raw_sha256": "f87c786b203755a52f98e0874ce16929c07dca7ec50da33513f4fb3c549ab673",
+        "commit_blob_sha256": "7ee1d8bcc8fbd0f3bfd2ebf0d109e7726394568e12d7ed49e22aa31a46551f9e",
+        "normalized_worktree_equals_blob": true
+      },
+      "project_memory.py": {
+        "raw_sha256": "48604bb05756ab9fe64be1e2abf3594e9502c9abed1e90f05d5a4207ed6102dd",
+        "commit_blob_sha256": "c014b78beb9304af6b1c8f6bb016f71fd2ac86edded9a785eb00670c229fc0ed",
+        "normalized_worktree_equals_blob": true
+      },
+      "self_diagnostics.py": {
+        "raw_sha256": "17253c207d9ad03e9b14a6fb115b1838aad9f5f10f4b984c9529357e589b03aa",
+        "commit_blob_sha256": "b2cd34569c51bf7ccb39d7870dd030d90fb558e87f6dee6caca24dd428fe1505",
+        "normalized_worktree_equals_blob": true
+      },
+      "skill_catalog.py": {
+        "raw_sha256": "4d3d827822116a2bc9dddbb91277b3b9c3a0c57f36d2c88e56089bcf634e9c8e",
+        "commit_blob_sha256": "a84af90e887c2d623c25d0b6e570796d4d31cc5d5a168ab7dc10f865bd4cf7b9",
+        "normalized_worktree_equals_blob": true
+      },
+      "table_ml.py": {
+        "raw_sha256": "6159aafead8f5a6f507670cd55d395405e88d689a60629d3f58ff93d34e18af9",
+        "commit_blob_sha256": "afdba128940c9c6f83e2226743593e4d4f86da085624fdad46efab5ad55540a4",
+        "normalized_worktree_equals_blob": true
+      },
+      "toolbox_mcp.py": {
+        "raw_sha256": "19291247ddd53dbd8e234e9e075723d418e1c1a9dcfbc22ea626085ac5043e28",
+        "commit_blob_sha256": "7be620df770b1ca00939528205548652e17abcbda6d1391ddb48d1c22a4a54e0",
+        "normalized_worktree_equals_blob": true
+      },
+      "voice_assistant.py": {
+        "raw_sha256": "7c219f7ef6a04932347f07880ed3da79f33bf5db0a88866a1e9901ebb71cdddf",
+        "commit_blob_sha256": "6fc7edae74737d844846e0a6994c3a7d8c85f6815c0a2bed7300fa37a5de55a8",
+        "normalized_worktree_equals_blob": true
+      },
+      "Validation/test_project_memory.py": {
+        "raw_sha256": "0952525304a444ed8e4fc6afb045084255fa4184573cd9844785424d2a7923aa",
+        "commit_blob_sha256": "c81eef17b46b4de88529273ef2e294ae68d7916d9abef798ef121bb06321ebce",
+        "normalized_worktree_equals_blob": true
+      }
+    },
+    "preserved_543": {
+      "video_edit_source_and_tests": true,
+      "install_files_manifest": true,
+      "runtime_file_count": 250,
+      "no_new_runtime_files": true
+    },
+    "remote_correction_method": "Original corrected542 commits were combined snapshots, not descendants of original PR. Derived narrow correction-only delta vs exact original patch applied to542, appended atop exact original PR head, verified affected normalized bytes exactly equal reviewed correction snapshot, guarded REST+lsremote originalhead then normal FF push without force. Original authored commit ancestry preserved.",
+    "remote_visibility_note": "915 immediate post-push REST briefly returned stale originalhead; assertion stopped before later actions. Preserved attempt1. Fresh REST+lsremote verified915. No re-push;916 and911 proceeded with fresh exact guards. Final nine heads independently rechecked.",
+    "remote_actions": "remote-actions.json",
+    "prior_qualification": {
+      "verdicts_path": "C:\\Users\\tahoe\\Documents\\Codex\\2026-10-31\\can\\outputs\\review-pr-910-919-evidence\\verdicts.json",
+      "verdicts_sha256": "dc195e527f7190ea2ffdffdd09917b2ad29f977090214a387367f03579e20750",
+      "915_916_corrected_commits_path": "C:\\Users\\tahoe\\Documents\\Codex\\2026-10-31\\can\\outputs\\review-pr-910-919-evidence\\correction-commits.json",
+      "corrected_commits_sha256": "3aa6be55c4fc405b8b93c676363884ba693922258be9243cdcae9aad9864a234"
+    },
+    "limits": [
+      "No PR ready/merge/main/release/install actions performed; all nine remain open drafts for parent exact-head integration.",
+      "Remote reads/checks are observations, not a cross-process transactional snapshot. Normal FF pushes preserve concurrent branch edits by refusing non-FF.",
+      "Original unsafe911 submitted regression remains rejected; public543 separate maintainer video fix retained exactly.",
+      "Source/identity and symlink/junction limits remain as documented in original915 review; no broad traversal-race safety claim.",
+      "Only own isolated checkout/TEMP fake services and synthetic browser/CPU tests; no user fixtures/SQLite/accounts/devices/models/live-service controls."
+    ]
+  },
+  "limits": [
+    "Ten related module suites, not general autonomous completion or full installed self-check.",
+    "Nineteen platform skips and two expected numerical-overflow warnings are retained.",
+    "Final-classification and whole-goal selector experimental fixes are excluded."
+  ]
+}
