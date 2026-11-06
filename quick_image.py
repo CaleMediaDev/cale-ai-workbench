@@ -108,7 +108,7 @@ def image_file_ok(path: str | Path) -> bool:
         with Image.open(source) as picture:
             picture.load()
         return True
-    except (OSError, ValueError, SyntaxError):
+    except (OSError, ValueError, SyntaxError, Image.DecompressionBombError):
         return False
 
 

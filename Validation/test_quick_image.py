@@ -325,6 +325,37 @@ def test_recovery_skips_non_object_job_records(tmp_path):
         assert json.loads(bad_path.read_text(encoding="utf-8")) == malformed
 
 
+def test_recovery_retries_oversized_png_without_aborting_other_jobs(tmp_path):
+    oversized_id = "6" * 32
+    other_id = "7" * 32
+    output = tmp_path / "oversized.png"
+    Image.new("RGB", (2, 2), "orange").save(output)
+    for job_id, target in ((oversized_id, output), (other_id, tmp_path / "other.png")):
+        quick_image._write_job(tmp_path, job_id, {
+            "job_id": job_id, "status": "working", "prompt": "a dog",
+            "output_path": str(target),
+        })
+    paths = [quick_image._job_path(tmp_path, job_id) for job_id in (oversized_id, other_id)]
+
+    # Four pixels exceed twice this limit, triggering DecompressionBombError.
+    with (patch.object(Image, "MAX_IMAGE_PIXELS", 1),
+          patch.object(Path, "glob", return_value=iter(paths)),
+          patch.object(quick_image, "_worker_running", return_value=False),
+          patch.object(quick_image, "_launch_job") as launch):
+        assert not quick_image.image_file_ok(output)
+        quick_image.recover_image_jobs(tmp_path)
+
+    assert launch.call_count == 2
+    assert [call.args for call in launch.call_args_list] == [
+        (tmp_path, oversized_id), (tmp_path, other_id),
+    ]
+    assert not output.exists()
+    for job_id in (oversized_id, other_id):
+        info = quick_image.image_job_status(tmp_path, job_id)
+        assert info["status"] == "queued"
+        assert info["recoveries"] == 1
+
+
 def test_recovery_preserves_valid_png_smaller_than_100_bytes(tmp_path):
     output = tmp_path / "small.png"
     Image.new("RGB", (1, 1), "orange").save(output)
