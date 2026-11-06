@@ -76,6 +76,15 @@ def _connect(root: str | Path):
             if not conn.in_transaction:
                 conn.execute("BEGIN IMMEDIATE")
             if not conn.execute(generation_schema).fetchone():
+                # Retained reviews cannot reconstruct floors after retraction.
+                # Match recall/maintenance: a known lost authoritative table
+                # must not be treated as a legacy database awaiting backfill.
+                if conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='feedback_recall_meta_v1'").fetchone():
+                    old_mode = conn.execute(
+                        "SELECT floor_mode FROM feedback_recall_meta_v1 WHERE id=1"
+                    ).fetchone()
+                    if old_mode is None or old_mode[0] != 0:
+                        raise sqlite3.DatabaseError("Authoritative generation floors disappeared")
                 conn.execute("""CREATE TABLE feedback_generations (
                     task_id TEXT PRIMARY KEY, generation INTEGER NOT NULL
                 )""")

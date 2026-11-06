@@ -517,6 +517,33 @@ def test_lost_generation_floor_table_never_revives_old_lessons(tmp_path):
     assert feedback_learning.maintain(tmp_path)["status"] == "unavailable"
 
 
+def test_record_does_not_rebuild_lost_floors_from_superseded_reviews(tmp_path):
+    import sqlite3
+    import pytest
+
+    original = task("lost-floor-write", "Techno synth bass", title="Techno synth bass")
+    old_id = feedback_learning.record(tmp_path, original, -1, "Stale preference")
+    latest_id = feedback_learning.record(tmp_path, dict(original, generation=1), 1)
+    assert feedback_learning.forget(tmp_path, latest_id)
+    _finish_recall(tmp_path)
+
+    with sqlite3.connect(tmp_path / "feedback-learning.sqlite3") as db:
+        db.execute("DROP TABLE feedback_generations")
+
+    # An unrelated write must not backfill generation zero from the retained
+    # historical review and thereby make that preference eligible again.
+    with pytest.raises(sqlite3.DatabaseError, match="generation floors disappeared"):
+        feedback_learning.record(tmp_path, task("unrelated", "Classical piano sonata"), 1)
+
+    assert not feedback_learning.guidance(tmp_path, "music", "Techno synth bass")
+    assert feedback_learning.for_task(tmp_path, original["id"])[0]["id"] == old_id
+    assert feedback_learning.for_task(tmp_path, "unrelated") == []
+    with sqlite3.connect(tmp_path / "feedback-learning.sqlite3") as db:
+        assert not db.execute(
+            "SELECT 1 FROM sqlite_master WHERE name='feedback_generations'"
+        ).fetchone()
+
+
 def test_recall_lifecycle_is_singleton_and_starts_no_database_work_on_caller(tmp_path, monkeypatch):
     from unittest.mock import Mock
     threads = []
