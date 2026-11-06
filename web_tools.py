@@ -365,7 +365,9 @@ def business_name_matches(name: str, title: str, url: str) -> bool:
         word for word in re.findall(r"[a-z0-9]+", name.casefold())
         if len(word) > 1 and word not in {"the", "and", "llc", "inc"}
     ]
-    visible = (title + " " + (urlsplit(url).hostname or "")).casefold()
+    visible = set(re.findall(
+        r"[a-z0-9]+", (title + " " + (urlsplit(url).hostname or "")).casefold()
+    ))
     return bool(words) and all(word in visible for word in words)
 
 
