@@ -131,7 +131,8 @@ def transcribe_to_midi(source_path: str, output_dir: str) -> dict:
         if not midi:
             raise RuntimeError("Basic Pitch finished without a MIDI file.")
         for notes in staging.glob("*.csv"):
-            normalize_note_events(notes)
+            if notes.is_file():
+                normalize_note_events(notes)
         files = sorted(path for path in staging.iterdir() if path.is_file() and path.stat().st_size > 0)
         published = []
         try:
