@@ -27,6 +27,7 @@ def test_chord_detection_declines_equally_supported_triads():
     for pitches, expected in (
         ([0, 4, 7], "C major"),
         ([0, 3, 7], "C minor"),
+        ([0, 4, 7], "C major"), # Re-test this case to ensure it passes after logic change
     ):
         chroma = np.zeros(12)
         chroma[pitches] = 1.0
