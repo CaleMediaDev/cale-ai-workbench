@@ -1,0 +1,134 @@
+{
+  "release": "0.5.547",
+  "base": "079541c590e873cc8907eb9f4cb6cac1e1034323",
+  "qualification": {
+    "status": "QUALIFIED isolated candidate, no commit/push/integration/release",
+    "base": "079541c590e873cc8907eb9f4cb6cac1e1034323",
+    "candidate": "C:\\Users\\tahoe\\Documents\\Codex\\2026-10-31\\can\\outputs\\review-model-public404-546\\candidate",
+    "edited_inventory": {
+      "donation.py": "b35f2dede6c4a32aabd1e292b3d98e1169e77760cb2ed490d02cac5c41b5c407",
+      "Validation/test_donation.py": "29355b38c6a45ea21f62df34cefd0a239bc101b5b769b893aa7afc526f74ab89"
+    },
+    "all_other_tracked_files_unchanged": 419,
+    "unexpected_changes": [],
+    "patch": "outputs\\review-model-public404-546\\candidate-v2.patch",
+    "patch_sha256": "e046ce9dffbb39c982f98e06ce1817143c792cde7e4b0c2fbbe671ca5ae0dff2",
+    "protected_function_AST_identical": {
+      "validate_proposal": true,
+      "_publication_policy": true,
+      "scope_fingerprint": true,
+      "complete_donation": true,
+      "claim_model_publication": true,
+      "finish": true
+    },
+    "small_training_source_sha256": "55e0cea16b25c834ae1629d194a3d2c0637eabba168f01427417de4be275f67f",
+    "results": {
+      "baseline_corrected_fixture": "2genuineFAIL2.61s: journalURLmissing; actualServicepublic404withoutURLaftervalidatedfakePR",
+      "focused_v2": "37PASS379deselected26.87s",
+      "full_v2": "443PASS117subtests90.28s,exit0,zero skip/fail",
+      "unique_count_note": "Focused cases overlap full443; not added to total."
+    },
+    "commands": {
+      "cwd": "C:\\Users\\tahoe\\Documents\\Codex\\2026-10-31\\can\\outputs\\review-model-public404-546\\candidate",
+      "python": "C:\\Users\\tahoe\\Documents\\Codex\\2026-10-31\\can\\outputs\\Hermes-Agent\\Toolbox\\python\\Scripts\\python.exe",
+      "baseline": "-m pytest Validation/test_donation.py -q -k \"model404_authenticated_url or model404_service_and_restart\" --showlocals",
+      "focused": "-m pytest Validation/test_donation.py -q -k \"model404 or public404_exposes or independent_public404_restart or pending_link_hydration or stale_empty_pending or stale_url_hydration or donor_only_pr\" -x --showlocals",
+      "full": "-m pytest Validation/test_donation.py Validation/test_donation_regressions.py Validation/test_github_account.py Validation/test_chatgpt_auth.py -q -x -rs",
+      "env": "Inherited developer environment; no environment overrides or account values collected/exported. Exact venv interpreter; fake inference/GitHub/training boundaries supplied by existing/new fixtures."
+    },
+    "log_sha256": {
+      "baseline-red.log": "8de85b4fe7921c8206b42d665bb55b2d2f36d25f40888d77fde15bd492fb9d9c",
+      "baseline-red-corrected-fixture.log": "6297ab23c0fb5647c4d6b09b1c5544fb8daccb0ba675d7170476936a23d003d0",
+      "focused.log": "bab9e65160f94605fd19cbf680022e265f3dea20c4d41c747ae60b6931822df9",
+      "focused-v2.log": "b3ba97f09b06047dc7a09fc56e4814322d64b3bcca94383c9f5b8b13c933ba48",
+      "full-v2.log": "c5d99542ba743243fa952cbee3c5f957f33868516dee50face6481533f07eb05"
+    },
+    "preserved_diagnostics": [
+      "baseline-red.log directURLfailure meaningful; initialServicegenericfailure was harness too-early60sretry, NOT counted as bugproof",
+      "baseline-red-corrected-fixture.log uses61sownedclockadvance without SQLbudget resets, proves actual404missinglink",
+      "focused.log V1candidate1FAIL21PASS: newlookupmistakenlyusedruns.revision; correctedtoscope_shaasactualtrainerclaimstoresfingerprint",
+      "v1-failed-binding stores exact2failedcandidatefiles; no assertion weakened"
+    ],
+    "behavior": "Authenticated canonical model PR URL+commit persisted after identity/artifact ancestry checks and before anonymousvisibilityread. Commonpendinghandler shows samefailedrunURL. Existing codehydrator remainsfirst; model fallbackread16states readyqualifiedmatchingrun/account/local/job/scope/fingerprint/artifacthashshape. URLsdiagnostic-only; normalpublicationguardsrevalidatecurrenttrainerbeforeanyrequest.",
+    "bounds": "mode=ro/as_uri/timeout0/100mscooperativeSQLprogresshandler, closing/BEGIN,8192BstatebeforeJSON,LIMIT16perjournal,atmost32combinedfallback. No newDB/schema/directories/API/network/workerworkfromhydration; no hardwall-I/Oclaim.",
+    "limits": [
+      "OtherPC training/version/account context remains unconfirmed. This fixes proven local model-publication link gap, not HTTP404 remote cause.",
+      "OldjournalwithoutURLremainsunknownuntilnormalauthenticatedsame-PRreconciliation; no inventedURLs or duplicatePOST.",
+      "Hydration binds savedexperimentfingerprint, not currenttrainer eligibility; displayonly, not upload/acceptedcredit.",
+      "No actual inference/audio/models/devices/services/Original/private/shared/installedruntimecontrols or sourcewrites.",
+      "No live donationSQLiteconnection used; installed-context report onlysafeversion/hash/settingsbooleans/logcounts."
+    ],
+    "installed_context": "installed-readonly-context.json"
+  },
+  "independent_review": {
+    "status": "STATIC V2 REVIEW: no concrete blocker found; no tests executed by reviewer",
+    "base": "079541c590e873cc8907eb9f4cb6cac1e1034323",
+    "patch_sha256": "e046ce9dffbb39c982f98e06ce1817143c792cde7e4b0c2fbbe671ca5ae0dff2",
+    "source_sha256": "b35f2dede6c4a32aabd1e292b3d98e1169e77760cb2ed490d02cac5c41b5c407",
+    "test_sha256": "29355b38c6a45ea21f62df34cefd0a239bc101b5b769b893aa7afc526f74ab89",
+    "changed_AST_nodes": [
+      "Service",
+      "Service._run",
+      "pending_publication_url",
+      "publish_model_candidate",
+      "publish_model_candidate.confirm"
+    ],
+    "added_AST_nodes": [
+      "_pending_model_publication_url"
+    ],
+    "unchanged": {
+      "small_training.py": {
+        "normalized_bytes_equal546": true,
+        "candidate_sha256": "55e0cea16b25c834ae1629d194a3d2c0637eabba168f01427417de4be275f67f"
+      },
+      "donation_ui.py": {
+        "normalized_bytes_equal546": true,
+        "candidate_sha256": "689e9715a51ee497f27b154f65792780c5172b53b63b4bbb0365c24ac392d8b3"
+      }
+    },
+    "findings": [
+      "confirm validates exact authenticated upstream/base/head/repo/author/markers/state and immutable expected artifact delta before newcommit/url journal.save; publicGET comes afterward. No premature submitted status or credit.",
+      "Saved canonical URL persists across publicvisibility404. Existing final publicidentity comparison and guards remain; upload success is still contingent on public confirmation.",
+      "Code-donation DurablePublication/ModelPublicationJournal/claim_model_publication AST unchanged. Service exception keeps existingpublication.state URL branch; new fallback is modelrun-specific only.",
+      "Modelhydration reads existingSQLite modeRO with closing+BEGIN/progressbudget, atmost16states<=8192bytes, current enabled/local/modelconsent plus account, savedready+qualified experiment/run/fingerprint/scope/job/resource and canonicalURL/commit/artifactshapes; no API/trainer initialization/currentidentity computation.",
+      "Hydration finalsettings equality protects consent changes duringread. MissingoldURL safely returns empty until ordinary authenticated retry reconciles existingPR. It cannot manufacture a canonical link frombranch or account data.",
+      "Artifact hashes in hydration are syntactic savedrecord correlation, not fresh artifact/trainer verification. This is acceptable because result is only unconfirmed diagnostic; actual publish still calls review_artifacts/currentidentity/account/consent and does not trust hydration asauthority.",
+      "No new submission/accepted label/token/computecredit codepath; pending UI status remains unconfirmed and non-clickconfirmed activity."
+    ],
+    "limits": [
+      "No execution, testsrerun, liveDB/account/API reads, orsourcechanges by independentreviewer. Owner qualification still required.",
+      "SQLite100msVM budget does not bound allOSIO. Existingfailurefallback remains empty diagnostic.",
+      "A stale savedready fingerprint may remain diagnostic across trainerupdate; no publicationauthority or currentqualification claimed."
+    ]
+  },
+  "validation": {
+    "affected_modules": {
+      "exit_code": 0,
+      "source_bytes_unchanged": true,
+      "passed": 443,
+      "subtests_passed": 117,
+      "skipped": 0,
+      "modules": [
+        "Validation/test_donation.py",
+        "Validation/test_donation_regressions.py",
+        "Validation/test_github_account.py",
+        "Validation/test_chatgpt_auth.py"
+      ],
+      "sha256": {
+        "donation.py": "b35f2dede6c4a32aabd1e292b3d98e1169e77760cb2ed490d02cac5c41b5c407",
+        "Validation/test_donation.py": "29355b38c6a45ea21f62df34cefd0a239bc101b5b769b893aa7afc526f74ab89"
+      }
+    }
+  },
+  "sha256": {
+    "donation.py": "b35f2dede6c4a32aabd1e292b3d98e1169e77760cb2ed490d02cac5c41b5c407",
+    "Validation/test_donation.py": "29355b38c6a45ea21f62df34cefd0a239bc101b5b769b893aa7afc526f74ab89"
+  },
+  "limits": [
+    "OtherPC training/version/account context remains unconfirmed. This fixes proven local model-publication link gap, not HTTP404 remote cause.",
+    "OldjournalwithoutURLremainsunknownuntilnormalauthenticatedsame-PRreconciliation; no inventedURLs or duplicatePOST.",
+    "Hydration binds savedexperimentfingerprint, not currenttrainer eligibility; displayonly, not upload/acceptedcredit.",
+    "No actual inference/audio/models/devices/services/Original/private/shared/installedruntimecontrols or sourcewrites.",
+    "No live donationSQLiteconnection used; installed-context report onlysafeversion/hash/settingsbooleans/logcounts."
+  ]
+}

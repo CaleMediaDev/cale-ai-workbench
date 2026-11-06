@@ -1264,6 +1264,10 @@ def publish_model_candidate(root, experiment, trained, login, check_cancel):
         journal.state["pr_attempted"] = True
         journal.save()
         verify_delta(sha)
+        # Authenticated identity and exact artifact ancestry are already checked.
+        # Preserve its canonical link even when anonymous delivery is not visible.
+        journal.state.update(commit=sha, url=url)
+        journal.save()
         public = public_pull_request(number)
         journal.guard()
         if (not isinstance(public, dict) or identity(public) != actual or public.get("state") not in {"open", "closed"}
@@ -1440,7 +1444,65 @@ def pending_publication_url(root, consent):
                 return state["url"]
     except (OSError, sqlite3.Error, ValueError, TypeError):
         pass
-    return ""
+    return _pending_model_publication_url(root, consent)
+
+
+def _pending_model_publication_url(root, consent, *, run_id=None):
+    """Read a saved authenticated model link; never grant publication authority.
+
+    At most 16 bounded journal states, no trainer/database initialization or API.
+    Fingerprints bind the same saved ready experiment and run. Normal upload
+    guards separately revalidate current trainer identity before any request.
+    """
+    login = consent.get('github_account', '')
+    if (not consent.get('enabled') or consent.get('model_training') is not True
+            or 'local' not in permitted_sources(consent, root)
+            or not isinstance(login, str) or not re.fullmatch(r'[A-Za-z0-9-]{1,39}', login)
+            or run_id is not None and (not isinstance(run_id, str) or not re.fullmatch(r'[a-f0-9]{32}', run_id))):
+        return ''
+    try:
+        import small_training as models
+        path = Path(root) / 'LongTasks/donations.db'
+        deadline = time.monotonic() + .1
+        with closing(sqlite3.connect(path.resolve().as_uri() + '?mode=ro', uri=True, timeout=0)) as conn:
+            conn.set_progress_handler(lambda: int(time.monotonic() >= deadline), 1000)
+            conn.execute('BEGIN')
+            rows = conn.execute("""SELECT j.run,j.fingerprint,j.account,substr(j.state,1,8193),
+                length(CAST(j.state AS BLOB)),r.job,r.resource,r.scope_sha
+                FROM model_publication_journal j
+                JOIN model_experiments e ON e.run_id=j.run AND e.fingerprint=j.fingerprint
+                JOIN runs r ON r.id=j.run
+                WHERE e.state='ready' AND e.qualified=1 AND r.status!='submitted'
+                AND (? IS NULL OR j.run=?)
+                ORDER BY j.checked DESC,j.run DESC LIMIT 16""", (run_id,run_id))
+            for saved_run, fingerprint, account, raw, size, job, resource, scope_sha in rows:
+                if (not isinstance(saved_run, str) or not re.fullmatch(r'[a-f0-9]{32}', saved_run)
+                        or not isinstance(fingerprint, str) or not re.fullmatch(r'[a-f0-9]{64}', fingerprint)
+                        or scope_sha != fingerprint or job != models.JOB_ID or resource != 'local'
+                        or account != _publication_account(consent, login, 'local')
+                        or not isinstance(raw, str) or not 0 < size <= 8192):
+                    continue
+                try:
+                    state = json.loads(raw)
+                except (ValueError, RecursionError):
+                    continue
+                if (not isinstance(state, dict)
+                        or set(state)-{'artifacts','pr_attempted','intent','commit','url'}
+                        or state.get('pr_attempted') is not True
+                        or not valid_proposal_url(state.get('url'))
+                        or not isinstance(state.get('commit'), str) or not re.fullmatch(r'[a-f0-9]{40}', state['commit'])
+                        or not isinstance(state.get('artifacts'), dict)
+                        or set(state['artifacts']) != set(models.ARTIFACTS)
+                        or any(not isinstance(value, str) or not re.fullmatch(r'[a-f0-9]{64}', value)
+                               for value in state['artifacts'].values())
+                        or 'intent' in state and state['intent'] not in _GITHUB_STAGES):
+                    continue
+                if settings(root) != consent:
+                    return ''
+                return state['url']
+    except (OSError, sqlite3.Error, ValueError, TypeError, KeyError, ImportError):
+        pass
+    return ''
 
 
 class DurablePublication:
@@ -2412,7 +2474,8 @@ class Service:
             # The authenticated write may have succeeded even when GitHub's
             # public API cannot see it. Expose its exact canonical link as
             # unconfirmed, not as a delivered contribution or accepted fix.
-            saved_url = publication.state.get("url", "") if publication is not None else ""
+            saved_url = (publication.state.get("url", "") if publication is not None else
+                         _pending_model_publication_url(self.root, settings(self.root), run_id=run_id))
             with self._events["lock"]:
                 self._events["pending_proposal_url"] = saved_url if valid_proposal_url(saved_url) else ""
                 self._events["pending_proposal_revision"] = self._events.get("pending_proposal_revision", 0) + 1

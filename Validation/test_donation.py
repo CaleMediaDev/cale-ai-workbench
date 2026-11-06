@@ -3811,3 +3811,104 @@ def test_cached_reserved_pytest_payload_needs_fresh_validation_without_reposting
     assert sum(body is not None for _, body in host.remote.calls) == mutations
     with closing(donation.connection(host.root)) as conn:
         assert conn.execute("SELECT phase,length(payload) FROM publication_outbox").fetchone() == ("stale",0)
+
+
+def _model404_pending_fixture(host):
+    models.complete(host.root, host.claimed, host.trained, 'ready')
+    host.remote.public_visible = False
+    with pytest.raises(donation.PublicVisibilityPending):
+        host.publish()
+    with closing(donation.connection(host.root)) as db:
+        raw = db.execute('SELECT state FROM model_publication_journal').fetchone()[0]
+    return json.loads(raw)
+
+
+def test_model404_authenticated_url_is_durable_before_public_confirmation(model_upload_host):
+    host = model_upload_host
+    state = _model404_pending_fixture(host)
+    assert state.get('url') == f'https://github.com/{donation.UPSTREAM}/pull/1'
+    assert state.get('commit') == host.remote.prs[0]['head']['sha']
+    with closing(donation.connection(host.root)) as db:
+        assert db.execute('SELECT status FROM runs').fetchone()[0] != 'submitted'
+    assert donation.total_tokens(host.root) == 0
+    assert len(host.remote.prs) == 1
+
+
+def test_model404_service_and_restart_show_same_unconfirmed_link_without_work(model_upload_host, monkeypatch):
+    import donation_ui
+    host = model_upload_host
+    models.complete(host.root, host.claimed, host.trained, 'ready')
+    host.remote.public_visible = False
+    monkeypatch.setattr(models, 'run_job', lambda *a, **k: pytest.fail('must resume existing model'))
+    monkeypatch.setattr(donation, 'complete_donation', lambda *a, **k: pytest.fail('no inference'))
+    first = donation.Service(host.root)
+    # A completed cached model has the existing one-minute publication retry delay.
+    # Advance the owned test clock, never reset ledger quotas or timestamps.
+    with patch.object(donation.time, 'time', return_value=time.time()+61):
+        first._run(threading.Event())
+    assert len(host.remote.prs) == 1
+    assert 'public proposal confirmation' in first.status_message()
+    expected = f'https://github.com/{donation.UPSTREAM}/pull/1'
+    assert expected in first.status_message()
+    messages = []
+    activity = donation_ui.ChatActivity(first, messages.append)
+    activity.poll()
+    assert any(expected in message and 'not confirmed' in message for message in messages)
+    assert not any('just sent' in message for message in messages)
+    assert not activity.urls
+    before_calls = len(host.remote.calls)
+    with closing(donation.connection(host.root)) as db:
+        before = db.execute('SELECT state FROM model_publication_journal').fetchall()
+    restarted = donation.Service(host.root)
+    restarted._run(threading.Event())
+    assert expected in restarted.status_message()
+    assert len(host.remote.calls) == before_calls
+    with closing(donation.connection(host.root)) as db:
+        assert db.execute('SELECT state FROM model_publication_journal').fetchall() == before
+        assert db.execute('SELECT status FROM runs').fetchone()[0] != 'submitted'
+    assert donation.total_tokens(host.root) == 0
+    assert len(host.remote.prs) == 1
+
+
+@pytest.mark.parametrize('corruption', ['old_without_url','wrong_account','wrong_run_resource',
+    'wrong_job','wrong_fingerprint','wrong_run_scope','not_ready','not_qualified','submitted','bad_artifacts',
+    'oversized','training_off','local_off','disabled'])
+def test_model404_hydration_rejects_stale_unbound_or_unconsented_records(model_upload_host, corruption):
+    host = model_upload_host
+    state = _model404_pending_fixture(host)
+    with closing(donation.connection(host.root)) as db, db:
+        if corruption == 'old_without_url':state.pop('url', None)
+        elif corruption == 'wrong_account':db.execute("UPDATE model_publication_journal SET account='foreign'")
+        elif corruption == 'wrong_run_resource':db.execute("UPDATE runs SET resource='chatgpt'")
+        elif corruption == 'wrong_job':db.execute("UPDATE runs SET job='another-job'")
+        elif corruption == 'wrong_fingerprint':db.execute("UPDATE model_publication_journal SET fingerprint=?", ('f'*64,))
+        elif corruption == 'wrong_run_scope':db.execute("UPDATE runs SET scope_sha=?", ('f'*64,))
+        elif corruption == 'not_ready':db.execute("UPDATE model_experiments SET state='failed'")
+        elif corruption == 'not_qualified':db.execute('UPDATE model_experiments SET qualified=0')
+        elif corruption == 'submitted':db.execute("UPDATE runs SET status='submitted'")
+        elif corruption == 'bad_artifacts':state['artifacts'] = {'unreviewed.json':'a'*64}
+        elif corruption == 'oversized':state['extra'] = 'x'*9000
+        if corruption in {'old_without_url','bad_artifacts','oversized'}:
+            db.execute('UPDATE model_publication_journal SET state=?', (json.dumps(state),))
+    if corruption in {'training_off','local_off','disabled'}:
+        config = donation.settings(host.root)
+        config['model_training'] = corruption != 'training_off'
+        config['enabled'] = corruption != 'disabled'
+        if corruption == 'local_off':config['sources'] = []
+        (host.root/'LongTasks/donation-settings.json').write_text(json.dumps(config), encoding='utf-8')
+    before = len(host.remote.calls)
+    assert donation.pending_publication_url(host.root, donation.settings(host.root)) == ''
+    assert len(host.remote.calls) == before
+
+
+def test_model404_old_journal_without_url_reconciles_same_pr_on_authenticated_retry(model_upload_host):
+    host = model_upload_host
+    state = _model404_pending_fixture(host)
+    state.pop('url', None)
+    with closing(donation.connection(host.root)) as db, db:
+        db.execute('UPDATE model_publication_journal SET state=?', (json.dumps(state),))
+    assert donation.pending_publication_url(host.root, donation.settings(host.root)) == ''
+    host.remote.public_visible = True
+    assert host.publish().endswith('/pull/1')
+    assert len(host.remote.prs) == 1
+    assert sum(endpoint.endswith('/pulls') and body is not None for endpoint,body in host.remote.calls) == 1
