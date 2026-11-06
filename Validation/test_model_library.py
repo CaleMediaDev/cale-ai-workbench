@@ -212,6 +212,38 @@ class AutoModelTests(unittest.TestCase):
                     self.assertEqual(json.loads(pending.read_text()), expected_pending)
                 delete.assert_called_once_with("old:large")
 
+    def test_retired_source_cleanup_accepts_routine_alias_deletion_race(self):
+        from urllib.error import HTTPError
+
+        for code in (404, 500):
+            with self.subTest(code=code), tempfile.TemporaryDirectory() as folder:
+                root = Path(folder)
+                error = HTTPError("http://localhost/api/delete", code,
+                                  "delete failed", {}, None)
+
+                def delete_model(alias):
+                    if alias == library.STANDARD_MAIN_ALIAS:
+                        raise error
+
+                with (patch.object(library, "ROOT", root),
+                      patch.object(library, "CATALOG", {"main": {"alias": "cale-local"}}),
+                      patch.object(library, "post", return_value={
+                          "capabilities": ["tools"], "parameters": "num_ctx 65536\n"}),
+                      patch.object(library, "owned_sources", return_value={"old:large"}),
+                      patch.object(library, "delete_model", side_effect=delete_model) as delete):
+                    library.record_main_source("new:balanced", False)
+                    library.queue_retired_main_source("old:large")
+                    self.assertEqual(library.cleanup_retired_main_sources(),
+                                     1 if code == 404 else 0)
+                    pending = root / "LongTasks/retired-main-sources.json"
+                    self.assertEqual(json.loads(pending.read_text()),
+                                     [] if code == 404 else ["old:large"])
+                self.assertEqual(
+                    [call.args[0] for call in delete.call_args_list],
+                    [library.STANDARD_MAIN_ALIAS, "old:large"] if code == 404
+                    else [library.STANDARD_MAIN_ALIAS],
+                )
+
     def test_retirement_retries_failed_owned_source_deletion(self):
         from urllib.error import HTTPError
 
