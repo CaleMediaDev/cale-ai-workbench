@@ -148,6 +148,20 @@ def test_installed_version_rejects_repeated_or_misplaced_yaml_directives(
     assert chrome_connector.installed_version() == ""
 
 
+@pytest.mark.parametrize("contents", [
+    "%YAML 1.1\nversion: 0.2.6\n",
+    "%YAML 1.2\nversion: 0.2.6\n",
+    "%YAML 1.2 # manifest format\n\n# missing document start\n  version: 0.2.6\n",
+])
+def test_installed_version_requires_document_start_after_yaml_directive(
+    tmp_path, monkeypatch, contents
+):
+    monkeypatch.setattr(chrome_connector, "PLUGIN", tmp_path)
+    (tmp_path / "plugin.yaml").write_text(contents, encoding="utf-8")
+
+    assert chrome_connector.installed_version() == ""
+
+
 def test_installed_version_accepts_utf8_bom(tmp_path, monkeypatch):
     plugin = tmp_path / "plugin"
     plugin.mkdir()

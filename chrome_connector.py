@@ -90,6 +90,9 @@ def installed_version() -> str:
         elif re.fullmatch(r"\.\.\.(?:[ \t]+#[^\r\n]*)?[ \t]*", line):
             document_ended = True
         else:
+            # YAML directives require an explicit document-start marker.
+            if yaml_seen and not document_started:
+                return ""
             document_started = True
     # YAML comments, directives and document markers may be less indented than the root mapping.
     mapping_lines = "\n".join(
