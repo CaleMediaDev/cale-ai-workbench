@@ -126,7 +126,7 @@ def missing(root: Path = ROOT, *, fresh: bool = False) -> list[str]:
     if not _runnable(toolbox_python, "-I", "-c", TOOLBOX_SDK_PROBE):
         unavailable.append("Toolbox model SDK")
     with _health_lock:
-        # An older probe must not overwrite a newer post-repair observation.
+        # Only update cache if this probe is the latest generation.
         if generation == _health_generation:
             _health_cache = (root, tuple(unavailable), check_started)
     return list(unavailable)

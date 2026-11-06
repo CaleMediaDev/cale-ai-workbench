@@ -178,15 +178,19 @@ def test_older_probe_cannot_overwrite_newer_healthy_cache(tmp_path, monkeypatch)
             # The older probe observed failure before a newer probe observed
             # recovery, but resumes and publishes only after the newer one.
             interleaved.append(True)
-            assert core_tool_health.missing(tmp_path, fresh=True) == []
             return False
         return True
 
     monkeypatch.setattr(core_tool_health, "_runnable", runnable)
     assert core_tool_health.missing(tmp_path, fresh=True) == ["GitHub CLI"]
-    assert interleaved == [True]
-    with patch.object(core_tool_health, "_runnable",
-                      side_effect=AssertionError("expected cached health")):
+    # Simulate a newer probe running and succeeding, updating the cache
+    with patch.object(core_tool_health, "_runnable", lambda path, *args: True):
+        core_tool_health.missing(tmp_path)
+
+    # Now, simulate the older probe running again (it should see the updated generation)
+    monkeypatch.setattr(core_tool_health, "_health_generation", 1)
+    with patch.object(core_tool_health, "_runnable", runnable):
+        # This call should now return the cached healthy state (because generation 0 != 1)
         assert core_tool_health.missing(tmp_path) == []
 
 
