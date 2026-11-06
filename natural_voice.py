@@ -63,10 +63,6 @@ def install():
         return
     with lock_file as lock:
         try:
-            lock.seek(0, 2)
-            if lock.tell() == 0:
-                lock.write(b"1")
-                lock.flush()
             lock.seek(0)
         except OSError as exc:
             save_download_status(STATUS, "error", str(exc)[:400], 0)
@@ -78,6 +74,12 @@ def install():
                 save_download_status(STATUS, "error", str(exc)[:400], 0)
             return
         try:
+            # Windows permits locking beyond EOF. Initialize only after acquiring
+            # the lock so a competing installer cannot write into a locked byte.
+            lock.seek(0, 2)
+            if lock.tell() == 0:
+                lock.write(b"1")
+                lock.flush()
             if not MEDIA_PYTHON.is_file():
                 raise FileNotFoundError("The bundled media Python executable is missing.")
             save_download_status(STATUS, "working", "Checking the natural voice", 5)

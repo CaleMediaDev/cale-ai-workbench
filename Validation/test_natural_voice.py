@@ -230,6 +230,33 @@ class NaturalVoiceTests(unittest.TestCase):
             fake_msvcrt.locking.assert_not_called()
             run.assert_not_called()
 
+    def test_contended_empty_lock_does_not_overwrite_active_progress(self):
+        contention = PermissionError(errno.EACCES, "Lock held by another installer")
+        lock = MagicMock()
+        lock.__enter__.return_value = lock
+        lock.tell.return_value = 0
+        # Another installer can hold a byte-range lock before writing its byte.
+        lock.write.side_effect = contention
+        fake_msvcrt = SimpleNamespace(
+            LK_NBLCK=1, locking=MagicMock(side_effect=contention)
+        )
+        with tempfile.TemporaryDirectory() as folder:
+            status = Path(folder) / "voice-status.json"
+            with (
+                patch.dict(sys.modules, {"msvcrt": fake_msvcrt}),
+                patch.object(natural_voice, "STATUS", status),
+                patch.object(Path, "open", return_value=lock),
+                patch.object(natural_voice, "save_download_status") as save_status,
+                patch.object(natural_voice.subprocess, "run") as run,
+            ):
+                natural_voice.install()
+        fake_msvcrt.locking.assert_called_once_with(
+            lock.fileno.return_value, fake_msvcrt.LK_NBLCK, 1
+        )
+        lock.write.assert_not_called()
+        save_status.assert_not_called()
+        run.assert_not_called()
+
     def test_unexpected_lock_failure_replaces_stale_working_status_with_error(self):
         with tempfile.TemporaryDirectory() as folder:
             status = Path(folder) / "voice-status.json"
