@@ -115,6 +115,43 @@ def test_ensure_reinstalls_existing_but_unusable_package_binary(tmp_path):
     assert calls[0] == calls[3]
 
 
+def test_ensure_repairs_package_after_discovery_timeout(tmp_path):
+    from unittest.mock import MagicMock
+
+    python = tmp_path / "Toolbox/python/Scripts/python.exe"
+    python.parent.mkdir(parents=True)
+    python.write_bytes(b"mock Python runtime")
+    source = tmp_path / "package-ffmpeg.exe"
+    source.write_bytes(b"broken executable")
+    discoveries = 0
+
+    def run(args, **kwargs):
+        nonlocal discoveries
+        if args[1] == "-c":
+            discoveries += 1
+            if discoveries == 1:
+                raise subprocess.TimeoutExpired(args, kwargs["timeout"])
+            return subprocess.CompletedProcess(args, 0, str(source) + "\n", "")
+        assert args[1:4] == ["-m", "pip", "install"]
+        assert "--force-reinstall" in args
+        assert "imageio-ffmpeg==0.6.0" in args
+        source.write_bytes(b"repaired executable")
+        return subprocess.CompletedProcess(args, 0, "", "")
+
+    with patch.dict(sys.modules, {"msvcrt": MagicMock()}), \
+            patch.object(ffmpeg_runtime, "working", side_effect=[False, False, True]), \
+            patch.object(ffmpeg_runtime.shutil, "which", return_value=None), \
+            patch.object(ffmpeg_runtime.subprocess, "run", side_effect=run) as mocked_run:
+        target = ffmpeg_runtime.ensure(tmp_path)
+
+    assert target == ffmpeg_runtime.executable(tmp_path)
+    assert target.read_bytes() == b"repaired executable"
+    calls = [call.args[0] for call in mocked_run.call_args_list]
+    assert len(calls) == 3
+    assert calls[0] == calls[2]
+    assert calls[1][1:4] == ["-m", "pip", "install"]
+
+
 def test_ensure_resolves_discovered_ffmpeg_command_on_path(tmp_path):
     from unittest.mock import MagicMock
 
