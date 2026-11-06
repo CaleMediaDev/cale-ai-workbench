@@ -100,6 +100,47 @@ def test_malformed_link_collection_preserves_queued_pages(tmp_path, monkeypatch,
     assert all(path.exists() for path in indexed)
 
 
+@pytest.mark.parametrize("empty_link", [{}, {"href": ""}, {"href": " \t\n"}])
+def test_empty_link_target_does_not_consume_redirect_crawl_budget(tmp_path, monkeypatch, empty_link):
+    monkeypatch.setattr(site_crawler, "check_url", lambda url: (urlsplit(url), ["93.184.215.14"]))
+    indexed = []
+    monkeypatch.setattr(project_memory, "index_file", lambda project, path: indexed.append(path))
+    start = "https://example.com/old"
+    destination = "https://example.com/docs/"
+    child = destination + "child"
+    seen = []
+
+    class FakeCrawler:
+        def __init__(self, config):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_):
+            return None
+
+        async def arun(self, url, config):
+            seen.append(url)
+            return types.SimpleNamespace(
+                success=True, markdown="Readable content", error_message="",
+                redirected_url=destination if url == start else None,
+                links={"internal": [empty_link, {"href": "child"}]} if url == start else {},
+            )
+
+    monkeypatch.setitem(sys.modules, "crawl4ai", types.SimpleNamespace(
+        AsyncWebCrawler=FakeCrawler,
+        BrowserConfig=lambda **kwargs: kwargs,
+        CrawlerRunConfig=lambda **kwargs: types.SimpleNamespace(**kwargs),
+    ))
+    result = asyncio.run(site_crawler.crawl_site(tmp_path, start, max_pages=2))
+    assert seen == [start, child]
+    assert result["errors"] == []
+    assert [page["url"] for page in result["pages"]] == [start, child]
+    assert indexed == [site_crawler.page_path(tmp_path, url) for url in [start, child]]
+    assert all(path.exists() for path in indexed)
+
+
 def test_url_scope_and_stable_path(tmp_path, monkeypatch):
     monkeypatch.setattr(site_crawler, "check_url", lambda url: (urlsplit(url), ["93.184.215.14"]))
     url = site_crawler.normalized_url("https://example.com/a#part", "example.com")
