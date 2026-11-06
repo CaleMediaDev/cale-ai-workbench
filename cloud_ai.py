@@ -1301,6 +1301,8 @@ class Router:
                     tags = json.load(response)
                 weights = {entry["name"]: entry["size"] / 2**30
                            for entry in tags.get("models", [])}
+            except InterruptedError:
+                raise
             except Exception:
                 weights = {}
             available = {}
@@ -1358,6 +1360,8 @@ class Router:
                         vision.add(name)
                     if "thinking" in info.get("capabilities", []):
                         thinking.add(name)
+                except InterruptedError:
+                    raise
                 except Exception:
                     continue
             self.model_cache = available

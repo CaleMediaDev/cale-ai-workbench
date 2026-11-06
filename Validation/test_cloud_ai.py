@@ -1137,6 +1137,113 @@ class CloudTests(unittest.TestCase):
             "tools": [{"description": "Accepts an image_url parameter"}],
         }))
 
+    def test_metadata_discovery_interruption_propagates_once_without_publishing_partial_cache(self):
+        """A resource deferral is not evidence of missing/small local models."""
+        import copy
+        from contextlib import ExitStack
+        class MetadataDeferred(InterruptedError):
+            pass
+        self.candidates.stop()  # Exercise the real discovery method and Router.
+        cloud.routing_mode.save_scope(cloud.STATE, "local_only")
+        aliases = ("candidate-a", "candidate-b", "candidate-c")
+        catalog = {name: {"alias": name, "context": 65536} for name in aliases}
+        tags = {"models": [{"name": name + ":latest", "size": 6 * 2**30} for name in aliases]}
+        info = {"capabilities": ["tools"], "parameters": "num_ctx 65536\n",
+                "details": {"parameter_size": "9B"}}
+        for stage in ("tags", "first_show", "later_show"):
+            for error_type in (InterruptedError, MetadataDeferred):
+                with self.subTest(stage=stage, error_type=error_type.__name__), ExitStack() as stack:
+                    error = error_type("owned metadata refusal")
+                    error.receipt = "owned-test-receipt"
+                    router = cloud.Router()
+                    # A stale but previously complete cache must not be replaced
+                    # with the successful prefix of an interrupted refresh.
+                    fields = ("model_cache", "model_contexts", "model_native_contexts", "model_thinking_controls",
+                              "model_weights", "model_speeds", "model_vision", "model_thinking", "model_cache_until")
+                    for name in fields:
+                        setattr(router, name, -123 if name == "model_cache_until" else
+                                {"previous"} if name in {"model_vision", "model_thinking"} else {"previous": 1})
+                    before = {name: copy.deepcopy(getattr(router, name)) for name in fields}
+                    original_objects = {name: getattr(router, name) for name in fields}
+                    stack.enter_context(patch.object(cloud, "CATALOG", catalog))
+                    for name in ("FAST_MODEL", "STANDARD_MAIN_ALIAS", "LOCAL_MODEL", "BALANCED_MODEL"):
+                        stack.enter_context(patch.object(cloud, name, aliases[0]))
+                    stack.enter_context(patch.object(cloud, "refresh_catalog"))
+                    stack.enter_context(patch.object(cloud, "candidate_approved", return_value=True))
+                    stack.enter_context(patch("model_fitness.profile_allows", return_value=True))
+                    stack.enter_context(patch("model_fitness.suitable", return_value=True))
+                    stack.enter_context(patch("usage_history.recent_local_speed", return_value=None))
+                    stack.enter_context(patch("usage_history.record_completion"))
+                    stack.enter_context(patch.object(cloud, "credentials", return_value={}))
+                    stack.enter_context(patch.object(cloud, "local_profile", return_value="main"))
+                    def fetch(*args, **kwargs):
+                        if stage == "tags":
+                            raise error
+                        return io.BytesIO(json.dumps(tags).encode())
+                    stack.enter_context(patch.object(cloud, "urlopen", side_effect=fetch))
+                    calls = []
+                    def post(url, body, **kwargs):
+                        self.assertTrue(url.endswith("/api/show"), "Inference must never follow this metadata refusal")
+                        calls.append(body["model"])
+                        if stage == "first_show" or body["model"] == aliases[1]:
+                            raise error
+                        return info
+                    upstream = stack.enter_context(patch.object(cloud, "post", side_effect=post))
+                    request = {**REQUEST, "model": cloud.LOCAL_MODEL, "max_tokens": 4096}
+                    original_request = copy.deepcopy(request)
+                    with self.assertRaises(InterruptedError) as caught:
+                        router.complete(request)
+                    self.assertIs(caught.exception, error)
+                    self.assertEqual(caught.exception.receipt, "owned-test-receipt")
+                    self.assertEqual({name: getattr(router, name) for name in fields}, before)
+                    for name, original in original_objects.items():
+                        self.assertIs(getattr(router, name), original)
+                    self.assertEqual(calls, [] if stage == "tags" else
+                                     [aliases[0]] if stage == "first_show" else list(aliases[:2]))
+                    self.assertEqual(upstream.call_count, len(calls))
+                    self.assertEqual(request, original_request)
+
+
+    def test_metadata_discovery_keeps_ordinary_unavailable_model_and_success_policy(self):
+        """Do not turn a normal missing model or transport failure into cancellation."""
+        from contextlib import ExitStack
+        self.candidates.stop()
+        aliases = ("candidate-a", "candidate-b")
+        catalog = {name: {"alias": name, "context": 65536} for name in aliases}
+        tags = {"models": [{"name": name + ":latest", "size": 6 * 2**30} for name in aliases]}
+        info = {"capabilities": ["tools"], "parameters": "num_ctx 65536\n",
+                "details": {"parameter_size": "9B"}}
+        for outcome in ("success", "tags_unavailable", "show_not_found", "show_malformed"):
+            with self.subTest(outcome=outcome), ExitStack() as stack:
+                stack.enter_context(patch.object(cloud, "CATALOG", catalog))
+                for name in ("FAST_MODEL", "STANDARD_MAIN_ALIAS", "LOCAL_MODEL", "BALANCED_MODEL"):
+                    stack.enter_context(patch.object(cloud, name, aliases[0]))
+                stack.enter_context(patch.object(cloud, "refresh_catalog"))
+                stack.enter_context(patch.object(cloud, "candidate_approved", return_value=True))
+                stack.enter_context(patch("model_fitness.profile_allows", return_value=True))
+                stack.enter_context(patch("model_fitness.suitable", return_value=True))
+                def fetch(*args, **kwargs):
+                    if outcome == "tags_unavailable":
+                        raise OSError("owned unavailable endpoint")
+                    return io.BytesIO(json.dumps(tags).encode())
+                stack.enter_context(patch.object(cloud, "urlopen", side_effect=fetch))
+                def post(url, body, **kwargs):
+                    self.assertTrue(url.endswith("/api/show"))
+                    if body["model"] == aliases[0]:
+                        if outcome == "show_not_found":
+                            raise HTTPError(url, 404, "owned absent model", {}, None)
+                        if outcome == "show_malformed":
+                            return None
+                    return info
+                stack.enter_context(patch.object(cloud, "post", side_effect=post))
+                router = cloud.Router()
+                selected = router.local_candidates("manual", required_context=17337)
+                self.assertEqual(set(selected), set(aliases) if outcome == "success" else
+                                 set() if outcome == "tags_unavailable" else {aliases[1]})
+                self.assertTrue(all(router.model_contexts[name] == 65536 for name in selected))
+                self.assertGreater(router.model_cache_until, time.monotonic())
+
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.state = patch.object(cloud, "STATE", Path(self.temp.name))
