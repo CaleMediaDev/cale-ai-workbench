@@ -47,7 +47,7 @@ LOOKUP_WORD = re.compile(
     re.IGNORECASE,
 )
 TOOL_WORK = re.compile(
-    r"\b(?:read|open|inspect|analy[sz]e|summari[sz]e|extract|transcribe|"
+    r"\b(?:read|open|inspect|explain|describe|analy[sz]e|summari[sz]e|extract|transcribe|"
     r"index|edit|search|browse|visit|scrape|crawl|generate|draw|make|create)\b"
     r".{0,90}\b(?:attached|uploaded|selected|my\s+(?:file|folder|document|"
     r"image|photo|video|audio|data)|this\s+(?:file|folder|document|pdf|"
