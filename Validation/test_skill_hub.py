@@ -119,6 +119,23 @@ class SkillHubTests(unittest.TestCase):
                     self.assertEqual(set(skill_hub.SEEN), {identifier})
                     self.assertEqual(skill_hub.INSPECTED, {})
 
+    def test_search_handles_mixed_alphanumeric_and_diacritic_queries(self):
+        identifier = "skills-sh/example/testcafe"
+        query = "café"
+        topic = "cafe\u0301"
+        payload = json.dumps([
+            {"identifier": "skills-sh/example/unrelated", "name": "Unrelated"},
+            {"identifier": identifier, "name": topic},
+        ])
+        with patch.object(skill_hub, "_run", return_value=payload):
+            result = skill_hub.search(query)
+        self.assertEqual(
+            [match["identifier"] for match in result["matches"]],
+            [identifier],
+        )
+        self.assertEqual(set(skill_hub.SEEN), {identifier})
+        self.assertEqual(skill_hub.INSPECTED, {})
+
     def test_search_normalizes_before_casefolding_greek_topics(self):
         identifier = "skills-sh/example/greek"
         decomposed = "\u03b1\u0345\u0301"

@@ -59,7 +59,7 @@ def search(query: str, source: str = "skills-sh", limit: int = 5) -> dict:
     terms = []
     term = ""
     for char in unicodedata.normalize("NFC", unicodedata.normalize("NFC", query).casefold()):
-        if char.isalnum() or (term and unicodedata.category(char).startswith("M")):
+        if char.isalnum() or unicodedata.category(char).startswith("M"):
             term += char
         else:
             if term:
