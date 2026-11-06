@@ -86,7 +86,10 @@ def generate(root: Path, prompt: str, output_path: str = "") -> Path:
         raise RuntimeError("The image maker did not return a usable result.")
     if result.returncode or reply.get("error"):
         raise RuntimeError(str(reply.get("error") or result.stderr[-500:]))
-    if Path(reply.get("path", "")).resolve() != destination or not destination.is_file():
+    reported_path = reply.get("path")
+    if (not isinstance(reported_path, str)
+            or Path(reported_path).resolve() != destination
+            or not destination.is_file()):
         raise RuntimeError("The image maker did not save the requested file.")
     with Image.open(destination) as picture:
         if picture.format != "PNG":
