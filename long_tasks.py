@@ -2043,8 +2043,217 @@ def recover_media_artifacts(p, snapshot):
                 continue
 
 
-def verify_project(p, timeout=1200):
+_SAVED_BROWSER_BOOTSTRAP = r'''
+import hashlib,json,runpy,secrets,sqlite3,sys,time
+from contextlib import closing
+from pathlib import Path
+app,state,identifier,folder,checker,suite,digest,checker_sha,basis_sha,generation=sys.argv[1:]
+app=Path(app).resolve(strict=True);folder=Path(folder).resolve(strict=True)
+checker=Path(checker).resolve(strict=True);suite=Path(suite).resolve(strict=True)
+if checker != app/'webapp_check.py' or suite != folder/'.local-ai/webapp-check.json':
+    raise RuntimeError('Fixed saved-checker paths changed')
+def bounded_hash(path,limit):
+    with path.open('rb') as stream:
+        raw=stream.read(limit+1)
+    if len(raw)>limit:raise RuntimeError('Saved checker input exceeded bounds')
+    return hashlib.sha256(raw).hexdigest()
+if bounded_hash(checker,4*1024*1024)!=checker_sha or bounded_hash(suite,64000)!=digest:
+    raise RuntimeError('Saved checker or suite changed before import')
+sys.dont_write_bytecode=True
+sys.pycache_prefix=str(folder/'.local-ai'/('uncached-saved-browser-'+secrets.token_hex(16)))
+sys.path.insert(0,str(app))
+import project_memory
+database=Path(state).resolve(strict=True)/'projects.db'
+with closing(sqlite3.connect(database.resolve().as_uri()+'?mode=ro',uri=True,timeout=0)) as conn:
+    until=time.monotonic()+.1
+    conn.set_progress_handler(lambda:int(time.monotonic()>=until),1000)
+    conn.execute('BEGIN')
+    rows=conn.execute("SELECT id,folder,CASE WHEN typeof(brief)='text' AND length(CAST(brief AS BLOB))<=64000 THEN brief END,status,generation FROM projects WHERE id=? LIMIT 2",(identifier,)).fetchall()
+    pending=conn.execute("SELECT 1 FROM requests WHERE project=? AND status='pending' AND action IN ('pause','stop','delete','note','resume') LIMIT 1",(identifier,)).fetchone()
+if len(rows)!=1 or pending or Path(rows[0][1]).resolve()!=folder or rows[0][3] not in ('working','retrying') or rows[0][2] is None or rows[0][4]!=int(generation):
+    raise RuntimeError('Current saved-checker task owner unavailable')
+project={'id':rows[0][0],'folder':rows[0][1],'brief':rows[0][2]}
+basis,request,instruction_identities=project_memory._receipt_instruction_snapshot(folder,project,time.monotonic()+2)
+if project_memory._verification_digest(basis)!=basis_sha:
+    raise RuntimeError('Current saved-checker instructions changed')
+sys.argv=[str(checker),'--folder',str(folder),'--spec',str(suite),'--spec-sha256',digest]
+with project_memory.verification_context(project):
+    runpy.run_path(str(checker),run_name='__main__')
+'''
+
+
+def _saved_browser_verifier_command(project, contract):
+    """Internal fixed typed checker, not a caller/model-supplied command."""
+    if (not isinstance(contract, dict)
+            or set(contract) != {'suite_sha256', 'checker_sha256', 'basis_sha256', 'owner_generation', 'snapshot_key'}
+            or type(contract.get('owner_generation')) is not int or contract['owner_generation'] < 0
+            or any(not isinstance(contract[key], str) or not re.fullmatch('[0-9a-f]{64}', contract[key])
+                   for key in ('suite_sha256', 'checker_sha256', 'basis_sha256', 'snapshot_key'))):
+        raise ValueError('Invalid host saved-browser contract')
+    folder = Path(project['folder']).resolve(strict=True)
+    checker = ROOT / 'webapp_check.py'
+    suite = folder / '.local-ai/webapp-check.json'
+    python = Path(sys.executable).resolve(strict=True)
+    for path in (checker, suite, python):
+        if (not path.is_file() or path.is_symlink()
+                or getattr(path.lstat(), 'st_file_attributes', 0) & 0x400):
+            raise ValueError('Saved-browser verifier paths unavailable')
+    return [str(python), '-I', '-B', '-c', _SAVED_BROWSER_BOOTSTRAP,
+            str(ROOT.resolve()), str(STATE.resolve()), project['id'], str(folder),
+            str(checker.resolve()), str(suite.resolve()), contract['suite_sha256'],
+            contract['checker_sha256'], contract['basis_sha256'], str(contract['owner_generation'])]
+
+
+def _verify_saved_browser_project(project, timeout, contract, admit):
+    """Host-only fixed checker; all launched exits recheck source freshness."""
+    if (type(timeout) not in (int, float) or not 0 < timeout <= 90 or not callable(admit)):
+        return False, 'Typed browser verification requires a bounded host admission.'
+    deadline = time.monotonic() + timeout
+    before = None
+    after = None
+    job = process = None
+    assigned = False
+    family_empty = False
+    normal_terminal = False
+    code = None
+    evidence = ''
+    failure = None
+    fence_unknown = False
+    log = STATE / f"{project['id']}-verification.log"
+    def admitted(stage):
+        return time.monotonic() < deadline and admit(stage) is True
+    def snapshot(stage):
+        value = admit(stage)
+        if (not isinstance(value, dict) or set(value) != {'key', 'source'}
+                or value.get('key') != contract['snapshot_key']):
+            return None
+        return value['source']
+    def members():
+        try:
+            value = win32job.QueryInformationJobObject(job, win32job.JobObjectBasicProcessIdList)
+        except Exception:
+            raise InterruptedError('Typed browser Job membership unavailable') from None
+        # pywin32 returns a PID tuple, not a dictionary. Unknown shape fails closed.
+        if (type(value) is not tuple or len(value) > 4096
+                or any(type(pid) is not int or pid <= 0 for pid in value)
+                or len(set(value)) != len(value)):
+            raise InterruptedError('Typed browser Job membership unavailable')
+        return value
+    def complete(value):
+        return (isinstance(value, dict) and value.get('scope') in {'full_project_source', 'application_source'}
+            and (value.get('scope') != 'application_source' or value.get('limitations') == ['excluded_runtime'])
+            and (value.get('scope') != 'full_project_source' or value.get('omitted') == 0))
+    try:
+        command = _saved_browser_verifier_command(project, contract)
+        import ctypes
+        from ctypes import wintypes
+        import win32job
+        job = win32job.CreateJobObject(None, 'Local\\LocalAISavedBrowser-' + uuid.uuid4().hex)
+        limits = win32job.QueryInformationJobObject(job, win32job.JobObjectExtendedLimitInformation)
+        limits['BasicLimitInformation']['LimitFlags'] |= win32job.JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+        win32job.SetInformationJobObject(job, win32job.JobObjectExtendedLimitInformation, limits)
+        with log.open('w', encoding='utf-8') as output:
+            output.write('Automatic fixed saved-browser integration replay\n')
+            output.flush()
+            if not admitted('launch'):
+                return False, 'Typed browser verification changed before launch.'
+            process = subprocess.Popen(command, cwd=project['folder'], env=environment(),
+                stdout=output, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
+                creationflags=HIDE | 0x00000004)
+            # A failed assignment is still a suspended child; cleanup kills
+            # that exact child before closing this Job. No arbitrary PID scan.
+            win32job.AssignProcessToJobObject(job, int(process._handle))
+            assigned = True
+            before = snapshot('resume')
+            if not complete(before) or time.monotonic() >= deadline:
+                raise InterruptedError('Typed browser verification changed before resume')
+            resume = ctypes.WinDLL('ntdll').NtResumeProcess
+            resume.argtypes = [wintypes.HANDLE]; resume.restype = wintypes.LONG
+            if resume(int(process._handle)) < 0:
+                raise RuntimeError('Could not resume typed browser verification')
+            while True:
+                if not admitted('monitor'):
+                    raise InterruptedError('Typed browser verification control or basis changed')
+                try:
+                    code = process.wait(timeout=min(1, max(.01, deadline-time.monotonic())))
+                    break
+                except subprocess.TimeoutExpired:
+                    if time.monotonic() >= deadline:
+                        failure = 'Typed browser verification reached its time budget.'
+                        break
+            if code is not None and not admitted('result'):
+                raise InterruptedError('Typed browser verification result was superseded')
+            normal_terminal = code is not None
+    except InterruptedError:
+        raise
+    except (OSError, ValueError, TypeError, KeyError, RuntimeError, ImportError, sqlite3.Error) as error:
+        failure = 'Typed browser verification unavailable (' + type(error).__name__ + ').'
+    finally:
+        # Source checking is also attempted after checker failure, launch error,
+        # cancellation and timeout. Unknown never becomes an accepted result.
+        cleanup_deadline = time.monotonic() + 15
+        try:
+            if process is not None and process.poll() is None:
+                if not assigned:
+                    process.kill()  # Suspended and outside the Job after failed assignment.
+                elif job is not None:
+                    try:
+                        win32job.TerminateJobObject(job, 125)
+                    except Exception:
+                        process.kill()  # Exact child only; Job Close also fences descendants.
+                else:
+                    process.kill()
+                process.wait(timeout=max(.01, cleanup_deadline-time.monotonic()))
+            if job is not None:
+                remaining = members()
+                if remaining and assigned and normal_terminal and process.poll() is not None:
+                    # A normally exited owned parent may finish before its Job
+                    # membership teardown is visible. Observe, never assume,
+                    # empty; this grace consumes the same cleanup budget.
+                    settle_deadline = min(cleanup_deadline, time.monotonic()+2)
+                    while remaining and time.monotonic() < settle_deadline:
+                        time.sleep(min(.05, max(0, settle_deadline-time.monotonic())))
+                        remaining = members()
+                if remaining:
+                    win32job.TerminateJobObject(job, 125)
+                    while remaining and time.monotonic() < cleanup_deadline:
+                        time.sleep(.05)
+                        remaining = members()
+                    failure = 'Typed browser verification left child processes; result unavailable.'
+                family_empty = not remaining
+        except Exception:
+            fence_unknown = True
+        finally:
+            try:
+                if job is not None:
+                    job.Close()
+            except Exception:
+                fence_unknown = True
+            finally:
+                if process is not None:
+                    try:
+                        after = snapshot('final')
+                    except (OSError, ValueError, TypeError, RuntimeError, sqlite3.Error):
+                        after = None
+        if process is not None and (fence_unknown or not family_empty):
+            raise InterruptedError('Owned browser family was not observed empty; defer further work')
+    if process is not None:
+        with log.open('rb') as stream:
+            stream.seek(0, 2); size = stream.tell(); stream.seek(max(0, size-12000))
+            evidence = stream.read(12000).decode('utf-8', errors='replace')
+    if before is not None and (not complete(after) or before != after):
+        return False, evidence + '\nSource freshness changed or became unknown during typed verification.'
+    if process is not None and not family_empty:
+        return False, evidence + '\nOwned browser verification family was not observed empty.'
+    if failure:
+        return False, evidence + '\n' + failure
+    return code == 0, evidence
+
+
+def verify_project(p, timeout=1200, *, _saved_browser=None, _host_admit=None):
     """Run project checks in a kill-on-close Windows Job for safe cancellation."""
+    if _saved_browser is not None:
+        return _verify_saved_browser_project(p, timeout, _saved_browser, _host_admit)
     folder = Path(p["folder"])
     script = folder / ".local-ai/verify.ps1"
     if not script.is_file() or not script.read_text(encoding="utf-8-sig").strip():
@@ -2133,11 +2342,7 @@ def verify_project(p, timeout=1200):
                         raise
         except subprocess.TimeoutExpired:
             # Only our verification process tree, never the shared model/gateway.
-            subprocess.run(
-                ["taskkill.exe", "/PID", str(process.pid), "/T", "/F"],
-                capture_output=True,
-                creationflags=HIDE,
-            )
+            win32job.TerminateJobObject(job, 124)
             process.wait(timeout=15)
             code = 124
         finally:

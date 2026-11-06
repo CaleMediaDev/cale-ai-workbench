@@ -105,3 +105,14 @@ Ghidra uses an exclusive nonhidden app Temp project while its supplied input cop
 The distribution carries its readable source and tests. Existing Validation imports those tests, and the self-check basis hashes the actual installed package/Java/test bytes. A direct release wheel URL with SHA-256 is installed by the existing requirements updater before source activation. The runtime manifest stays at 250 entries for older clients. See [package documentation](packages/cale-security/README.md).
 
 Camera capture has a separate local lifecycle. The GUI retains each suspended child before assignment/resume and owns a Windows Job with kill-on-close enabled. The family must be observed empty before replacement; uncertainty retains the exact owner for retry. A bounded legacy scan retires only this installation's exact camera entrypoint with a proven expired owner, while current and unknown owners are preserved. A fatal worker error ends that session before later buffered readiness or preview messages can replace it. Readiness follows the first valid frame.
+
+
+## Durable continuation and verification ownership
+
+Checked SQLite units remain component evidence. After a queue ends, the worker rebuilds ordinary whole-goal work from current instructions, artifacts and saved checks. Optional observations do not earn completion credit. Read-only check receipts are copied and source-bound before use. Saved browser feedback runs only the fixed host checker under current supervisor ownership; unknown ownership or cleanup defers the slice.
+
+Native schema repairs can retain their earlier request bucket only while the selected model, capacity, configuration and advertised avatar headroom remain current. Transient retries rebuild transport authority and preserve one shared usage clock. This is a request-sizing optimization; real latency and KV-cache savings have not been measured here.
+
+Planning instruction read failures are typed before startup briefing writes. The latest checkpoint survives, and a separate per-project SQLite retry hint backs off from two to thirty seconds. Source changes and implausible clock changes bypass that delay. The hint never supplies permission to act without reading instructions. Pause/Stop remain authoritative. Windows verification timeouts terminate the existing owned Job directly.
+
+Each project retains one checkpoint writer. A general parallel task-team scheduler remains future work. The 1,710-case record is composed from retained runs; five skips and all earlier failures remain explicit. It does not establish real-model app delivery or complete installed-suite success.

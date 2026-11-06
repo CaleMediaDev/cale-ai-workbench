@@ -3002,6 +3002,19 @@ class LongTaskTests(unittest.TestCase):
             task_module.tick()
         self.assertEqual(self.item()["status"], "stopped")
 
+    def test_timeout_retires_existing_owned_job_without_external_taskkill(self):
+        import win32job
+
+        self.verify_script("Start-Sleep -Seconds 60; exit 0")
+        terminate = win32job.TerminateJobObject
+        with (patch.object(win32job, "TerminateJobObject", wraps=terminate) as stopped,
+              patch.object(subprocess, "run", side_effect=AssertionError("No external cleanup command"))):
+            passed, evidence = task_module.verify_project(self.item(), timeout=0.3)
+        self.assertFalse(passed)
+        self.assertIn("exit code: 124", evidence)
+        stopped.assert_called_once()
+        self.assertEqual(stopped.call_args.args[1], 124)
+
     def test_timeout_fails_instead_of_hanging(self):
         self.verify_script("Start-Sleep -Seconds 60; exit 0")
         passed, evidence = task_module.verify_project(self.item(), timeout=0.3)
@@ -3932,3 +3945,243 @@ def test_feedback_maintenance_gui_lifecycle_starts_at_mainloop_and_stops_own_bir
                     assert bool(caught) is loop_failure
                     assert events==["start","mainloop"]+([("stop",token)] if token and fault is None else [])
                 memory.start_maintenance.assert_called_once_with(state)
+
+
+class SavedBrowserHostReplayTests(unittest.TestCase):
+    """Internal checker transport controls, all process operations injected."""
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temporary.cleanup)
+        self.folder = Path(self.temporary.name) / 'project'; self.folder.mkdir()
+        (self.folder / '.local-ai').mkdir()
+        self.state = Path(self.temporary.name) / 'registry'; self.state.mkdir()
+        self.item = {'id': 'owned', 'folder': str(self.folder), 'brief': 'Keep the existing browser suite.'}
+        self.contract = {'suite_sha256': 'a'*64, 'checker_sha256': 'b'*64,
+            'basis_sha256': 'c'*64, 'owner_generation': 0, 'snapshot_key': 'd'*64}
+
+    def test_saved_browser_fixed_command_ignores_saved_powershell(self):
+        (self.folder / '.local-ai/webapp-check.json').write_text('{}', encoding='utf-8')
+        script = self.folder / '.local-ai/verify.ps1'
+        script.write_text('throw "This script must never execute"', encoding='utf-8')
+        command = task_module._saved_browser_verifier_command(self.item, self.contract)
+        self.assertEqual(command[:4], [str(Path(sys.executable).resolve()), '-I', '-B', '-c'])
+        self.assertEqual(command[4], task_module._SAVED_BROWSER_BOOTSTRAP)
+        self.assertNotIn(str(script), command)
+        self.assertIn(str((task_module.ROOT / 'webapp_check.py').resolve()), command)
+        self.assertEqual(command[-4:], ['a'*64, 'b'*64, 'c'*64, '0'])
+        # AST parsing checks the actual fixed child string, without running it.
+        import ast
+        ast.parse(command[4])
+
+    def injected_runner(self, *, source_changed=False, deny_resume=False, popen_error=False, assignment_error=False, polls=0):
+        from types import SimpleNamespace
+        from unittest.mock import Mock
+        import contextlib
+        process = Mock()
+        process._handle = 123; process.returncode = None
+        remaining_polls = [polls]
+        def wait(timeout=None):
+            if remaining_polls[0] > 0:
+                remaining_polls[0] -= 1
+                raise subprocess.TimeoutExpired('owned mocked child', timeout)
+            process.returncode = 0 if not deny_resume else 125
+            return process.returncode
+        process.wait.side_effect = wait
+        process.poll.side_effect = lambda: process.returncode
+        job = Mock()
+        def query(handle, kind):
+            return {'BasicLimitInformation': {'LimitFlags': 0}} if kind == 1 else ()
+        fake = SimpleNamespace(CreateJobObject=Mock(return_value=job),
+            QueryInformationJobObject=Mock(side_effect=query), SetInformationJobObject=Mock(),
+            AssignProcessToJobObject=Mock(side_effect=OSError('Owned assignment failure') if assignment_error else None), TerminateJobObject=Mock(),
+            JobObjectExtendedLimitInformation=1, JobObjectBasicProcessIdList=2,
+            JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE=0x2000)
+        before = {'scope': 'full_project_source', 'omitted': 0, 'sha256': 'a'*64}
+        after = dict(before, sha256='b'*64) if source_changed else before
+        source = Mock(side_effect=[before, after])
+        popen = Mock(side_effect=OSError('Owned launch failure')) if popen_error else Mock(return_value=process)
+        resume = Mock(return_value=0)
+        patches = contextlib.ExitStack()
+        patches.enter_context(patch.dict(sys.modules, {'win32job': fake}))
+        patches.enter_context(patch.object(task_module, 'STATE', self.state))
+        patches.enter_context(patch.object(task_module, '_saved_browser_verifier_command', return_value=['fixed-trusted-checker']))
+        patches.enter_context(patch.object(task_module.project_memory, 'verification_source_state', side_effect=AssertionError('No duplicate full capture in verifier')))
+        patches.enter_context(patch.object(task_module, 'environment', return_value={}))
+        patches.enter_context(patch.object(task_module.subprocess, 'Popen', popen))
+        import ctypes
+        patches.enter_context(patch.object(ctypes, 'WinDLL', return_value=SimpleNamespace(NtResumeProcess=resume)))
+        def admit(stage):
+            if stage in {'resume', 'final'}:
+                if deny_resume and stage == 'resume':
+                    return None
+                return {'key': self.contract['snapshot_key'], 'source': source()}
+            return True
+        return patches, process, job, fake, source, popen, admit
+
+    def test_saved_browser_failed_popen_has_no_execution_or_false_pass(self):
+        patches, process, job, fake, source, popen, admit = self.injected_runner(source_changed=True, popen_error=True)
+        with patches:
+            passed, output = task_module.verify_project(self.item, timeout=2,
+                _saved_browser=self.contract, _host_admit=admit)
+        self.assertFalse(passed); self.assertIn('OSError', output)
+        self.assertEqual(source.call_count, 0); self.assertEqual(popen.call_count, 1)
+        job.Close.assert_called_once()
+
+    def test_saved_browser_resume_refusal_reaps_exact_child_and_rechecks_source(self):
+        patches, process, job, fake, source, popen, admit = self.injected_runner(deny_resume=True)
+        with patches, self.assertRaises(InterruptedError):
+            task_module.verify_project(self.item, timeout=2, _saved_browser=self.contract, _host_admit=admit)
+        fake.TerminateJobObject.assert_called_once_with(job, 125)
+        self.assertEqual(process.wait.call_count, 1)
+        self.assertGreater(process.wait.call_args.kwargs['timeout'], 0)
+        self.assertLessEqual(process.wait.call_args.kwargs['timeout'], 15)
+        self.assertEqual(source.call_count, 1); job.Close.assert_called_once()
+
+    def test_saved_browser_success_with_changed_source_is_failure(self):
+        patches, process, job, fake, source, popen, admit = self.injected_runner(source_changed=True)
+        with patches:
+            passed, output = task_module.verify_project(self.item, timeout=2,
+                _saved_browser=self.contract, _host_admit=admit)
+        self.assertFalse(passed); self.assertIn('Source freshness', output)
+        self.assertEqual(source.call_count, 2)
+
+    def test_saved_browser_host_dispatch_does_not_change_explicit_defaults(self):
+        with (patch.object(task_module, '_verify_saved_browser_project', return_value=(False, 'typed')) as typed,
+              patch.object(task_module, 'verify_audio_handoff', return_value=(False, 'no audio'))):
+            self.assertEqual(task_module.verify_project(self.item), (False, 'no audio'))
+            typed.assert_not_called()
+            self.assertEqual(task_module.verify_project(self.item, timeout=2,
+                _saved_browser=self.contract, _host_admit=lambda stage: True), (False, 'typed'))
+            typed.assert_called_once()
+
+
+    def test_saved_browser_full_captures_do_not_scale_with_monitor_polls(self):
+        for polls in (0, 20):
+            with self.subTest(polls=polls):
+                patches, process, job, fake, source, popen, admit = self.injected_runner(polls=polls)
+                with patches:
+                    passed, output = task_module.verify_project(self.item, timeout=2,
+                        _saved_browser=self.contract, _host_admit=admit)
+                self.assertTrue(passed)
+                self.assertEqual(source.call_count, 2)  # one Resume + one final, zero per poll
+                self.assertEqual(process.wait.call_count, polls+1)
+
+    def test_saved_browser_assignment_failure_kills_exact_unassigned_child(self):
+        patches, process, job, fake, source, popen, admit = self.injected_runner(assignment_error=True)
+        with patches:
+            passed, output = task_module.verify_project(self.item, timeout=2,
+                _saved_browser=self.contract, _host_admit=admit)
+        self.assertFalse(passed)
+        process.kill.assert_called_once()
+        self.assertEqual(process.wait.call_count, 1)
+        self.assertGreater(process.wait.call_args.kwargs['timeout'], 0)
+        self.assertLessEqual(process.wait.call_args.kwargs['timeout'], 15)
+        fake.TerminateJobObject.assert_not_called()
+        job.Close.assert_called_once()
+        self.assertEqual(source.call_count, 1)  # final capture despite assignment failure
+
+
+    def test_saved_browser_actual_pywin32_empty_owned_job_shape(self):
+        import win32job
+        import uuid
+        job = win32job.CreateJobObject(None, 'Local\\CaleOwnedSavedBrowserTest-' + uuid.uuid4().hex)
+        try:
+            members = win32job.QueryInformationJobObject(job, win32job.JobObjectBasicProcessIdList)
+            self.assertIs(type(members), tuple)
+            self.assertEqual(members, ())
+        finally:
+            job.Close()
+
+    def test_saved_browser_actual_tiny_owned_child_reaped_and_job_empty(self):
+        import win32job
+        from unittest.mock import Mock
+        before = {'scope': 'full_project_source', 'omitted': 0, 'sha256': 'a'*64}
+        stages, memberships = [], []
+        query = win32job.QueryInformationJobObject
+        def observed_query(job, kind):
+            result = query(job, kind)
+            if kind == win32job.JobObjectBasicProcessIdList:
+                memberships.append(result)
+            return result
+        def admit(stage):
+            stages.append(stage)
+            return {'key': self.contract['snapshot_key'], 'source': before} if stage in {'resume','final'} else True
+        child = [sys.executable, '-I', '-B', '-c', 'print("owned tiny child finished")']
+        original_popen = task_module.subprocess.Popen
+        children = []
+        def launch(*args, **kwargs):
+            process = original_popen(*args, **kwargs); children.append(process); return process
+        with (patch.object(task_module, 'STATE', self.state),
+              patch.object(task_module, '_saved_browser_verifier_command', return_value=child),
+              patch.object(task_module.subprocess, 'Popen', side_effect=launch),
+              patch.object(win32job, 'QueryInformationJobObject', side_effect=observed_query)):
+            passed, text = task_module.verify_project(self.item, timeout=5,
+                _saved_browser=self.contract, _host_admit=admit)
+        self.assertTrue(passed, text)
+        self.assertIn('owned tiny child finished', text)
+        self.assertEqual(len(children), 1)
+        self.assertEqual(children[0].poll(), 0)
+        self.assertEqual(memberships[-1], ())
+        self.assertEqual(stages.count('resume'), 1)
+        self.assertEqual(stages.count('final'), 1)
+
+
+    def settlement_runner(self, mode):
+        patches, process, job, fake, source, popen, admit = self.injected_runner()
+        clock = [0.0]; queries = []; sleeps = []; terminated = [False]
+        fake.termination_times = []
+        old_query = fake.QueryInformationJobObject.side_effect
+        def query(handle, kind):
+            if kind == fake.JobObjectExtendedLimitInformation:
+                return old_query(handle, kind)
+            queries.append(clock[0])
+            if mode == 'unknown':
+                return ('unknown-pid',)
+            if terminated[0] or mode == 'transient' and len(queries) > 1:
+                return ()
+            return (4321,)
+        def terminate(handle, code):
+            fake.termination_times.append(clock[0])
+            terminated[0] = True
+        def sleep(seconds):
+            sleeps.append(seconds); clock[0] += seconds
+        fake.QueryInformationJobObject.side_effect = query
+        fake.TerminateJobObject.side_effect = terminate
+        patches.enter_context(patch.object(task_module.time, 'monotonic', side_effect=lambda: clock[0]))
+        patches.enter_context(patch.object(task_module.time, 'sleep', side_effect=sleep))
+        return patches, process, job, fake, source, admit, clock, queries, sleeps
+
+    def test_saved_browser_transient_terminal_members_settle_without_termination(self):
+        patches, process, job, fake, source, admit, clock, queries, sleeps = self.settlement_runner('transient')
+        with patches:
+            passed, output = task_module.verify_project(self.item, timeout=2,
+                _saved_browser=self.contract, _host_admit=admit)
+        self.assertTrue(passed, output)
+        fake.TerminateJobObject.assert_not_called()
+        self.assertEqual(len(queries), 2)
+        self.assertGreater(sum(sleeps), 0); self.assertLessEqual(sum(sleeps), 2)
+        self.assertEqual(process.poll(), 0); job.Close.assert_called_once()
+        self.assertEqual(source.call_count, 2)
+
+    def test_saved_browser_persistent_terminal_members_are_terminated_and_not_passed(self):
+        patches, process, job, fake, source, admit, clock, queries, sleeps = self.settlement_runner('persistent')
+        with patches:
+            passed, output = task_module.verify_project(self.item, timeout=2,
+                _saved_browser=self.contract, _host_admit=admit)
+        self.assertFalse(passed)
+        self.assertIn('left child processes', output)
+        fake.TerminateJobObject.assert_called_once_with(job, 125)
+        self.assertEqual(len(fake.termination_times), 1)
+        self.assertGreaterEqual(fake.termination_times[0], 2-0.000001)
+        self.assertLessEqual(fake.termination_times[0], 2+0.000001)
+        self.assertLessEqual(sum(sleeps), 15)
+        self.assertLessEqual(clock[0], 15)
+        job.Close.assert_called_once(); self.assertEqual(source.call_count, 2)
+
+    def test_saved_browser_unknown_terminal_members_raise_typed_defer(self):
+        patches, process, job, fake, source, admit, clock, queries, sleeps = self.settlement_runner('unknown')
+        with patches, self.assertRaises(InterruptedError):
+            task_module.verify_project(self.item, timeout=2,
+                _saved_browser=self.contract, _host_admit=admit)
+        self.assertEqual(sleeps, [])
+        job.Close.assert_called_once(); self.assertEqual(source.call_count, 2)

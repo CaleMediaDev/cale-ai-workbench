@@ -10,10 +10,12 @@ Created by [Cale Media](https://calemedia.com).
 2. Click **Install** and watch the progress bar. Accounts are optional; you can connect them while models download.
 3. Click **Open Cale AI** and describe what you want in chat.
 
-Release 0.5.553 fixes stale camera workers keeping webcams busy, preserves useful camera errors, and adds local official-CVE lookup, supplied-source inspection, dependency evidence and bounded Ghidra analysis through the existing AI tools. Matches remain unconfirmed candidates until tested. [How it works](packages/cale-security/README.md) · [Validation and limits](benchmarks/results/local-security-tools-553-20261106.json).
+Release 0.5.554 improves durable task continuation, fresh browser-check replay, local context handling and automatic retries when task instructions cannot be read. Verification timeouts use the owned Windows Job for cleanup. [Validation and limits](benchmarks/results/agent-core-554-20261106.json).
 
 <details>
 <summary>Feature history and validation</summary>
+
+Release 0.5.553 fixes stale camera workers keeping webcams busy, preserves useful camera errors, and adds local official-CVE lookup, supplied-source inspection, dependency evidence and bounded Ghidra analysis through the existing AI tools. Matches remain unconfirmed candidates until tested. [How it works](packages/cale-security/README.md) · [Validation and limits](benchmarks/results/local-security-tools-553-20261106.json).
 
 Release 0.5.552 shortens repeated worker guidance while retaining the original request, leaving more briefing space for installed paths and skill descriptions. [Validation and limits](benchmarks/results/concise-installed-briefing-552-20261106.json).
 

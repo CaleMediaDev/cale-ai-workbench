@@ -1367,3 +1367,248 @@ def test_memory_query_preserves_combining_mark_words(tmp_path, word):
     note = memory.save(tmp_path, "note", "Unicode source", word)
     assert [row["id"] for row in memory.search(tmp_path, word, kind="note")] == [note["id"]]
     assert memory._query_words("\u0301 " + word + " other_word") == [word, "other", "word"]
+
+
+def _public548_preview_cache_fixture(tmp_path, *, application=False, wal=False):
+    """Synthetic cache rows test validation/copying, not actual checker authority."""
+    import task_context
+    import time
+    root = tmp_path / 'project'
+    root.mkdir()
+    notes = root / '.local-ai'
+    notes.mkdir()
+    (root / 'logic.py').write_text('def twice(value): return value * 2\n', encoding='utf8')
+    checker = tmp_path / 'owned-checker.py'
+    checker.write_text('# inert checker identity fixture\n', encoding='utf8')
+    if application:
+        (root / 'node_modules').mkdir()
+        (root / 'node_modules/unused.js').write_text('// unused runtime fixture\n', encoding='utf8')
+    project = {'id': 'preview-fixture', 'folder': str(root), 'brief': 'Verify twice(value).'}
+    database = notes / 'memory.sqlite3'
+    conn = sqlite3.connect(database)
+    if wal:
+        assert conn.execute('PRAGMA journal_mode=WAL').fetchone()[0] == 'wal'
+    conn.execute('CREATE TABLE verification_receipts (id TEXT PRIMARY KEY,payload TEXT NOT NULL,created REAL NOT NULL)')
+    conn.execute('CREATE TABLE task_steps (request_hash TEXT,status TEXT,check_tool TEXT,check_arguments TEXT,position INTEGER,id INTEGER)')
+    request = task_context.request_identity(root)
+    conn.execute('INSERT INTO task_steps VALUES(?,?,?,?,?,?)', (request, 'done', 'check_webapp',
+        json.dumps({'path': 'index.html', 'cases': [{'visible': ['result']}]}), 1, 1))
+    conn.commit()
+    source = memory.verification_source_state(root)
+    value = {'version': 1, 'observed_at': time.time(), 'dependency_scope': 'project_local_dependencies',
+        'project': hashlib.sha256(str(root.resolve()).encode()).hexdigest(),
+        'planning_basis': memory.verification_basis(root, project), 'request_hash': request,
+        'checker': 'check_webapp_saved', 'check_sha256': 'a' * 64, 'suite_sha256': 'b' * 64,
+        'checker_sha256': hashlib.sha256(checker.read_bytes()).hexdigest(),
+        'bound_step_check_sha256': None, 'source_before': source, 'source_after': source,
+        'report_sha256': 'c' * 64, 'passed': True, 'verification_level': 'acceptance_passed',
+        'training_eligible': False, 'persistence_witnesses': []}
+    identifier = memory._verification_digest(value)
+    conn.execute('INSERT INTO verification_receipts VALUES(?,?,?)',
+                 (identifier, json.dumps(value), time.time()))
+    conn.commit()
+    return root, project, checker, conn, value
+
+
+@pytest.mark.parametrize('application', [False, True])
+def test_public548_receipt_preview_preserves_full_and_application_source_contracts(tmp_path, application):
+    root, project, checker, conn, value = _public548_preview_cache_fixture(tmp_path, application=application)
+    try:
+        status = {}
+        ordinary = memory.current_check_receipts(root, project, checker_file=checker, source_status=status)
+        expected_scope = 'application_source' if application else 'full_project_source'
+        assert value['source_after']['scope'] == expected_scope
+        assert status['scope'] == expected_scope
+        assert ordinary == [value]
+        if application:
+            assert status['limitations'] == ['excluded_runtime']
+            assert value['source_after']['omitted'] > 0
+        with patch.object(memory, 'connection', side_effect=AssertionError('Preview must not open live project SQLite')):
+            preview = memory.readonly_check_receipts(root, project, checker_file=checker, include_plan=True)
+        assert preview['status'] == 'available'
+        assert preview['source'] == value['source_after']
+        assert preview['receipts'] == ordinary
+        assert preview['plan']['total'] == preview['plan']['done'] == 1
+        assert preview['plan']['remaining'] == 0
+    finally:
+        conn.close()
+
+
+@pytest.mark.parametrize('application', [False, True])
+@pytest.mark.parametrize('changed', ['source', 'instructions', 'checker'])
+def test_public548_preview_and_ordinary_reader_reject_stale_cached_rows(tmp_path, application, changed):
+    root, project, checker, conn, _ = _public548_preview_cache_fixture(tmp_path, application=application)
+    try:
+        path = {'source': root / 'logic.py', 'instructions': root / '.local-ai/USER-REQUESTS.md',
+                'checker': checker}[changed]
+        path.write_text('changed bytes\n', encoding='utf8')
+        assert memory.current_check_receipts(root, project, checker_file=checker) == []
+        preview = memory.readonly_check_receipts(root, project, checker_file=checker, include_plan=True)
+        assert preview['receipts'] == []
+    finally:
+        conn.close()
+
+
+@pytest.mark.parametrize('scope', ['limited_dependency_manifest', 'unknown'])
+def test_public548_receipt_preview_does_not_promote_unknown_source_scope(tmp_path, scope):
+    root, project, checker, conn, value = _public548_preview_cache_fixture(tmp_path)
+    try:
+        limited = {**value['source_after'], 'scope': scope, 'omitted': 1, 'limitations': ['changed_file']}
+        with patch.object(memory, 'verification_source_state', return_value=limited):
+            result = memory.readonly_check_receipts(root, project, checker_file=checker, include_plan=True)
+        assert result['status'] == 'unknown'
+        assert result['reason'] == 'source_scope_limited'
+        assert result['receipts'] == []
+    finally:
+        conn.close()
+
+
+def test_public548_receipt_preview_copies_nonempty_wal_without_touching_live_sidecars(tmp_path):
+    root, project, checker, conn, value = _public548_preview_cache_fixture(tmp_path, wal=True)
+    try:
+        database = root / '.local-ai/memory.sqlite3'
+        wal = database.with_name(database.name + '-wal')
+        assert wal.stat().st_size > 0
+        paths = [p for p in database.parent.iterdir() if p.name.startswith('memory.sqlite3')]
+        before = {p.name: p.read_bytes() for p in paths}
+        connect = sqlite3.connect
+        opened = []
+        def copy_only(path, *args, **kwargs):
+            selected = Path(path).resolve()
+            assert selected != database.resolve()
+            opened.append(selected)
+            return connect(path, *args, **kwargs)
+        with patch.object(sqlite3, 'connect', side_effect=copy_only):
+            result = memory.readonly_check_receipts(root, project, checker_file=checker, include_plan=True)
+        assert result['status'] == 'available'
+        assert result['receipts'] == [value]
+        assert result['plan']['done'] == 1
+        assert opened and all(not p.is_relative_to(root) for p in opened)
+        assert {p.name: p.read_bytes() for p in paths} == before
+        assert set(result['_plan_snapshot']) == {database.name, wal.name}
+    finally:
+        conn.close()
+
+
+def test_public548_preview_final_instruction_recheck_rejects_during_copy_change(tmp_path):
+    root, project, checker, conn, _ = _public548_preview_cache_fixture(tmp_path)
+    original = memory._receipt_stream
+    changed = []
+    def mutate_after_copy(path, identity, deadline, destination=None):
+        digest = original(path, identity, deadline, destination)
+        if destination is not None and not changed:
+            (root / '.local-ai/USER-REQUESTS.md').write_text('New requirement\n', encoding='utf8')
+            changed.append(True)
+        return digest
+    try:
+        with patch.object(memory, '_receipt_stream', side_effect=mutate_after_copy):
+            result = memory.readonly_check_receipts(root, project, checker_file=checker, include_plan=True)
+        assert changed
+        assert result['status'] == 'unknown'
+        assert result['receipts'] == []
+    finally:
+        conn.close()
+
+
+@pytest.mark.parametrize('failure', ['plan_bounds', 'sql_budget', 'snapshot_oversize'])
+def test_public548_preview_bounds_never_return_partial_authority(tmp_path, failure):
+    from contextlib import ExitStack
+    root, project, checker, conn, _ = _public548_preview_cache_fixture(tmp_path)
+    try:
+        if failure == 'plan_bounds':
+            conn.execute("UPDATE task_steps SET check_arguments=?", ('x' * 64001,))
+            conn.commit()
+        with ExitStack() as stack:
+            if failure == 'sql_budget':
+                stack.enter_context(patch.object(memory, '_RECEIPT_RO_SQL_SECONDS', 0))
+            elif failure == 'snapshot_oversize':
+                stack.enter_context(patch.object(memory, '_RECEIPT_RO_DB_BYTES', 1))
+            result = memory.readonly_check_receipts(root, project, checker_file=checker, include_plan=True)
+        assert result['status'] == 'unknown'
+        assert result['receipts'] == []
+        assert 'plan' not in result
+    finally:
+        conn.close()
+
+
+@pytest.mark.parametrize('deadline', [True, False, float('nan'), float('inf'), -float('inf'), 'soon', 10 ** 400])
+def test_public548_source_deadline_rejects_nonfinite_or_non_numeric_values(tmp_path, deadline):
+    with pytest.raises(ValueError, match='finite monotonic timestamp'):
+        memory.verification_source_state(tmp_path, deadline=deadline)
+
+
+@pytest.mark.parametrize('application', [False, True])
+def test_public548_source_deadline_default_preserves_complete_scope_and_earlier_budget_limits(tmp_path, application):
+    import time
+    root, project, checker, conn, value = _public548_preview_cache_fixture(tmp_path, application=application)
+    try:
+        assert memory.verification_source_state(root) == value['source_after']
+        assert memory.verification_source_state(root, deadline=None) == value['source_after']
+        assert memory.verification_source_state(root, deadline=time.monotonic() + 60) == value['source_after']
+        expired = memory.verification_source_state(root, deadline=time.monotonic() - 1)
+        assert expired['scope'] == 'limited_dependency_manifest'
+        assert 'elapsed_budget' in expired['limitations']
+        assert expired['omitted'] > 0
+    finally:
+        conn.close()
+
+
+def test_public548_source_deadline_cannot_extend_default_elapsed_budget(tmp_path):
+    import time
+    (tmp_path / 'plain.txt').write_text('owned bytes', encoding='utf8')
+    with patch.object(memory, '_VERIFICATION_MAX_SECONDS', 0):
+        ordinary = memory.verification_source_state(tmp_path)
+        future = memory.verification_source_state(tmp_path, deadline=time.monotonic() + 100000)
+    assert ordinary['scope'] == future['scope'] == 'limited_dependency_manifest'
+    assert 'elapsed_budget' in ordinary['limitations']
+    assert 'elapsed_budget' in future['limitations']
+
+
+@pytest.mark.parametrize('application', [False, True])
+def test_public548_preview_source_deadline_exhaustion_is_unknown_without_live_sidecar_changes(tmp_path, application):
+    root, project, checker, conn, _ = _public548_preview_cache_fixture(tmp_path, application=application, wal=True)
+    try:
+        paths = [p for p in (root / '.local-ai').iterdir() if p.name.startswith('memory.sqlite3')]
+        before = {p.name: p.read_bytes() for p in paths}
+        with patch.object(memory, '_RECEIPT_RO_COPY_SECONDS', 0):
+            result = memory.readonly_check_receipts(root, project, checker_file=checker, include_plan=True)
+        assert result['status'] == 'unknown'
+        assert result['receipts'] == []
+        assert {p.name: p.read_bytes() for p in paths} == before
+    finally:
+        conn.close()
+
+
+def test_public548_preview_uses_one_absolute_deadline_for_both_source_captures(tmp_path):
+    root, project, checker, conn, value = _public548_preview_cache_fixture(tmp_path)
+    original = memory.verification_source_state
+    seen = []
+    def observe(folder, *, deadline=None):
+        assert deadline is not None
+        seen.append(deadline)
+        return original(folder, deadline=deadline)
+    try:
+        with patch.object(memory, 'verification_source_state', side_effect=observe):
+            result = memory.readonly_check_receipts(root, project, checker_file=checker, include_plan=True)
+        assert result['status'] == 'available'
+        assert result['receipts'] == [value]
+        assert len(seen) == 2 and seen[0] == seen[1]
+    finally:
+        conn.close()
+
+
+def test_public548_preview_null_status_is_unknown_without_live_sidecar_mutation(tmp_path):
+    root, project, checker, conn, _ = _public548_preview_cache_fixture(tmp_path, wal=True)
+    try:
+        conn.execute('UPDATE task_steps SET status=NULL')
+        conn.commit()
+        paths = [p for p in (root / '.local-ai').iterdir() if p.name.startswith('memory.sqlite3')]
+        before = {p.name: p.read_bytes() for p in paths}
+        result = memory.readonly_check_receipts(root, project, checker_file=checker, include_plan=True)
+        assert result['status'] == 'unknown'
+        assert result['reason'] == 'plan_bounds'
+        assert result['receipts'] == []
+        assert 'plan' not in result and '_plan_snapshot' not in result
+        assert {p.name: p.read_bytes() for p in paths} == before
+    finally:
+        conn.close()

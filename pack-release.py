@@ -22,6 +22,7 @@ missing_tests = sorted(
 if missing_tests:
     raise ValueError("Release manifest omits validation files: " + ", ".join(missing_tests))
 extras = [
+    "benchmarks/results/agent-core-554-20261106.json",
     ".gitattributes",
     "benchmarks/results/local-security-tools-553-20261106.json",
     "packages/cale-security/LICENSE",

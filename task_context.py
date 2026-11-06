@@ -21,6 +21,85 @@ LIMITS = {"PLAN.md": 3500, "PROGRESS.md": 3500, "USER-REQUESTS.md": 2500}
 CACHE_RECHECK_SECONDS = 300
 
 
+def _instruction_wait_basis(project):
+    """Metadata is only a retry hint, never proof of instruction contents."""
+    root = project_memory._artifact_project_root(project['folder'])
+    rows = []
+    for path in (root/'AGENTS.md', document_path(root, 'USER-REQUESTS.md')):
+        try:
+            info = path.lstat()
+            rows.append((info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns))
+        except FileNotFoundError:
+            rows.append(None)
+        except OSError:
+            rows.append('unavailable')
+    value = [str(project.get('id', '')), str(project.get('brief', '')), rows]
+    return root, hashlib.sha256(json.dumps(value, sort_keys=True).encode()).hexdigest()
+
+
+def _instruction_wait_schema(conn):
+    conn.execute('''CREATE TABLE IF NOT EXISTS native_instruction_wait (
+        id INTEGER PRIMARY KEY CHECK(id=1), basis TEXT NOT NULL,
+        attempts INTEGER NOT NULL, retry_at REAL NOT NULL)''')
+
+
+def _instruction_wait_row(root):
+    """Polling an ordinary task must not initialize or rewrite its database."""
+    import sqlite3
+    database = root/'.local-ai/memory.sqlite3'
+    if not database.is_file():
+        return None
+    conn = None
+    try:
+        conn = sqlite3.connect(database.as_uri() + '?mode=ro', uri=True, timeout=0.1)
+        conn.row_factory = sqlite3.Row
+        return conn.execute('SELECT basis,retry_at FROM native_instruction_wait WHERE id=1').fetchone()
+    except sqlite3.OperationalError as exc:
+        if (str(exc) == 'no such table: native_instruction_wait'
+                or getattr(exc, 'sqlite_errorcode', None) in {sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED}):
+            # Timing is optional. A locked hint never grants instruction-read
+            # authority: the normal worker must still read the actual rules.
+            return None
+        raise
+    finally:
+        if conn is not None:
+            conn.close()
+
+
+def defer_instruction_read(project):
+    """Persist bounded automatic retry timing, independent of the checkpoint."""
+    root, basis = _instruction_wait_basis(project)
+    now = time.time()
+    with project_memory.connection(root) as conn:
+        _instruction_wait_schema(conn)
+        conn.execute('BEGIN IMMEDIATE')
+        previous = conn.execute('SELECT basis,attempts FROM native_instruction_wait WHERE id=1').fetchone()
+        attempts = min(5, max(0, int(previous['attempts'])) + 1) if previous and previous['basis'] == basis else 1
+        delay = min(30, 2 ** attempts)
+        conn.execute('''INSERT INTO native_instruction_wait VALUES(1,?,?,?)
+            ON CONFLICT(id) DO UPDATE SET basis=excluded.basis,
+            attempts=excluded.attempts,retry_at=excluded.retry_at''', (basis, attempts, now + delay))
+    return delay
+
+
+def instruction_wait(project):
+    """A changed source or suspect wall clock bypasses the short retry delay."""
+    root, basis = _instruction_wait_basis(project)
+    row = _instruction_wait_row(root)
+    now = time.time()
+    return bool(row and row['basis'] == basis and now < row['retry_at'] <= now + 30)
+
+
+def clear_instruction_wait(project):
+    """Successful slices retire only this task's retry hint, never task data."""
+    root, basis = _instruction_wait_basis(project)
+    row = _instruction_wait_row(root)
+    if not row or row['basis'] != basis:
+        return
+    with project_memory.connection(root) as conn:
+        conn.execute('DELETE FROM native_instruction_wait WHERE id=1 AND basis=?', (basis,))
+
+
 def _schema(conn):
     conn.execute("""CREATE TABLE IF NOT EXISTS task_api_scope (
         request_hash TEXT NOT NULL, brief_hash TEXT NOT NULL, operation TEXT NOT NULL,
@@ -1173,3 +1252,122 @@ def explicit_persistence_obligations(folder, project):
                          (value['id'],json.dumps(value,sort_keys=True),time.time()))
         conn.execute('DELETE FROM requirement_obligations WHERE id NOT IN (SELECT id FROM requirement_obligations ORDER BY updated DESC LIMIT 64)')
     return obligations
+
+
+def parse_persistence_obligations(sources, basis):
+    """Pure version of the final gate's exact phrase semantics; no saved authority."""
+    obligations=[]
+    for source,text in sources:
+        for match in re.finditer(r'[^.!?;\n]+[.!?;]?',text):
+            clause=match[0].strip()
+            if not clause or len(clause)>400 or clause.endswith('?'):continue
+            if re.search(r"(?i)\b(?:do not|don't|never|no need|not required|need not|needn't|does not|doesn't|without|may|might|could|optionally|perhaps|should not|must not|shall not|will not|not save|not persist|not retain|not keep)\b",clause):continue
+            if re.match(r'(?i)(?:if|explain|describe|example|suppose|what|why|how)\b',clause):continue
+            if re.search(r'(?i)\b(?:if|unless)\b',clause):continue
+            reload_word=r'\b(?:reload(?:ing|s)?|refresh(?:ing|es)?|reopen(?:ing)?|restart(?:ing|s)?)\b'
+            # 'Save after reloading' can be a screenshot/export procedure.
+            # Require intrinsic persist semantics or save ACROSS reloads;
+            # generic 'keep visible' is layout, not a mutation-retention claim.
+            persistent=re.search(r'(?i)\bpersist\b.{0,180}\b(?:after|across|between|through|on)\b.{0,80}'+reload_word,clause)
+            save_across=re.search(r'(?i)\bsave\b.{0,180}\b(?:across|between|through)\b.{0,80}'+reload_word,clause)
+            reload_preserves=re.search(reload_word+r'\s+(?:must|shall|should)\s+(?:preserve|retain|restore)\b',clause,re.I)
+            if re.search(r'(?i)\b(?:visibility|visible|layout|aligned|alignment|nothing)\b',clause):continue
+            if not (persistent or save_across or reload_preserves):continue
+            effects=[]
+            if re.search(r'(?i)\b(?:added|additions|created|creations)\b',clause):effects.append('creation')
+            if re.search(r'(?i)\b(?:deleted|deletions|removed|removals)\b',clause):effects.append('removal')
+            if not effects:effects=['mutation']
+            value={'kind':'browser_persistence','required_effects':effects,'source':source,'span':[match.start(),match.end()],
+                   'span_sha256':hashlib.sha256(match[0].encode()).hexdigest(),'planning_basis':basis}
+            value['id']=_recovery_hash(value)
+            obligations.append(value)
+            if len(obligations)>=32:break
+        if len(obligations)>=32:break
+    return obligations
+
+
+def planned_persistence_effects(specifications):
+    """Conservative structural candidates, NEVER browser observations or passes.
+
+    Compare typed values on one target in one sequence. A changing action must
+    follow an asserted baseline, then a later action-free reload must assert
+    its new value. Removal additionally needs a prior reload baseline. Unknown
+    meanings, unsupported counts and truncated sequences remain unproven.
+    """
+    from webapp_check import normalize_spec, validate_spec_data
+    groups = {}
+    def assertions(case):
+        result = {}
+        for namespace in ("expect", "row_counts", "state"):
+            values = case.get(namespace)
+            if isinstance(values, dict) and len(values) <= 128:
+                for key, value in values.items():
+                    if isinstance(key, str) and len(key) <= 166:
+                        result[(namespace, key)] = value
+        return result
+    def canonical(value):
+        return json.dumps(value, sort_keys=True, allow_nan=False, separators=(",", ":"))
+    def actions(case):
+        return any(case.get(key) for key in ("set", "click", "keys"))
+    for sequence, spec in enumerate(specifications[:128]):
+        try:
+            spec = normalize_spec(spec)
+            validate_spec_data(spec)
+        except (ValueError, TypeError, RecursionError):
+            continue
+        cases = spec.get("cases")
+        if not isinstance(cases, list) or not 1 <= len(cases) <= 128:
+            continue
+        baseline = {}
+        reload_baseline = {}
+        pending = {}
+        try:
+            for case in cases:
+                if not isinstance(case, dict):
+                    break
+                values = assertions(case)
+                if case.get("reload") is True:
+                    if actions(case):
+                        pending.clear()
+                        baseline.clear()
+                        reload_baseline.clear()
+                        continue
+                    for target, (value, effect) in pending.items():
+                        if target in values and canonical(values[target]) == canonical(value):
+                            effects = groups.setdefault((sequence, target), set())
+                            effects.add("mutation")
+                            if effect:
+                                effects.add(effect)
+                    pending.clear()
+                    baseline = values
+                    reload_baseline = values
+                    continue
+                if actions(case):
+                    # Another action invalidates the preceding candidate;
+                    # unrelated actions cannot bridge a claimed reload proof.
+                    pending.clear()
+                    for target, value in values.items():
+                        if target not in baseline or canonical(value) == canonical(baseline[target]):
+                            continue
+                        effect = None
+                        namespace, key = target
+                        count = namespace == "row_counts" or (namespace == "state" and key.endswith(".length"))
+                        old = baseline[target]
+                        if count and type(old) is int and type(value) is int and 0 <= old <= 10000 and 0 <= value <= 10000:
+                            if value > old:
+                                effect = "creation"
+                            elif target in reload_baseline and canonical(reload_baseline[target]) == canonical(old):
+                                effect = "removal"
+                        pending[target] = (value, effect)
+                    reload_baseline = {}
+                for target in list(pending):
+                    if target in values and canonical(values[target]) != canonical(pending[target][0]):
+                        pending.pop(target)
+                baseline.update(values)
+        except (ValueError, TypeError, RecursionError):
+            continue  # Malformed stored data is not a planned coverage claim.
+    # Do not combine an unrelated creation and removal into one collection's
+    # planned coverage. The real witness gate is still stricter than this hint.
+    return sorted(max(groups.values(), key=lambda value: (len(value), sorted(value)), default=set()))
+
+

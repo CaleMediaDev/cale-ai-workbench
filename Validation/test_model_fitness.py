@@ -808,3 +808,93 @@ def test_retirement_does_not_hide_ollama_failures():
         patch.object(model_library, "delete_model", side_effect=unavailable),
     ):
         assert not model_library.retire_slow_model(item)
+
+
+
+def test_typed_headroom_proves_local_absence_without_process_or_gpu_queries(tmp_path, monkeypatch):
+    import psutil
+    monkeypatch.setattr(psutil, 'Process', lambda _pid: (_ for _ in ()).throw(AssertionError('No owner exists')))
+    monkeypatch.setattr(model_fitness, 'gpu_vram_gb', lambda: (_ for _ in ()).throw(AssertionError('No GPU query')))
+    absent = model_fitness.avatar_headroom_observation(tmp_path)
+    assert absent['status'] == 'known' and absent['reserved_gb'] == 0
+    assert absent['owners'] == [] and absent['marker_sha256'] == {}
+    assert model_fitness.avatar_headroom_observation(tmp_path)['identity'] == absent['identity']
+    (tmp_path / 'LongTasks').mkdir()
+    empty = model_fitness.avatar_headroom_observation(tmp_path)
+    assert empty['status'] == 'known' and empty['reserved_gb'] == 0
+    # Directory appearance is conservatively a different observation identity.
+    assert empty['identity'] != absent['identity']
+
+
+def test_typed_headroom_live_owner_and_heartbeat_have_real_file_proofs(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    import psutil
+    folder = tmp_path / 'LongTasks'
+    folder.mkdir()
+    marker = folder / 'avatar-gpu-current.json'
+    record = {'pid': 123, 'started': 100.0, 'reserved_bytes': 2 * 1024 ** 3, 'phase': 'active', 'updated': 101}
+    marker.write_text(json.dumps(record), encoding='utf-8')
+    process = SimpleNamespace(is_running=lambda: True, create_time=lambda: 100.0,
+        cmdline=lambda: ['python.exe', str(tmp_path / 'camera_presence.py'), '--avatar'])
+    monkeypatch.setattr(psutil, 'Process', lambda pid: process if pid == 123 else (_ for _ in ()).throw(AssertionError('Unrelated PID')))
+    before = model_fitness.avatar_headroom_observation(tmp_path)
+    assert before['status'] == 'known' and before['reserved_gb'] == 2
+    assert before['owners'] == [(123, 100.0, 2 * 1024 ** 3, 'active', 'camera')]
+    record['updated'] = 102
+    marker.write_text(json.dumps(record), encoding='utf-8')
+    after = model_fitness.avatar_headroom_observation(tmp_path)
+    assert after['status'] == 'known' and after['identity'] == before['identity']
+    assert after['marker_sha256'] != before['marker_sha256']
+    process.create_time = lambda: 200.0
+    stale = model_fitness.avatar_headroom_observation(tmp_path)
+    assert stale['status'] == 'known' and stale['reserved_gb'] == 0
+    assert stale['identity'] != after['identity']
+
+
+def test_typed_headroom_invalid_metadata_is_unknown_but_legacy_numeric_fallback_stays_zero(tmp_path, monkeypatch):
+    import psutil
+    folder = tmp_path / 'LongTasks'
+    folder.mkdir()
+    marker = folder / 'avatar-gpu-current.json'
+    monkeypatch.setattr(psutil, 'Process', lambda _pid: (_ for _ in ()).throw(AssertionError('Invalid marker must not query process')))
+    for raw in ('[]', '{broken', 'x' * 4097, '{"pid":true,"started":100,"reserved_bytes":1,"phase":"active"}'):
+        marker.write_text(raw, encoding='utf-8')
+        assert model_fitness.avatar_headroom_observation(tmp_path)['status'] == 'unknown'
+        assert model_fitness.avatar_reserved_vram_gb(tmp_path) == 0
+
+
+def test_typed_headroom_changed_file_during_owner_observation_is_unknown(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    import psutil
+    folder = tmp_path / 'LongTasks'
+    folder.mkdir()
+    marker = folder / 'avatar-gpu-current.json'
+    record = {'pid': 123, 'started': 100.0, 'reserved_bytes': 2 * 1024 ** 3, 'phase': 'active'}
+    marker.write_text(json.dumps(record), encoding='utf-8')
+    calls = []
+    def command():
+        calls.append(True)
+        if len(calls) == 2:
+            marker.write_text(json.dumps({**record, 'reserved_bytes': 3 * 1024 ** 3}), encoding='utf-8')
+        return ['python.exe', str(tmp_path / 'camera_presence.py'), '--avatar']
+    monkeypatch.setattr(psutil, 'Process', lambda _pid: SimpleNamespace(
+        is_running=lambda: True, create_time=lambda: 100.0, cmdline=command))
+    assert model_fitness.avatar_headroom_observation(tmp_path)['status'] == 'unknown'
+
+
+
+def test_typed_headroom_rejects_finite_json_syntax_that_overflows_float(tmp_path, monkeypatch):
+    import psutil
+    import math
+    config = tmp_path / 'Cloud'
+    config.mkdir()
+    path = config / 'provider-scope.json'
+    monkeypatch.setattr(psutil, 'Process', lambda _pid: (_ for _ in ()).throw(AssertionError('No owner exists')))
+    for number in ('1e309', '-1e309', '1e999999'):
+        # parse_constant is not invoked for these syntactically ordinary JSON numbers.
+        assert not math.isfinite(json.loads(number))
+        path.write_text('{"scope":"both","nested":{"value":' + number + '}}', encoding='utf-8')
+        assert model_fitness.avatar_headroom_observation(tmp_path)['status'] == 'unknown'
+        assert model_fitness.avatar_reserved_vram_gb(tmp_path) == 0
+    path.write_text('{"scope":"both","finite":1e308}', encoding='utf-8')
+    assert model_fitness.avatar_headroom_observation(tmp_path)['status'] == 'known'

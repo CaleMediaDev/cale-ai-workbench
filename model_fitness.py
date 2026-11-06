@@ -93,6 +93,183 @@ def avatar_reserved_vram_gb(root=None):
     return sum(reservations.values()) / 1024 ** 3
 
 
+
+def avatar_headroom_observation(root=None, *, state=None):
+    """Observe advertised local avatar allocations, not an atomic GPU lease.
+
+    Unlike the legacy numeric API, uncertainty is explicit. Only this bounded
+    fresh observation can authorize retaining a larger inner-repair context.
+    It performs no provider calls, GPU queries, writes or process controls.
+    """
+    import hashlib
+    import json
+    import math
+    import stat
+    from pathlib import Path
+
+    import psutil
+
+    def unknown(reason):
+        return {"status": "unknown", "reason": reason}
+
+    def reject_constant(_value):
+        raise ValueError("constant")
+
+    def finite_float(value):
+        result = float(value)
+        if not math.isfinite(result):
+            raise ValueError("nonfinite")
+        return result
+
+    def stamp(value):
+        return (value.st_dev, value.st_ino, value.st_mode,
+                value.st_size, value.st_mtime_ns)
+
+    def plain(value, directory=False):
+        return (not getattr(value, "st_file_attributes", 0) & 0x400
+                and (stat.S_ISDIR(value.st_mode) if directory else stat.S_ISREG(value.st_mode)))
+
+    def bounded_file(path):
+        try:
+            before = path.lstat()
+        except FileNotFoundError:
+            return None
+        if not plain(before) or before.st_size > 4096 or before.st_nlink != 1:
+            raise ValueError("file")
+        with path.open("rb") as stream:
+            opened = os.fstat(stream.fileno())
+            if stamp(opened) != stamp(before):
+                raise ValueError("changed")
+            raw = stream.read(4097)
+            if len(raw) > 4096 or stamp(os.fstat(stream.fileno())) != stamp(opened):
+                raise ValueError("changed")
+        if stamp(path.lstat()) != stamp(before):
+            raise ValueError("changed")
+        return raw
+
+    def inventory(folder):
+        try:
+            before = folder.lstat()
+        except FileNotFoundError:
+            return None
+        if not plain(before, directory=True):
+            raise ValueError("directory")
+        names = []
+        with os.scandir(folder) as entries:
+            for count, entry in enumerate(entries, 1):
+                if count > 512:
+                    raise ValueError("inventory")
+                name = entry.name
+                if name == "avatar-gpu-current.json" or (name.startswith("avatar-gpu-active-") and name.endswith(".json")):
+                    names.append(name)
+                    if len(names) > 32:
+                        raise ValueError("inventory")
+        if stamp(folder.lstat()) != stamp(before):
+            raise ValueError("changed")
+        return sorted(names)
+
+    def owner(record, app):
+        pid, reserved, started = record.get("pid"), record.get("reserved_bytes"), record.get("started")
+        if (type(pid) is not int or pid <= 0 or type(reserved) is not int
+                or not 0 < reserved <= 64 * 1024 ** 3
+                or type(started) not in (int, float) or not math.isfinite(started) or started <= 0
+                or record.get("phase") not in ("starting", "active")):
+            raise ValueError("record")
+        try:
+            process = psutil.Process(pid)
+            birth = process.create_time()
+            running = process.is_running()
+            if type(running) is not bool or type(birth) not in (int, float) or not math.isfinite(birth) or birth <= 0:
+                raise ValueError("owner")
+            if not running or abs(birth - started) >= .01:
+                return None  # A positively observed stale owner is not a live allocation.
+            command = process.cmdline()
+            if (not isinstance(command, list) or not 1 <= len(command) <= 128
+                    or any(not isinstance(value, str) or len(value) > 4096 for value in command)):
+                raise ValueError("command")
+            camera = ("--avatar" in command and any(
+                Path(value).resolve() == app / "camera_presence.py" for value in command[1:]))
+            probe = any(Path(value).resolve() == app / "video_generation.py"
+                and index + 1 < len(command) and command[index + 1] == "avatar-profile-probe"
+                for index, value in enumerate(command) if index > 0)
+            if not (camera or probe):
+                raise ValueError("owner")
+            proof = (pid, started, reserved, record["phase"], "camera" if camera else "probe")
+            if (not process.is_running() or process.create_time() != birth
+                    or process.cmdline() != command):
+                raise ValueError("changed")
+            return proof
+        except psutil.NoSuchProcess:
+            return None
+
+    try:
+        app = Path(root or Path(__file__).resolve().parent).resolve()
+        app_before = app.stat()
+        if not plain(app_before, directory=True):
+            return unknown("root_unavailable")
+        folder = app / "LongTasks"
+        config = Path(state) if state is not None else app / "Cloud"
+        # Only these non-secret routing-policy files; values never leave this helper.
+        config_names = ("model-choice.json", "provider-scope.json", "routing-mode.json")
+        try:
+            config_before = config.lstat()
+        except FileNotFoundError:
+            config_before = None
+        if config_before is not None and not plain(config_before, directory=True):
+            return unknown("config_unavailable")
+        configs = {name: bounded_file(config / name) for name in config_names}
+        for value in configs.values():
+            if value is not None and not isinstance(json.loads(value, parse_constant=reject_constant, parse_float=finite_float), dict):
+                return unknown("config_invalid")
+        names = inventory(folder)
+        records = {}
+        live = []
+        for name in names or []:
+            raw = bounded_file(folder / name)
+            if raw is None:
+                return unknown("changed")
+            record = json.loads(raw, parse_constant=reject_constant, parse_float=finite_float)
+            if not isinstance(record, dict):
+                return unknown("record_invalid")
+            if name != "avatar-gpu-current.json" and name != "avatar-gpu-active-" + str(record.get("pid")) + ".json":
+                return unknown("record_invalid")
+            observed = owner(record, app)
+            records[name] = (raw, record, observed)
+            if observed is not None:
+                live.append(observed)
+        if names != inventory(folder) or stamp(app.stat()) != stamp(app_before):
+            return unknown("changed")
+        for name, (raw, record, observed) in records.items():
+            if bounded_file(folder / name) != raw or owner(record, app) != observed:
+                return unknown("changed")
+        if any(bounded_file(config / name) != value for name, value in configs.items()):
+            return unknown("changed")
+        try:
+            config_after = config.lstat()
+        except FileNotFoundError:
+            config_after = None
+        if ((config_before is None) != (config_after is None)
+                or config_before is not None and stamp(config_before) != stamp(config_after)):
+            return unknown("changed")
+        owners = sorted(set(live))
+        if len(owners) > 1:
+            return unknown("multiple_or_conflicting_owners")
+        authority = {"root": str(app), "state": str(config.resolve()),
+            "inventory": names, "owners": owners,
+            "configuration": {name: hashlib.sha256(value).hexdigest() if value is not None else None
+                              for name, value in configs.items()}}
+        encoded = json.dumps(authority, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()
+        return {"status": "known", "scope": "advertised-avatar-headroom-v1",
+            "identity": hashlib.sha256(encoded).hexdigest(),
+            "reserved_gb": owners[0][2] / 1024 ** 3 if owners else 0.0,
+            "marker_sha256": {name: hashlib.sha256(value[0]).hexdigest() for name, value in records.items()},
+            "owners": owners}
+    except InterruptedError:
+        raise
+    except (OSError, ValueError, OverflowError, TypeError, KeyError, RecursionError, psutil.Error):
+        return unknown("unavailable_or_invalid")
+
+
 def routing_vram_gb(root=None):
     """Use transient avatar headroom for routing without changing hardware facts."""
     return max(0.0, gpu_vram_gb() - avatar_reserved_vram_gb(root))

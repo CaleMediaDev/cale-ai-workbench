@@ -547,7 +547,7 @@ def _verification_file_identity(value):
             value.st_mtime_ns, value.st_ctime_ns)
 
 
-def verification_source_state(folder):
+def verification_source_state(folder, *, deadline=None):
     """Stream a bounded, complete source manifest or label it explicitly limited.
 
     Hash every included byte on each capture: size/mtime alone are not content
@@ -557,6 +557,13 @@ def verification_source_state(folder):
     """
     import json
     import stat
+    if deadline is not None:
+        try:
+            valid_deadline = type(deadline) in (int, float) and math.isfinite(deadline)
+        except (OverflowError, ValueError):
+            valid_deadline = False
+        if not valid_deadline:
+            raise ValueError('Source deadline must be a finite monotonic timestamp')
     root = _artifact_project_root(folder)
     started=time.monotonic()
     entries=[]; pending=[root]; directories=[]; files=[]; total=consumed=visited=path_bytes=0
@@ -567,7 +574,10 @@ def verification_source_state(folder):
         nonlocal omitted
         omitted+=1;reasons.add(reason)
     def expired():
-        return time.monotonic()-started>=_VERIFICATION_MAX_SECONDS
+        # Advisory callers may shorten this budget, never extend the scanner's
+        # own limit. Default callers keep the original expiry calculation.
+        return (time.monotonic()-started>=_VERIFICATION_MAX_SECONDS
+                or (deadline is not None and time.monotonic()>=deadline))
     def unsafe(value):
         return stat.S_ISLNK(value.st_mode) or bool(getattr(value,'st_file_attributes',0)&0x400)
     while pending and not exhausted:
@@ -765,36 +775,10 @@ def current_check_receipts(folder, project, *, checker_file, source_status=None)
     if isinstance(source_status,dict):
         source_status.update(scope=current['scope'],limitations=current.get('limitations',[])[:16])
     runner=hashlib.sha256(Path(checker_file).read_bytes()).hexdigest()
-    output=[]
     with connection(root) as conn:
         if not conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='verification_receipts'").fetchone():return []
         rows=conn.execute('SELECT id,substr(payload,1,32001) AS payload,length(CAST(payload AS BLOB)) AS bytes FROM verification_receipts ORDER BY created DESC LIMIT 64').fetchall()
-    for row in rows:
-        if row['bytes']>_VERIFICATION_RECEIPT_BYTES:continue
-        try:value=json.loads(row['payload'])
-        except (ValueError,TypeError):continue
-        fields={'version','observed_at','dependency_scope','project','planning_basis','request_hash','checker','check_sha256','suite_sha256',
-                'checker_sha256','bound_step_check_sha256','source_before','source_after','report_sha256','passed','verification_level',
-                'training_eligible','persistence_witnesses'}
-        if not isinstance(value,dict) or set(value)!=fields:continue
-        try:
-            if _verification_digest(value)!=row['id']:continue
-        except (ValueError,TypeError):continue
-        if any(not isinstance(value.get(key),str) or not re.fullmatch(r'[a-f0-9]{64}',value[key])
-               for key in ('project','check_sha256','suite_sha256','checker_sha256','report_sha256')):continue
-        bound=value.get('bound_step_check_sha256')
-        if bound is not None and (not isinstance(bound,str) or not re.fullmatch(r'[a-f0-9]{64}',bound)):continue
-        if (type(value.get('observed_at')) not in (int,float) or not 0<value['observed_at']<time.time()+1
-                or type(value.get('version')) is not int or value['version']!=1
-                or value.get('passed') is not True or value.get('training_eligible') is not False
-                or value.get('verification_level')!='acceptance_passed'
-                or value.get('project')!=hashlib.sha256(str(root).encode()).hexdigest()
-                or value.get('planning_basis')!=basis or value.get('request_hash')!=task_context.request_identity(root)
-                or _verification_digest(value.get('source_before'))!=_verification_digest(current)
-                or _verification_digest(value.get('source_after'))!=_verification_digest(current)
-                or value.get('checker_sha256')!=runner):continue
-        output.append(value)
-    return output
+    return _validated_check_receipts(rows, root, basis, current, runner)
 
 
 # Opaque permits bind recording to a real checker return in this process. This
@@ -1166,3 +1150,266 @@ def expression_helper_basis(folder,helper_id):
     """Current checked identity for a saved unit, not a completion verdict."""
     row=_helper_selected(folder,helper_id);_helper_current(folder,row)
     return {key:row[key] for key in ('id','source_hash','cases_hash','runner_hash','request_hash')}
+
+
+def _validated_check_receipts(rows, root, basis, current, runner, *, request_identity=None):
+    """Validate the public cache contract against explicitly captured inputs.
+
+    The ordinary wrapper still reads its live basis; the TEMP preview supplies
+    its pinned request hash. Neither path creates verification authority.
+    """
+    import json
+    import task_context
+    output=[]
+    for row in rows:
+        if row['bytes']>_VERIFICATION_RECEIPT_BYTES:continue
+        try:value=json.loads(row['payload'])
+        except (ValueError,TypeError):continue
+        fields={'version','observed_at','dependency_scope','project','planning_basis','request_hash','checker','check_sha256','suite_sha256',
+                'checker_sha256','bound_step_check_sha256','source_before','source_after','report_sha256','passed','verification_level',
+                'training_eligible','persistence_witnesses'}
+        if not isinstance(value,dict) or set(value)!=fields:continue
+        try:
+            if _verification_digest(value)!=row['id']:continue
+        except (ValueError,TypeError):continue
+        if any(not isinstance(value.get(key),str) or not re.fullmatch(r'[a-f0-9]{64}',value[key])
+               for key in ('project','check_sha256','suite_sha256','checker_sha256','report_sha256')):continue
+        bound=value.get('bound_step_check_sha256')
+        if bound is not None and (not isinstance(bound,str) or not re.fullmatch(r'[a-f0-9]{64}',bound)):continue
+        if (type(value.get('observed_at')) not in (int,float) or not 0<value['observed_at']<time.time()+1
+                or type(value.get('version')) is not int or value['version']!=1
+                or value.get('passed') is not True or value.get('training_eligible') is not False
+                or value.get('verification_level')!='acceptance_passed'
+                or value.get('project')!=hashlib.sha256(str(root).encode()).hexdigest()
+                or value.get('planning_basis')!=basis or value.get('request_hash')!=(request_identity() if request_identity is not None else task_context.request_identity(root))
+                or _verification_digest(value.get('source_before'))!=_verification_digest(current)
+                or _verification_digest(value.get('source_after'))!=_verification_digest(current)
+                or value.get('checker_sha256')!=runner):continue
+        output.append(value)
+    return output
+
+
+_RECEIPT_RO_DB_BYTES = 16 * 1024 * 1024
+
+
+_RECEIPT_RO_WAL_BYTES = 8 * 1024 * 1024
+
+
+_RECEIPT_RO_COPY_SECONDS = 2.0
+
+
+_RECEIPT_RO_SQL_SECONDS = .1
+
+
+def _receipt_file_identity(path):
+    value = path.lstat()
+    if (not path.is_file() or path.is_symlink()
+            or getattr(value, 'st_file_attributes', 0) & 0x400):
+        raise ValueError('unsafe_path')
+    return (value.st_dev, value.st_ino, value.st_size,
+            value.st_mtime_ns, value.st_ctime_ns)
+
+
+def _receipt_source_paths(database):
+    paths = [database]
+    wal = database.with_name(database.name + '-wal')
+    journal = database.with_name(database.name + '-journal')
+    if journal.exists() or journal.is_symlink():
+        raise ValueError('journal_ambiguous')
+    if wal.exists() or wal.is_symlink():
+        paths.append(wal)
+    return paths
+
+
+def _receipt_stream(path, identity, deadline, destination=None):
+    """Hash every copied byte; metadata is a race check, never the content proof."""
+    result = hashlib.sha256()
+    total = 0
+    with path.open('rb') as stream:
+        value = os.fstat(stream.fileno())
+        actual = (value.st_dev, value.st_ino, value.st_size,
+                  value.st_mtime_ns, value.st_ctime_ns)
+        # Windows path-stat and opened-handle stat can report different ctime
+        # values for the same file. Compare shared identity across APIs; guard each API's full
+        # ctime-inclusive tuple against its own before/after observation.
+        if actual[:4] != identity[:4]:
+            raise ValueError('source_changed')
+        while True:
+            if time.monotonic() >= deadline:
+                raise ValueError('copy_budget')
+            chunk = stream.read(min(1024 * 1024, identity[2] - total + 1))
+            if not chunk:
+                break
+            total += len(chunk)
+            if total > identity[2]:
+                raise ValueError('source_changed')
+            result.update(chunk)
+            if destination is not None:
+                destination.write(chunk)
+        value = os.fstat(stream.fileno())
+        if (value.st_dev, value.st_ino, value.st_size,
+                value.st_mtime_ns, value.st_ctime_ns) != actual:
+            raise ValueError('source_changed')
+    if total != identity[2] or _receipt_file_identity(path) != identity:
+        raise ValueError('source_changed')
+    return result.hexdigest()
+
+
+def _receipt_instruction_snapshot(root, project, deadline):
+    """Bound actual streamed instruction bytes, not just a pre-read stat size."""
+    if (not isinstance(project, dict) or not isinstance(project.get('folder'), (str, Path))
+            or not isinstance(project.get('brief', ''), str)
+            or len(project.get('brief', '')) > 64000
+            or Path(project['folder']).resolve(strict=True) != root):
+        raise ValueError('basis_unavailable')
+    brief = project.get('brief', '').encode('utf-8')
+    if len(brief) > 64000:
+        raise ValueError('basis_unavailable')
+    basis = {'brief': hashlib.sha256(brief).hexdigest()}
+    observed = {}
+    for name, relative in (('rules', 'AGENTS.md'), ('followups', '.local-ai/USER-REQUESTS.md')):
+        path = root / relative
+        try:
+            path.lstat()  # Broken links are present-but-unsafe, never absent.
+        except FileNotFoundError:
+            basis[name] = None
+            observed[name] = None
+            continue
+        identity = _receipt_file_identity(path)
+        if identity[2] > 64000:
+            raise ValueError('basis_unavailable')
+        digest = _receipt_stream(path, identity, deadline)
+        basis[name] = digest
+        observed[name] = (identity, digest)
+    request = basis['followups'] or hashlib.sha256(b'').hexdigest()
+    return basis, request, observed
+
+
+def _receipt_temp_parent(root):
+    """Prove an existing outside-project parent without tempfile probe writes."""
+    import tempfile
+    configured = tempfile.tempdir
+    if configured is None:
+        configured = next((os.environ[name] for name in ('TMPDIR', 'TEMP', 'TMP')
+                           if os.environ.get(name)), None)
+    if configured is None:
+        configured = str(Path(os.environ.get('SystemRoot', 'C:/Windows')) / 'Temp') if os.name == 'nt' else '/tmp'
+    if not isinstance(configured, (str, bytes, os.PathLike)):
+        raise ValueError('temp_unavailable')
+    parent = Path(os.fsdecode(configured)).resolve(strict=True)
+    if not parent.is_dir() or parent == root or parent.is_relative_to(root):
+        raise ValueError('temp_unavailable')
+    return parent
+
+
+def readonly_check_receipts(folder, project, *, checker_file, include_plan=False):
+    """Bounded evidence preview; UNKNOWN never means an obligation is fulfilled.
+
+    Never opens the project SQLite database: mode=ro alone can create SHM for
+    WAL databases. Copy stable bounded DB+WAL bytes into owned TEMP, query and
+    validate there, then recheck the source bytes and original task basis.
+    Final acceptance keeps its existing wrapper and obligation persistence.
+    This is observational freshness, not same-user write linearizability.
+    """
+    import tempfile
+    from contextlib import closing
+    unknown = {'status': 'unknown', 'reason': 'unavailable', 'receipts': []}
+    try:
+        root = _artifact_project_root(folder)
+        deadline = time.monotonic() + _RECEIPT_RO_COPY_SECONDS
+        basis, request, instructions = _receipt_instruction_snapshot(root, project, deadline)
+        database = root / '.local-ai/memory.sqlite3'
+        if not database.is_file():
+            return {**unknown, 'reason': 'database_missing'}
+        paths = _receipt_source_paths(database)
+        identities = {path: _receipt_file_identity(path) for path in paths}
+        if (identities[database][2] > _RECEIPT_RO_DB_BYTES
+                or any(identity[2] > _RECEIPT_RO_WAL_BYTES for path, identity in identities.items() if path != database)):
+            return {**unknown, 'reason': 'snapshot_oversize'}
+        runner_path = Path(checker_file)
+        runner_identity = _receipt_file_identity(runner_path)
+        if runner_identity[2] > 4 * 1024 * 1024:
+            return {**unknown, 'reason': 'checker_unavailable'}
+        runner = _receipt_stream(runner_path, runner_identity, deadline)
+        current = verification_source_state(root, deadline=deadline)
+        if (not isinstance(current, dict) or current.get('scope') not in {'full_project_source', 'application_source'}
+                or type(current.get('omitted')) is not int
+                or (current['scope'] == 'full_project_source' and current['omitted'] != 0)
+                or (current['scope'] == 'application_source' and
+                    (current['omitted'] <= 0 or current.get('limitations') != ['excluded_runtime']))):
+            return {**unknown, 'reason': 'source_scope_limited'}
+        temp_parent = _receipt_temp_parent(root)
+        with tempfile.TemporaryDirectory(prefix='cale-receipt-preview-', dir=temp_parent) as temporary:
+            snapshot = Path(temporary) / 'memory.sqlite3'
+            hashes = {}
+            for path, identity in identities.items():
+                with (snapshot.parent / path.name).open('xb') as output:
+                    hashes[path] = _receipt_stream(path, identity, deadline, output)
+            if _receipt_source_paths(database) != paths:
+                return {**unknown, 'reason': 'source_changed'}
+            for path, identity in identities.items():
+                if _receipt_stream(path, identity, deadline) != hashes[path]:
+                    return {**unknown, 'reason': 'source_changed'}
+            with closing(sqlite3.connect(snapshot, timeout=0)) as conn:
+                conn.row_factory = sqlite3.Row
+                sql_deadline = time.monotonic() + _RECEIPT_RO_SQL_SECONDS
+                conn.set_progress_handler(lambda: time.monotonic() >= sql_deadline, 1000)
+                conn.execute('BEGIN')
+                if time.monotonic() >= sql_deadline:
+                    return {**unknown, 'reason': 'sql_budget'}
+                if conn.execute('PRAGMA quick_check(1)').fetchone()[0] != 'ok':
+                    return {**unknown, 'reason': 'database_invalid'}
+                # SQL byte/type checks precede payload materialization in Python.
+                rows = conn.execute("SELECT CASE WHEN typeof(id)='text' AND length(CAST(id AS BLOB))=64 THEN id END AS id,"
+                    "CASE WHEN typeof(payload)='text' AND length(CAST(payload AS BLOB))<=32000 THEN payload END AS payload,"
+                    "length(CAST(payload AS BLOB)) AS bytes FROM verification_receipts ORDER BY created DESC LIMIT 64").fetchall()
+                if any(row['id'] is None or row['payload'] is None for row in rows):
+                    return {**unknown, 'reason': 'receipt_bounds'}
+                if time.monotonic() >= sql_deadline:
+                    return {**unknown, 'reason': 'sql_budget'}
+                receipts = _validated_check_receipts(rows, root, basis, current, runner,
+                    request_identity=lambda: request)
+                plan = None
+                if include_plan:
+                    sizes = conn.execute("SELECT COUNT(*),COALESCE(SUM(status='done'),0),"
+                        "COALESCE(SUM(status IN ('active','pending')),0),"
+                        "SUM(CASE WHEN check_tool='check_webapp' THEN length(CAST(check_arguments AS BLOB)) ELSE 0 END),"
+                        "MAX(CASE WHEN check_tool='check_webapp' THEN length(CAST(check_arguments AS BLOB)) ELSE 0 END),"
+                        "SUM(CASE WHEN check_tool='check_webapp' AND typeof(check_arguments)!='text' THEN 1 ELSE 0 END),"
+                        "SUM(CASE WHEN typeof(status)!='text' OR status NOT IN ('active','pending','done') THEN 1 ELSE 0 END) "
+                        "FROM task_steps WHERE request_hash=? AND (status IS NULL OR status!='split')", (request,)).fetchone()
+                    if (sizes[0] > 128 or (sizes[3] or 0) > 256000 or (sizes[4] or 0) > 64000 or sizes[5] or sizes[6]):
+                        return {**unknown, 'reason': 'plan_bounds'}
+                    import json
+                    specs = [json.loads(row[0]) for row in conn.execute(
+                        "SELECT check_arguments FROM task_steps WHERE request_hash=? AND (status IS NULL OR status!='split') "
+                        "AND check_tool='check_webapp' ORDER BY position,id LIMIT 128", (request,))]
+                    from webapp_check import normalize_spec, validate_spec_data
+                    for specification in specs:
+                        if (not isinstance(specification, dict) or not isinstance(specification.get('path'), str)
+                                or not 1 <= len(specification['path']) <= 240):
+                            return {**unknown, 'reason': 'plan_invalid'}
+                        validate_spec_data(normalize_spec(specification))
+                    plan = {'total': sizes[0], 'done': sizes[1], 'remaining': sizes[2],
+                            'browser_specifications': specs}
+                if time.monotonic() >= sql_deadline:
+                    return {**unknown, 'reason': 'sql_budget'}
+            if (_receipt_source_paths(database) != paths
+                    or _receipt_instruction_snapshot(root, project, deadline) != (basis, request, instructions)
+                    or verification_source_state(root, deadline=deadline) != current
+                    or _receipt_stream(runner_path, runner_identity, deadline) != runner):
+                return {**unknown, 'reason': 'basis_changed'}
+            for path, identity in identities.items():
+                if _receipt_stream(path, identity, deadline) != hashes[path]:
+                    return {**unknown, 'reason': 'source_changed'}
+        result = {'status': 'available', 'reason': None, 'receipts': receipts,
+                  'planning_basis': basis, 'request_hash': request, 'source': current,
+                  'checker_sha256': runner}
+        if include_plan:
+            result['plan'] = plan
+            result['_plan_snapshot'] = {path.name: (identities[path], hashes[path]) for path in paths}
+        return result
+    except (OSError, ValueError, TypeError, RecursionError, sqlite3.Error):
+        return unknown
+
+

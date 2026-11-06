@@ -1,0 +1,82 @@
+{
+  "release": "0.5.554",
+  "base": "47783879f6404a1bbfd231b5cd80264f25a33d3c",
+  "changes": [
+    "Continue whole-goal work after checked components without treating SQLite unit records as final delivery.",
+    "Rebuild ordinary requests from current instruction and artifact identities; preserve newer control checkpoints when optional observations are unavailable.",
+    "Replay the saved browser check through the fixed host checker only under current task ownership, source and instruction bindings.",
+    "Retain a larger native request bucket across schema repairs only with current model/headroom proof; revalidate before the one transient retry.",
+    "Unreadable planning instructions defer inference before briefing writes and schedule bounded SQLite retries independently of conversation checkpoints.",
+    "Verification timeout retires its already-owned Windows Job instead of spawning taskkill.",
+    "Three old routing tests now provide explicit installed-model metadata and assert real discovery inspection."
+  ],
+  "source_raw_sha256": {
+    "Validation/test_cloud_ai.py": "3623a6f121821173175d3fdae4f607f4c48f733ba1a68d2fec1c94b8e8440848",
+    "Validation/test_long_tasks.py": "fd1231969e83639c14eb818c9fa082a63a67ff35f2cee0c7495239f4037a1500",
+    "Validation/test_model_fitness.py": "461b78832db90fde7c57e6d76a981bb81b090f7726e901706df882cb320630ab",
+    "Validation/test_native_agent.py": "9ef4888f9de5e45a4b486bdcf4369084f6ffea5736bd7f0a692c582ab2e53300",
+    "Validation/test_project_memory.py": "b53fb381bd5396f568210171127007bffaae483aa3da49310b8d521a03cd3dbd",
+    "cloud_ai.py": "d55716e5db8444dea2f45ba490608af5792f8157b74a29b769eef9c41557643f",
+    "long_tasks.py": "42531b179fec3e8aa3b1545e22aa9eb7b5edb35551db3c542b485536f19a9e44",
+    "model_fitness.py": "514de5eabde88a934cac7dfb4dce97257868abd334e8e0cd6be385af94d61edc",
+    "native_agent.py": "182bda9b9c91c1fa69fd0c0857812c7860ca52d796a548553bdb3bca76d43d44",
+    "project_memory.py": "f881122dfe1bd2c579dcbc400d47bfd6d700222436ec404e4f2c2ab8cee20681",
+    "task_context.py": "df562ebd87a60f0d1a40acb83e71d97088a62f9d87883fb1fd4499e8f75c7746"
+  },
+  "validation": {
+    "kind": "composed selected-module coverage, not one full run",
+    "distinct_cases": 1710,
+    "passed": 1705,
+    "skipped": 5,
+    "skip_nodes": [
+      "Validation/test_project_memory.py::ProjectMemoryTests::test_code_scan_rejects_symlink_to_excluded_filename",
+      "Validation/test_project_memory.py::ProjectMemoryTests::test_code_scan_uses_canonical_identity_for_symlink_aliases",
+      "Validation/test_project_memory.py::test_recovery_artifact_guard_rejects_database_link",
+      "Validation/test_model_fitness.py::test_avatar_headroom_ignores_nested_json_and_recovers",
+      "Validation/test_long_tasks.py::test_subscription_connection_real_tk_requires_user_action_and_success_before_enabling"
+    ],
+    "subtests": "Reported per retained run; overlaps are not summed.",
+    "qualification_sha256": "8677d8a3bd8ce786db53185d221a1581858345498b5e1c7cafa908e240c12937",
+    "case_ledger_sha256": "2b5e13d625b3a38abcb711f8914a5bfbd31095b08e8d735220f49a968798e14e",
+    "all_credited_case_jobs_terminal": true,
+    "no_denied_case_credited": true,
+    "retained_failures": [
+      "Original V5 full run1F1215P with3network denials, including2falsepassing fixtures.",
+      "Public553 baseline reproduced same metadata fixture failure and3denied attempts.",
+      "V6 remaining stopped before realFFmpeg; media remainder stopped at externalTaskkill with teardownerror.",
+      "OwnedJob regression on priorruntime failedNo external cleanup command andteardownerror."
+    ]
+  },
+  "test_parity": {
+    "Validation/test_cloud_ai.py": {
+      "old_definitions_retained": 202,
+      "all_old_assertions_retained": true
+    },
+    "Validation/test_long_tasks.py": {
+      "old_definitions_retained": 219,
+      "all_old_assertions_retained": true
+    },
+    "Validation/test_model_fitness.py": {
+      "old_definitions_retained": 33,
+      "all_old_assertions_retained": true
+    },
+    "Validation/test_native_agent.py": {
+      "old_definitions_retained": 423,
+      "all_old_assertions_retained": true
+    },
+    "Validation/test_project_memory.py": {
+      "old_definitions_retained": 76,
+      "all_old_assertions_retained": true
+    }
+  },
+  "runtime_manifest_entries": 250,
+  "limits": [
+    "Not a single full green run; counts are a per-node composition with duplicates removed.",
+    "Not the complete application suite, clean-PC installer, real model performance or actual app-delivery proof.",
+    "Tk subscription dialog was skipped; no new claim that its live UI works.",
+    "Actual private benchmark FAILED340/current298 remains unchanged; no model RPC, counter reset or evaluator changes.",
+    "Camera/security package bytes remain unchanged from553.",
+    "A general parallel task-team scheduler is still unimplemented.",
+    "Installer payload verification and publication remain separate gates."
+  ]
+}

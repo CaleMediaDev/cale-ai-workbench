@@ -14,6 +14,7 @@ import concurrent.futures
 import copy
 import hashlib
 import json
+import math
 import os
 import re
 import secrets
@@ -28,7 +29,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.error import HTTPError
 from urllib.parse import parse_qs, urlencode, urlsplit
-from urllib.request import Request, urlopen
+from urllib.request import Request, urlopen, build_opener, ProxyHandler, HTTPRedirectHandler
 
 import win32crypt
 from jsonschema.exceptions import SchemaError, ValidationError
@@ -271,16 +272,45 @@ def select_profile(profile):
     record("local", "Model selection applies to the next request.", model)
 
 
-def post(url, payload, key="", timeout=180):
+class _LocalMetadataNoRedirect(HTTPRedirectHandler):
+    def redirect_request(self, request, response, code, message, headers, newurl):
+        return None
+
+
+def post(url, payload, key="", timeout=180, *, _local_metadata=False):
+    if type(_local_metadata) is not bool:
+        raise ValueError("Invalid local metadata mode")
+    if _local_metadata:
+        allowed = ((url == "http://127.0.0.1:11434/api/tags" and payload is None)
+            or (url == "http://127.0.0.1:11434/api/show" and isinstance(payload, dict)
+                and set(payload) == {"model"} and isinstance(payload["model"], str)
+                and 0 < len(payload["model"]) <= 256))
+        if key or not allowed:
+            raise ValueError("Bounded local metadata endpoint required")
+        if type(timeout) not in (int, float) or not math.isfinite(timeout) or timeout <= 0:
+            raise ValueError("Bounded local metadata timeout required")
+        timeout = min(timeout, 3.0)
     headers = {"Content-Type": "application/json"}
     if key:
         headers["Authorization"] = "Bearer " + key
     started = time.monotonic()
-    with urlopen(
-        Request(url, data=json.dumps(payload).encode(), headers=headers),
-        timeout=timeout,
-    ) as response:
-        result = json.load(response)
+    request = Request(url, data=None if _local_metadata and payload is None else json.dumps(payload).encode(), headers=headers)
+    opener = build_opener(ProxyHandler({}), _LocalMetadataNoRedirect()).open if _local_metadata else urlopen
+    with opener(request, timeout=timeout) as response:
+        if _local_metadata:
+            raw = response.read(1048577)
+            if len(raw) > 1048576:
+                raise ValueError("Local metadata response exceeds its bound")
+            def finite_float(value):
+                number = float(value)
+                if not math.isfinite(number):
+                    raise ValueError("Nonfinite local metadata")
+                return number
+            def reject_constant(_value):
+                raise ValueError("Nonfinite local metadata")
+            result = json.loads(raw, parse_float=finite_float, parse_constant=reject_constant)
+        else:
+            result = json.load(response)
     if url.endswith("/chat/completions"):
         import usage_history
 
@@ -1198,6 +1228,140 @@ def native_chat_completion(raw):
     return result
 
 
+
+def _selected_alias_record(tags, model):
+    """Optional exact alias-manifest proof; malformed data disables reuse."""
+    if (not isinstance(model, str) or not 0 < len(model) <= 256
+            or not isinstance(tags, dict) or not isinstance(tags.get("models"), list)
+            or len(tags["models"]) > 4096):
+        return None
+    matches = [item for item in tags["models"] if isinstance(item, dict)
+        and isinstance(item.get("name"), str) and len(item["name"]) <= 263
+        and item["name"].removesuffix(":latest") == model.removesuffix(":latest")]
+    if len(matches) != 1:
+        return None
+    digest, size = matches[0].get("digest"), matches[0].get("size")
+    if (not isinstance(digest, str) or not re.fullmatch(r"[0-9a-fA-F]{64}", digest)
+            or type(size) is not int or size <= 0):
+        return None
+    return (digest.lower(), size)
+
+
+def _thinking_identity(value):
+    try:
+        raw = json.dumps(value, sort_keys=True, allow_nan=False)
+        return hashlib.sha256(raw.encode()).hexdigest() if len(raw) <= 65536 else None
+    except (ValueError, TypeError, RecursionError):
+        return None
+
+
+def _refresh_selected_context(model, expected, timeout, check_cancel):
+    """One guarded pair proves this dispatch only, never extends global TTL."""
+    import model_library
+    from context_window import configured_context, native_context
+
+    try:
+        if type(timeout) not in (int, float) or not math.isfinite(timeout) or timeout <= 0:
+            return None
+    except OverflowError:
+        return None
+    deadline = time.monotonic() + min(6.0, timeout)
+    def remaining():
+        check_cancel()
+        left = deadline - time.monotonic()
+        if left <= 0:
+            raise TimeoutError("Selected metadata observation elapsed")
+        return min(3.0, left)
+    try:
+        tags = post("http://127.0.0.1:11434/api/tags", None,
+                    timeout=remaining(), _local_metadata=True)
+        record = _selected_alias_record(tags, model)
+        if record is None:
+            return None
+        if record != expected[0]:
+            raise InterruptedError("Selected local model identity changed before context reuse")
+        info = post("http://127.0.0.1:11434/api/show", {"model": model},
+                    timeout=remaining(), _local_metadata=True)
+        remaining()  # An elapsed budget cannot produce a fresh dispatch proof.
+        if not isinstance(info, dict):
+            return None
+        if info.get("remote_host") or info.get("remote_model"):
+            raise InterruptedError("Selected local model policy changed before context reuse")
+        capabilities = info.get("capabilities")
+        if not isinstance(capabilities, list) or any(not isinstance(value, str) for value in capabilities):
+            return None
+        if "tools" not in capabilities:
+            raise InterruptedError("Selected local model capability changed before context reuse")
+        weights = model_library.weight_blob(info)
+        configured = configured_context(info)
+        capacity = min(configured, native_context(info))
+        thinking = _thinking_identity(info.get("thinking"))
+        if (not re.fullmatch(r"[0-9a-f]{64}", weights) or thinking is None
+                or type(configured) is not int or type(capacity) is not int or not 0 < capacity <= configured):
+            return None
+        actual = (record, weights, configured, capacity, thinking,
+                  "vision" in capabilities, "thinking" in capabilities)
+        if actual != expected:
+            raise InterruptedError("Selected local model metadata changed before context reuse")
+        return {"model": model, "metadata": actual, "observed": time.monotonic()}
+    except InterruptedError:
+        raise
+    except (OSError, ValueError, TypeError, KeyError, AttributeError, OverflowError, RecursionError):
+        return None
+
+
+def _native_context_floor_basis(router, model, capacity, observation, *, allow_expired=False):
+    """Reuse only an unchanged, unexpired routing snapshot and fresh local proof.
+
+    Model metadata keeps its existing discovery TTL; this is not an atomic
+    retag detector or a claim about currently free physical GPU memory.
+    """
+    if (not isinstance(observation, dict) or observation.get("status") != "known"
+            or observation.get("scope") != "advertised-avatar-headroom-v1"):
+        return None
+    def finite_number(value):
+        try:
+            return type(value) in (int, float) and math.isfinite(value)
+        except OverflowError:
+            return False
+
+    identity = observation.get("identity")
+    reserved = observation.get("reserved_gb")
+    weights = getattr(router, "model_weights", {}).get(model)
+    alias_record = getattr(router, "model_alias_records", {}).get(model)
+    thinking = _thinking_identity(getattr(router, "model_thinking_controls", {}).get(model))
+    configured = getattr(router, "model_contexts", {}).get(model)
+    expires = getattr(router, "model_cache_until", 0)
+    cached_reserved = getattr(router, "model_cache_avatar_headroom", None)
+    version = getattr(router, "native_version", None)
+    if (not isinstance(version, tuple) or len(version) != 3
+            or any(type(value) is not int or value < 0 for value in version)):
+        return None
+    if (not isinstance(identity, str) or not re.fullmatch(r"[0-9a-f]{64}", identity)
+            or not isinstance(weights, str) or not re.fullmatch(r"[0-9a-f]{64}", weights)
+            or not isinstance(alias_record, tuple) or len(alias_record) != 2
+            or not isinstance(alias_record[0], str) or not re.fullmatch(r"[0-9a-f]{64}", alias_record[0])
+            or type(alias_record[1]) is not int or alias_record[1] <= 0 or thinking is None
+            or type(capacity) is not int or type(configured) is not int
+            or not 0 < capacity <= configured
+            or getattr(router, "model_native_contexts", {}).get(model) != capacity
+            or not finite_number(reserved) or reserved < 0
+            or not finite_number(cached_reserved) or cached_reserved < 0 or reserved != cached_reserved
+            or not finite_number(expires)
+            or not allow_expired and time.monotonic() >= expires):
+        return None
+    try:
+        catalog = json.dumps(CATALOG, sort_keys=True, allow_nan=False)
+        if len(catalog) > 65536:
+            return None
+    except (TypeError, ValueError, RecursionError):
+        return None
+    metadata = (alias_record, weights, configured, capacity, thinking,
+                model in getattr(router, "model_vision", set()),
+                model in getattr(router, "model_thinking", set()))
+    return (model, metadata, version, identity, hashlib.sha256(catalog.encode()).hexdigest())
+
+
 class Router:
     """Choose a provider for one request while preserving local fallback."""
 
@@ -1209,6 +1373,7 @@ class Router:
         self.model_cache = {}
         self.model_contexts = {}
         self.model_native_contexts = {}
+        self.model_alias_records = {}
         self.model_thinking_controls = {}
         self.native_version_until = 0
         self.native_version_ready = False
@@ -1308,6 +1473,7 @@ class Router:
             available = {}
             contexts = {}
             native_contexts = {}
+            alias_records = {}
             thinking_controls = {}
             weight_ids = {}
             vision = set()
@@ -1348,6 +1514,9 @@ class Router:
                     available[name] = float(match.group(1)) if match else 1.0
                     weight_ids[name] = model_library.weight_blob(info)
                     contexts[name] = int(configured.group(1))
+                    alias_record = _selected_alias_record(tags, name)
+                    if alias_record is not None:
+                        alias_records[name] = alias_record
                     from context_window import native_context
                     try:
                         native_limit = native_context(info)
@@ -1367,6 +1536,7 @@ class Router:
             self.model_cache = available
             self.model_contexts = contexts
             self.model_native_contexts = native_contexts
+            self.model_alias_records = alias_records
             self.model_thinking_controls = thinking_controls
             self.model_vision = vision
             self.model_thinking = thinking
@@ -1722,9 +1892,11 @@ class Router:
         empty_weights = set()
         transient_retry_used = False
         native_started = False
+        context_floor = None  # Requested bucket only; never a GPU reservation.
+        selected_refresh_attempted = False
 
-        def local_post(body, timeout):
-            nonlocal transient_retry_used, native_started
+        def local_post(body, timeout, _usage_started=None):
+            nonlocal transient_retry_used, native_started, context_floor, selected_refresh_attempted
             check_cancel()
             native = None
             capacity = self.model_native_contexts.get(body.get("model"), 0)
@@ -1754,9 +1926,35 @@ class Router:
             if native is None and native_started:
                 raise RuntimeError("Native local inference failed; legacy transport was not attempted because it may truncate history.") from last_error
             check_cancel()
+            basis = None
+            if native is not None:
+                import model_fitness
+                observation = model_fitness.avatar_headroom_observation(ROOT, state=STATE)
+                basis = _native_context_floor_basis(self, body["model"], capacity, observation, allow_expired=True)
+                if basis is None or context_floor is not None and context_floor[0] != basis:
+                    context_floor = None
+                fresh = (basis is not None and
+                    _native_context_floor_basis(self, body["model"], capacity, observation) == basis)
+                would_shrink = context_floor is not None and native["options"]["num_ctx"] < context_floor[1]
+                if would_shrink and not fresh and not selected_refresh_attempted:
+                    selected_refresh_attempted = True
+                    proof = _refresh_selected_context(body["model"], basis[1], timeout, check_cancel)
+                    after = model_fitness.avatar_headroom_observation(ROOT, state=STATE)
+                    current = _native_context_floor_basis(self, body["model"], capacity, after, allow_expired=True)
+                    if (self.model_native_contexts.get(body["model"]) != capacity
+                            or current is not None and current != basis):
+                        raise InterruptedError("Selected local context policy changed during observation")
+                    fresh = (proof is not None and proof["model"] == body["model"]
+                        and proof["metadata"] == basis[1] and current == basis)
+                if not fresh:
+                    basis = None
+                    context_floor = None
+                if context_floor is not None:
+                    native["options"]["num_ctx"] = max(native["options"]["num_ctx"], context_floor[1])
+                check_cancel()  # Recheck after the new bounded local observation.
             transport = native if native is not None else body
             native_started = native_started or native is not None
-            started = time.monotonic()
+            started = time.monotonic() if _usage_started is None else _usage_started
             try:
                 result = post(url, transport, timeout=timeout)
             except HTTPError as error:
@@ -1766,14 +1964,21 @@ class Router:
                 if error.fp is not None:
                     error.close()
                 check_cancel()
+                if native is not None:
+                    # Each native HTTP dispatch needs current context authority.
+                    # Return directly: the nested path records/normalizes once.
+                    return local_post(body, min(timeout, 60), _usage_started=started)
                 result = post(url, transport, timeout=min(timeout, 60))
             if native is not None:
+                if basis is not None:
+                    context_floor = (basis, native["options"]["num_ctx"])
                 import usage_history
                 usage_history.record_completion(native_usage_fields(result), "ollama", time.monotonic() - started)
                 result = native_chat_completion(result)
             return result
 
         for selected_model in selected:
+            context_floor = None  # No inheritance across aliases/fallback attempts.
             identity = getattr(self, "model_weights", {}).get(selected_model)
             if identity and identity in empty_weights:
                 continue

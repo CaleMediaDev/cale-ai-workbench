@@ -1995,12 +1995,15 @@ def check_function(folder: Path, arguments: dict, *, javascript: bool = False) -
     return result
 
 
-def prompt(project: dict) -> str:
+def prompt(project: dict, *, rules_override: str | None = None) -> str:
     folder = Path(project["folder"])
-    try:
-        rules = (folder / "AGENTS.md").read_text(encoding="utf-8-sig", errors="replace")
-    except OSError:
-        rules = ""
+    if rules_override is not None:
+        rules = rules_override
+    else:
+        try:
+            rules = (folder / "AGENTS.md").read_text(encoding="utf-8-sig", errors="replace")
+        except OSError:
+            rules = ""
     if len(rules) > 4000:
         rules = (rules[:2000] + "\n… rules excerpt omitted; read AGENTS.md if needed …\n"
                  + rules[-2000:])
@@ -2216,6 +2219,7 @@ def compact_messages(messages: list, folder: Path, context_limit: int | None = N
         import task_context
         checkpoint = {"role": "system", "content": task_context.recovery_snapshot(folder)}
     base = [messages[0], copy.deepcopy(checkpoint)]
+    checkpoint_source = str(base[1]["content"])
 
     def clip(value: str, length: int) -> str:
         if len(value) <= length:
@@ -2230,25 +2234,74 @@ def compact_messages(messages: list, folder: Path, context_limit: int | None = N
         head = (length - len(marker)) // 2
         return value[:head] + marker + value[-(length - len(marker) - head):]
 
+    # Only the producer's second line is routing metadata. A matching string
+    # inside a saved document must never be promoted into that protocol slot.
+    checkpoint_lines = checkpoint_source.splitlines()
+    routing_line = ""
+    if len(checkpoint_lines) > 1:
+        line = checkpoint_lines[1]
+        prefix = "Native routing evidence: "
+        if line.startswith(prefix) and len(line) <= 256:
+            try:
+                evidence = json.loads(line[len(prefix):])
+                fields = ("failed_step_attempts", "repeated_check_failures")
+                if (isinstance(evidence, dict) and set(evidence) == {"v", *fields}
+                        and type(evidence["v"]) is int and evidence["v"] == 1
+                        and all(type(evidence[key]) is int and 0 <= evidence[key] <= 100
+                                for key in fields)):
+                    routing_line = line
+            except (ValueError, TypeError, RecursionError):
+                pass
+
     # Keep room for at least one recent exchange, even with a long checkpoint.
+    def clip_checkpoint(value: str, length: int) -> str:
+        if len(value) <= length:
+            return value
+        # Saved note excerpts remain data. Keep their explicit unfinished work
+        # ahead of repeated recovery/missing-note prose in a small window.
+        lines = value.splitlines()
+        next_step = next((line for line in lines if line.startswith("Next step: ")), "")
+        plan_step = ""
+        in_plan = False
+        for line in lines:
+            if line == "PLAN.md:":
+                in_plan = True
+            elif line in {"PROGRESS.md:", "USER-REQUESTS.md:", "Recent actions:"}:
+                in_plan = False
+            elif in_plan and re.match(r"\s*[-*]\s*\[\s\]\s*\S", line):
+                plan_step = "PLAN.md: " + line.strip()
+                break
+        facts = [line for line in (next_step, plan_step) if line]
+        if not facts and not routing_line:
+            return clip(value, length)
+        heading = "Current task checkpoint (saved data excerpt):\n"
+        if routing_line:
+            protected = heading + routing_line
+            # Keep this bounded minimum whole. The estimator charges its real
+            # cost, leaving less room for prose/history; it is never a larger
+            # context allowance or a partially rewritten counter record.
+            room = length - len(protected) - 1
+            return protected + ("\n" + clip("\n".join(facts), room) if room > 0 and facts else "")
+        return clip(heading + "\n".join(facts), length)
+
     target_base = budget - min(1024, budget // 4)
     # A growing tool catalog must not reserve so much exchange space that a
     # short durable plan is erased. Retain a bounded briefing when it fits.
-    minimum = [base[0], {**base[1], "content": clip(str(base[1]["content"]), 512)}]
+    minimum = [base[0], {**base[1], "content": clip_checkpoint(str(base[1]["content"]), 512)}]
     target_base = min(budget, max(target_base, estimate(minimum, tools)))
     def shrink_checkpoint(target):
         if estimate(base, tools) <= target:
             return
-        original = str(base[1]["content"])
+        original = checkpoint_source
         low, high = 0, len(original)
         while low < high:
             middle = (low + high + 1) // 2
-            base[1]["content"] = clip(original, middle)
+            base[1]["content"] = clip_checkpoint(original, middle)
             if estimate(base, tools) <= target:
                 low = middle
             else:
                 high = middle - 1
-        base[1]["content"] = clip(original, low)
+        base[1]["content"] = clip_checkpoint(original, low)
     shrink_checkpoint(target_base)
     groups = []
     current = []
@@ -2333,7 +2386,7 @@ def compact_messages(messages: list, folder: Path, context_limit: int | None = N
 
 
 def fresh_messages(messages: list, folder: Path, state: dict | None = None,
-                   project: dict | None = None) -> list:
+                   project: dict | None = None, *, omit_completion_advice=False) -> list:
     """Rebuild each model call from the durable checkpoint and recent exchanges."""
     import task_context
 
@@ -2468,7 +2521,7 @@ def fresh_messages(messages: list, folder: Path, state: dict | None = None,
     if state and state.get("failed_checks"):
         checkpoint += ("\nUnresolved failed checks: " + ", ".join(state["failed_checks"].values())
                        + ". Repair the cause and rerun those checks before finishing.")
-    elif state and state.get("verify_passed"):
+    elif state and state.get("verify_passed") and not omit_completion_advice:
         pending = completion_issue(folder, project, state) if project is not None else ""
         if pending:
             checkpoint += ("\nThe saved verifier returned success, but completion requirements "
@@ -3975,6 +4028,10 @@ def initial_plan_required(project: dict | None) -> bool:
     return creating and browser_check_required({**project, "brief": intent_text})
 
 
+class InstructionReadUnavailable(OSError):
+    """An authoritative instruction could not be read; never infer past it."""
+
+
 def planning_basis(project: dict) -> dict:
     """Hash full planning requirements without truncating large user documents."""
     import task_context
@@ -3984,9 +4041,12 @@ def planning_basis(project: dict) -> dict:
     for name, path in (("rules", folder / "AGENTS.md"),
                        ("followups", task_context.document_path(folder, "USER-REQUESTS.md"))):
         basis[name] = None
-        if path.is_file():
-            with path.open("rb") as stream:
-                basis[name] = hashlib.file_digest(stream, "sha256").hexdigest()
+        try:
+            if path.is_file():
+                with path.open("rb") as stream:
+                    basis[name] = hashlib.file_digest(stream, "sha256").hexdigest()
+        except OSError as exc:
+            raise InstructionReadUnavailable("Task instructions are temporarily unreadable") from exc
     return basis
 
 
@@ -4411,46 +4471,10 @@ def plan_declared_function_step(project: dict, state: dict, messages: list, call
 
 
 def persistence_completion_issue(folder, project):
-    """Require a fresh measured reload witness only for an explicit request.
-
-    This proves one observed retained mutation, not complete semantic coverage.
-    The real independent verifier remains required by completion_issue.
-    """
-    import project_memory
-    import task_context
-    import webapp_check
-    suite=Path(folder)/'.local-ai/webapp-check.json'
-    if not browser_check_required(project) and not suite.is_file():return ''
-    obligations=task_context.explicit_persistence_obligations(folder,project)
-    if not obligations:return ''
-    required={effect for row in obligations for effect in row['required_effects']}
-    if not suite.is_file():return 'The original request explicitly requires persistence after reload. Add and run a same-sequence browser case that changes data, asserts its new outcome, reloads, and asserts that same outcome without filling or clicking again.'
-    with suite.open('rb') as stream:raw=stream.read(64001)
-    if len(raw)>64000:return 'The saved browser suite exceeds the bounded persistence evidence limit; restore its valid retained checks.'
-    saved=json.loads(raw)
-    digest=hashlib.sha256(raw).hexdigest()
-    source_status={}
-    receipts=project_memory.current_check_receipts(folder,project,checker_file=webapp_check.__file__,source_status=source_status)
-    for receipt in receipts:
-        if (receipt.get('checker')=='check_webapp_saved' and receipt.get('suite_sha256')==digest
-                and receipt.get('source_after',{}).get('scope') in {'full_project_source','application_source'}
-                and receipt.get('dependency_scope')=='project_local_dependencies'
-                and receipt.get('check_sha256')==project_memory._verification_digest({'suite_sha256':digest})
-                and valid_persistence_witnesses(receipt.get('persistence_witnesses'),saved)):
-            groups={}
-            pages=[name for name in requested_root_files(str(project.get('brief',''))) if Path(name).suffix.lower() in {'.html','.htm'}]
-            for witness in receipt['persistence_witnesses']:
-                if len(pages)==1 and witness['path']!=pages[0]:continue
-                groups.setdefault((witness['path'],witness['sequence'],witness['target']),set()).add(witness['effect'])
-            if any(('mutation' not in required or observed) and required-{'mutation'}<=observed for observed in groups.values()):return ''
-    limitations=', '.join(source_status.get('limitations',[]))
-    scope_note=(' Source scope: '+str(source_status.get('scope','unknown'))+
-                (('; limitations: '+limitations) if limitations else '')+'.')
-    return ('The original request explicitly requires persistence after reload, but no fresh complete-source and local-dependency browser witness records it. '
-            'Use check_webapp with one saved sequence: change data through its controls, assert the changed text/state/count, '
-            'then reload in a later case and assert that same value with no new fill/click/key actions. Retain all earlier cases '
-            'and run the actual saved verifier after the final source edit. Static visibility or SQL done rows are not reload proof. '
-            +scope_note+' Required measured effects: '+', '.join(sorted(required))+'. A removal/deletion needs an earlier successful reload baseline, then an observed collection decrease, then another reload retaining the new outcome. Supported counts are table rows, UL/OL items, or exported array.length state; add-only evidence does not cover deletion. For click/key-only mutation, first assert a reload baseline. Returning to the initial empty/zero without a persisted baseline is not evidence.')
+    """Direct callers acquire a fresh scope; no caller can supply obligations."""
+    if project is None and not (Path(folder) / '.local-ai/webapp-check.json').is_file():
+        return ''  # Preserve the old direct no-project/no-suite no-op.
+    return _persistence_completion_issue_for_scope(folder, project, _final_delivery_scope(folder, project))
 
 
 
@@ -4526,7 +4550,10 @@ def completion_issue(folder: Path, project: dict | None = None,
     life_issue = starter_lives_issue(folder, project, state)
     if life_issue:
         return life_issue
-    if state is not None and browser_check_required(project):
+    final_scope = _final_delivery_scope(folder, project) if state is not None else None
+    if final_scope is not None and final_scope['required'] is None:
+        return 'Cannot confirm which current output owns reload persistence; inspect the original instructions before final handoff.'
+    if state is not None and final_scope['required']:
         checked = str(state.get("browser_checked_path") or "")
         try:
             current_hash = hashlib.sha256(project_path(folder, checked).read_bytes()).hexdigest()
@@ -4591,10 +4618,13 @@ def completion_issue(folder: Path, project: dict | None = None,
             return "Cannot confirm saved browser case coverage: " + str(error)[:300] + "; rerun check_webapp."
     if project and state and state.get("verify_passed"):
         try:
-            issue=persistence_completion_issue(folder,project)
+            issue=_persistence_completion_issue_for_scope(folder, project, final_scope)
         except (OSError,ValueError,TypeError,RuntimeError,sqlite3.Error):
             return 'Cannot validate the original reload requirement against fresh host evidence; rerun its actual saved browser checks.'
         if issue:return issue
+    notes_issue = authored_notes_issue(folder, project)
+    if notes_issue:
+        return notes_issue
     return ""
 
 
@@ -5455,7 +5485,13 @@ def advance_checked_steps(project: dict, state: dict, messages: list) -> bool:
 def run_slice(project: dict, complete=None) -> dict:
     import project_memory
     with project_memory.verification_context(project):
-        return _run_slice(project,complete=complete)
+        try:
+            return _run_slice(project,complete=complete)
+        except InstructionReadUnavailable:
+            result = _post_queue_instruction_defer(project, read_state(project), 'instructions_unavailable')
+            if result.get('status') == 'continue':
+                result['instruction_read_unavailable'] = True
+            return result
 
 
 def _run_slice(project: dict, complete=None) -> dict:
@@ -5468,6 +5504,10 @@ def _run_slice(project: dict, complete=None) -> dict:
     state = read_state(project)
     if state.get("status") in ("paused", "stopped", "done"):
         return state
+    # Before refreshing a briefing or publishing running state, establish that
+    # authoritative instructions are readable. Later planning still rechecks
+    # their full hashes; this early guard grants no lasting execution authority.
+    planning_basis(project)
     if small_html_page(project) and automatic_handoff_ready(folder, project, state):
         # A provider outage after real verification must not hold finished work
         # hostage. Recheck the app-owned verifier before skipping another AI call.
@@ -5503,11 +5543,16 @@ def _run_slice(project: dict, complete=None) -> dict:
     from cloud_ai import ToolArgumentError
 
     router = Router() if complete is None else None
+    validated_whole_request = None
     def automatic_call(payload):
-        avoid = repair_avoid_models(state, task_context.request_identity(folder))
+        request_hash = (validated_whole_request if payload.get('_native_whole_goal_work')
+                        else task_context.request_identity(folder))
+        if payload.get('_native_whole_goal_work') and not isinstance(request_hash, str):
+            raise RuntimeError('Whole-goal request identity was not validated before inference.')
+        avoid = repair_avoid_models(state, request_hash)
         stage = payload.get("_native_workload")
         payload = {key: value for key, value in payload.items()
-                   if key not in {"_native_workload", "_native_repair_basis", "_native_plan_basis", "_native_capability_recovery"}}
+                   if key not in {"_native_workload", "_native_repair_basis", "_native_plan_basis", "_native_capability_recovery", "_native_whole_goal_work"}}
         options = {"repair_avoid": avoid} if avoid else {}
         if stage in {"starter_selection", "starter_scope_review"}:
             options["size_hint"] = "quick"
@@ -5570,6 +5615,17 @@ def _run_slice(project: dict, complete=None) -> dict:
         planned_request_hash = task_context.request_identity(folder)
         planned_queue = task_context.step_status(folder)
         planned_step = planned_queue["active"]
+        if planned_queue['total'] > 0 and planned_queue['remaining'] == 0 and not planned_step:
+            saved_feedback = automatic_saved_browser_feedback(project, state, planned_queue, planned_request_hash)
+            if saved_feedback is False:
+                return read_state(project)
+            if saved_feedback is not None:
+                messages.append(saved_feedback)
+            latest = read_state(project)
+            if latest.get('status') in {'paused', 'stopped', 'done'}:
+                return latest
+            if user_request_stamp(folder) != request_before:
+                return _post_queue_instruction_defer(project, state, 'instructions_changed')
         needs_initial_plan = initial_plan_required(project) and not planned_queue["total"]
         # Pre-implementation executable acceptance remains an opt-in experiment.
         # Default workers may ground selectors in real source first; the final
@@ -5580,22 +5636,44 @@ def _run_slice(project: dict, complete=None) -> dict:
         plan_basis = planning_basis(project) if needs_initial_plan else None
         if needs_initial_plan and messages and messages[0].get("role") == "system":
             messages[0] = {"role": "system", "content": prompt(project)}
-        messages = fresh_messages(messages, folder, state, project)
+        instruction_frame = None
+        whole_goal_work = _post_queue_candidate(project, planned_queue)
+        if whole_goal_work:
+            try:
+                instruction_frame = _post_queue_instruction_frame(project)
+                if instruction_frame['request'] != planned_request_hash:
+                    return _post_queue_instruction_defer(project, state, 'instructions_changed')
+                if (not messages or messages[0].get('role') != 'system'
+                        or not str(messages[0].get('content', '')).startswith("You are Cale's native project worker.")):
+                    return _post_queue_instruction_defer(project, state, 'frame_unknown')
+                messages[0] = {'role': 'system', 'content': prompt(
+                    {**project, 'brief': instruction_frame['brief']}, rules_override=instruction_frame['rules'])}
+            except (OSError, ValueError, TypeError, KeyError, RecursionError):
+                return _post_queue_instruction_defer(project, state, 'instructions_unavailable')
+        messages = fresh_messages(messages, folder, state, project,
+                                  omit_completion_advice=whole_goal_work)
         if needs_initial_plan and planning_basis(project) != plan_basis:
             continue  # Rebuild the prompt and its identity together, without inference or mutation.
-        focus = None if planning else focused_browser_check(project, state, planned_request_hash)
-        available_tools = step_tools(project, state, repair_tools(project, state))
-        available_tools = expression_helper_tools(project, available_tools)
-        available_tools = acceptance_repair_tools(project, state, available_tools)
+        frontier = post_queue_frontier(project, state, planned_queue, planned_request_hash,
+                                       instruction_frame=instruction_frame) if whole_goal_work else None
+        if whole_goal_work and frontier is None:
+            return _post_queue_instruction_defer(project, state, 'classification_changed')
+        focus = None if planning or whole_goal_work else focused_browser_check(project, state, planned_request_hash)
+        if whole_goal_work:
+            available_tools = expression_helper_tools(project, copy.deepcopy(TOOLS))
+        else:
+            available_tools = step_tools(project, state, repair_tools(project, state))
+            available_tools = expression_helper_tools(project, available_tools)
+            available_tools = acceptance_repair_tools(project, state, available_tools)
         if planning:
             available_tools = initial_plan_tools(project, available_tools)
         messages = compact_messages(messages, folder, context_limit, tools=available_tools)
         # Prefer an already diagnosed narrow checker repair before reserving a
         # generic recovery turn. A missing module has no such browser specialist.
-        decision = active_step_repair_notice(project, state) if not focus and not planning else None
+        decision = active_step_repair_notice(project, state) if not focus and not planning and not whole_goal_work else None
         scoped_request = (focused_step_repair_request(project, state, available_tools, decision, context_limit)
-                          if not needs_initial_plan and not focus else None)
-        recovery_request = (None if needs_initial_plan or focus or scoped_request else
+                          if not needs_initial_plan and not focus and not whole_goal_work else None)
+        recovery_request = (None if needs_initial_plan or focus or scoped_request or whole_goal_work else
                             capability_recovery_request(project,state,messages,available_tools))
         if recovery_request and recovery_request.get('_capability_recovery_reload'):
             latest=read_state(project)
@@ -5642,7 +5720,7 @@ def _run_slice(project: dict, complete=None) -> dict:
                 "Do not write implementation, run shell commands, fake successful checks or hand off "
                 "before creating this queue. A plan records work still to do; it is not a passing result. "
                 "Normal implementation tools return after a valid plan has been saved.")}]
-        elif not focus:
+        elif not focus and not whole_goal_work:
             scoped = scoped_request or recovery_request
             if scoped:
                 request.update(scoped)
@@ -5653,6 +5731,31 @@ def _run_slice(project: dict, complete=None) -> dict:
             request["messages"][-1] = {**focus[1], "content": focus[1]["content"]
                                       + "\nArgument schema: " + json.dumps(schema)}
             request["response_format"] = {"type": "json_object"}
+        if whole_goal_work:
+            request['_native_whole_goal_work'] = True
+            from cloud_ai import estimated_input_tokens
+            hinted = {**request, 'messages': [*request['messages'], post_queue_frontier_notice(frontier)]}
+            notice_added = estimated_input_tokens(hinted) + request['max_tokens'] <= context_limit
+            if notice_added:
+                request = hinted
+            current = post_queue_frontier_current(project, frontier)
+            if current in {'instructions_changed', 'instructions_unknown', 'queue_changed'}:
+                return _post_queue_instruction_defer(project, state, current)
+            if current == 'changed' and notice_added:
+                request['messages'][-1] = {'role': 'system', 'content':
+                    '[Whole-goal work] Optional observations changed or became unavailable. '
+                    'Inspect the original requirements and current implementation with ordinary tools; '
+                    'no passing evidence or completion credit was inferred.'}
+            latest = read_state(project)
+            if latest.get('status') in {'paused', 'stopped', 'done'}:
+                return latest
+            if user_request_stamp(folder) != request_before:
+                return _post_queue_instruction_defer(project, state, 'instructions_changed')
+        remember_request_mode(state, selected_request_mode(request, planning=planning, focus=focus),
+            request, instruction_frame['basis'] if whole_goal_work else plan_basis,
+            {'request': planned_request_hash, 'step': planned_step.get('id') if planned_step else None,
+             'check': planned_step.get('check_arguments') if planned_step else None})
+        validated_whole_request = instruction_frame['request'] if whole_goal_work else None
         try:
             response = call(request)
         except ToolArgumentError as error:
@@ -5690,6 +5793,12 @@ def _run_slice(project: dict, complete=None) -> dict:
             state.update(messages=messages, current="Reading changed project requirements")
             save_state(project, state)
             continue
+        if whole_goal_work:
+            try:
+                if _post_queue_frame_identity(_post_queue_instruction_frame(project)) != _post_queue_frame_identity(instruction_frame):
+                    return _post_queue_instruction_defer(project, state, 'instructions_changed')
+            except (OSError, ValueError, TypeError, KeyError, RecursionError):
+                return _post_queue_instruction_defer(project, state, 'instructions_unavailable')
         current_request_stamp = user_request_stamp(folder)
         if current_request_stamp != request_before:
             # The response was planned against the older brief. Do not run
@@ -6137,7 +6246,14 @@ def worker_main(project_id: str) -> int:
     if project is None:
         return 2
     try:
-        run_slice(project)
+        result = run_slice(project)
+        import task_context
+        if result.get('instruction_read_unavailable'):
+            # Separate SQLite scheduling metadata never overwrites the latest
+            # checkpoint, messages, acceptance, or Pause/Stop state.
+            task_context.defer_instruction_read(project)
+        else:
+            task_context.clear_instruction_wait(project)
         return 0
     except Exception as exc:
         state = read_state(project)
@@ -6198,6 +6314,13 @@ def advance(project: dict) -> tuple[str, str] | None:
     if process_alive(state):
         detail = state.get("current") or "Cale is working"
         return ("working", detail) if project["detail"] != detail else None
+    if state.get('status') in {'paused', 'stopped'}:
+        return None
+    if state.get('status') != 'done':
+        import task_context
+        if task_context.instruction_wait(project):
+            detail = 'Task instructions are temporarily unavailable; retrying automatically.'
+            return ('working', detail) if project.get('detail') != detail else None
     if state.get("status") == "done":
         return "checking", "Cale finished the work slice; checking the result."
     if state.get("status") == "error" and int(state.get("failures", 0)) >= 3:
@@ -6306,6 +6429,1379 @@ def check_expression_helper(folder, arguments):
     return {'passed':all(c['passed'] for c in cases),'cases':cases,'helper':identity,
             'inference_calls':0,'process_calls':0,'task_completion':False,
             'note':'Only these concrete helper cases were checked; no general correctness or app completion claim.'}
+
+
+
+
+def _final_affirmative_html_output(sources, *, allow_single_file=False):
+    """Conservative output-request syntax, not a browser-completion classifier."""
+    filename = r'(?i)(?<![\w/:\\])(?:[\w-]+[/\\])*[\w.-]+\.html?\b'
+    for _, text in sources:
+        masked = re.sub(filename, '__HTML_OUTPUT__', text)
+        if allow_single_file:
+            masked = re.sub(r'(?i)\bsingle.file\s+html\b', '__HTML_OUTPUT__', masked)
+        for clause in re.split(r'[.!?;\n]', masked):
+            if len(clause) > 600 or '__HTML_OUTPUT__' not in clause:
+                continue
+            if re.search(r"(?i)\b(?:example|reference|sample|tutorial|hypothetical|instead\s+of|avoid)\b", clause):
+                continue
+            if re.search(r"(?i)\b(?:do not|don't|never|without|not required|no need|rather than)\b", clause):
+                continue
+            if re.match(r'(?i)\s*(?:if|suppose|explain|describe|what|why|how)\b', clause):
+                continue
+            if re.search(r'(?i)\b(?:build|create|make|write|save|develop|implement|produce|deliver|update|edit|fix)\b.{0,180}__HTML_OUTPUT__', clause):
+                return True
+    return False
+
+
+def _final_clause_owner(clause):
+    """Explicit output ownership, not unrelated HTML/persistence co-occurrence.
+
+    Mixed owners are unknown. Merely mentioning a filename never changes the
+    owner; static HTML documentation is non-browser delivery for this new arm.
+    """
+    negative = (r"(?i)\b(?:do not|don't|never|no need|not required|need not|needn't|does not|doesn't|"
+                r"without|may|might|could|optionally|perhaps|should not|must not|shall not|will not|"
+                r"not create|not write|not build|not save|not persist|not retain|not keep)\b")
+    if (re.search(negative, clause)
+            or re.match(r'(?i)\s*(?:if|explain|describe|example|suppose|what|why|how)\b', clause)
+            or re.search(r'(?i)\b(?:if|unless)\b', clause)):
+        return None
+    html = _final_affirmative_html_output(
+        [('request', clause.replace('__HTML_OUTPUT__', 'output.html'))], allow_single_file=True)
+    action = re.search(r'(?i)\b(?:build|create|make|write|save|develop|implement|produce|deliver|update|edit|fix)\b', clause)
+    nonbrowser = bool(action and re.search(
+        r'(?i)\b(?:CLI|command.line|terminal|console|native application|Python script|PowerShell script)\b', clause))
+    document_noun = bool(html and re.search(
+        r'(?i)\b(?:documentation|docs|manual|report|article|guide|screenshot|export)\b', clause))
+    # A report editor, guide app or export tool is not a static document merely
+    # because its requested artifact has a document-like noun. Explicit CLI
+    # application references belong to the non-browser owner above.
+    application_text = re.sub(
+        r'(?i)\b(?:CLI|command.line|console|terminal)\s+(?:app|application|tool)\b',
+        'CLI_PROGRAM', clause)
+    interactive_delivery = bool(html and re.search(
+        r'(?i)\b(?:app|application|editor|interactive|dashboard|manager|tracker|builder|tool|interface|workspace|viewer)\b',
+        application_text))
+    if document_noun and interactive_delivery:
+        return 'ambiguous'  # Never silently discard an interactive persistence duty.
+    static_delivery = bool(html and (
+        re.search(r'(?i)\b(?:documentation|docs|manual|article)\b', clause)
+        or re.search(r'(?i)\b(?:static|read.only|written|printable|downloadable)\b.{0,80}'
+                     r'\b(?:report|guide|export|document|screenshot|page)\b', clause)
+        or re.search(r'(?i)\b(?:report|guide|export|document|screenshot)\b.{0,80}'
+                     r'\b(?:static|read.only|written|printable|downloadable)\b', clause)))
+    if static_delivery:
+        return 'nonbrowser'
+    if html and nonbrowser:
+        return 'ambiguous'
+    if html:
+        return 'html'
+    if nonbrowser:
+        return 'nonbrowser'
+    return None
+
+
+class _FinalDeliveryScanner:
+    """Full instruction scan with bounded clause/token/obligation retention.
+
+    Filename dots are protected only for output ownership. The unmodified pure
+    persistence parser still sees real sentence punctuation and actual clauses.
+    Ownership applies to the same clause, then carries to following clauses.
+    Tokens above 600 characters are outside this narrow output grammar.
+    """
+    def __init__(self, basis):
+        self.basis = basis
+        self.owner = None
+        self.html_seen = False
+        self.records = []
+        self.pending = []
+        self.overflow = False
+        self.source = 'brief'
+        self.position = 0
+        self.raw_start = 0
+        self.raw = self.raw_space = self.clause = self.token = ''
+        self.raw_over = self.clause_over = self.token_over = False
+
+    def _finish_raw(self, delimiter=''):
+        import task_context
+
+        clause = self.raw + (self.raw_space + delimiter if delimiter else '')
+        if not self.raw_over and len(clause.strip()) <= 400:
+            for value in task_context.parse_persistence_obligations([(self.source, clause)], self.basis):
+                if len(self.records) >= 32:
+                    self.overflow = True
+                    break
+                value['span'] = [self.raw_start + offset for offset in value['span']]
+                value.pop('id', None)
+                value['id'] = task_context._recovery_hash(value)
+                record = {'obligation': value, 'owner': None}
+                self.records.append(record)
+                self.pending.append(record)
+        self.raw = self.raw_space = ''
+        self.raw_over = False
+
+    def _raw_character(self, character):
+        position = self.position
+        self.position += 1
+        if character in '.!?;\n':
+            self._finish_raw(character)
+        elif character.isspace():
+            if self.raw and len(self.raw_space) <= 400:
+                self.raw_space += character
+        elif not self.raw_over:
+            if not self.raw:
+                self.raw_start = position
+            if len(self.raw) + len(self.raw_space) + 1 <= 400:
+                self.raw += self.raw_space + character
+                self.raw_space = ''
+            else:
+                self.raw_over = True
+
+    def _finish_scope(self):
+        if self.clause_over:
+            # Do not guess an owner hidden in an unsupported long clause.
+            owner = 'ambiguous' if self.html_seen else None
+        else:
+            owner = _final_clause_owner(self.clause)
+        if owner is not None:
+            self.owner = owner
+            self.html_seen = self.html_seen or owner in {'html', 'ambiguous'}
+        for record in self.pending:
+            record['owner'] = self.owner
+        self.pending.clear()
+        self.clause = ''
+        self.clause_over = False
+
+    def _append_clause(self, text):
+        if not self.clause_over:
+            if len(self.clause) + len(text) <= 600:
+                self.clause += text
+            else:
+                self.clause_over = True
+
+    def _literal(self, text):
+        for character in text:
+            self._raw_character(character)
+            if character in '.!?;\n':
+                self._finish_scope()
+            else:
+                self._append_clause(character)
+
+    def _finish_token(self):
+        filename = r'(?i)(?<![\w/:\\])(?:[\w-]+[/\\])*[\w.-]+\.html?\b'
+        start = 0
+        for match in re.finditer(filename, self.token):
+            self._literal(self.token[start:match.start()])
+            for character in match[0]:
+                self._raw_character(character)
+            self._append_clause('__HTML_OUTPUT__')
+            start = match.end()
+        self._literal(self.token[start:])
+        self.token = ''
+        self.token_over = False
+
+    def feed(self, text):
+        for match in re.finditer(r'\s+|\S+', text):
+            part = match[0]
+            if part.isspace():
+                self._finish_token()
+                self._literal(part)
+            elif not self.token_over and len(self.token) + len(part) <= 600:
+                self.token += part
+            else:
+                if self.token:
+                    self._literal(self.token)
+                    self.token = ''
+                self.token_over = True
+                self._literal(part)
+
+    def finish_source(self, next_source=None):
+        self._finish_token()
+        self._finish_raw()
+        self._finish_scope()
+        if next_source is not None:
+            self.source = next_source
+            self.position = 0
+
+    def projection(self, legacy, suite_trigger=False):
+        owned = [row['obligation'] for row in self.records if row['owner'] == 'html']
+        unclear = any(row['owner'] in {None, 'ambiguous'} for row in self.records)
+        if legacy:
+            required = True
+            obligations = [row['obligation'] for row in self.records]
+        elif self.html_seen and unclear:
+            required = None
+            obligations = []
+        else:
+            required = bool(owned)
+            obligations = owned
+        # A saved suite independently enabled persistence enforcement before
+        # this classifier existed. Preserve that path without requiring the
+        # new HTML ownership arm or adding legacy browser-state prerequisites.
+        if suite_trigger and not legacy:
+            required = True if required is True else False
+            obligations = [row['obligation'] for row in self.records]
+        if self.overflow and (legacy or suite_trigger or self.html_seen):
+            required = None
+            obligations = []
+        return {'required': required, 'obligations': obligations,
+                'persistence_eligible': bool(legacy or suite_trigger or required),
+                'suite_trigger': suite_trigger,
+                'reason': ('obligation_limit' if self.overflow and required is None else
+                           'mixed_ownership' if required is None else
+                           'legacy_browser' if legacy else
+                           'legacy_suite' if suite_trigger else
+                           'html_owned_persistence' if required else 'outside_added_scope'),
+                'obligation_limit': 32, 'overflow': self.overflow}
+
+
+def _final_delivery_scope(folder, project):
+    """Fresh host-only tri-state projection, never caller-supplied authority.
+
+    Full byte hashes and normal chunked reads bind instructions. No project
+    SQLite/obligation diagnostic writes occur here. Total request length is not
+    capped by optional preview limits; synchronous IO is not wall-preemptible.
+    """
+    import codecs
+    import project_memory
+
+    unknown = {'required': None, 'obligations': [], 'basis': None,
+               'reason': 'instructions_unavailable', 'obligation_limit': 32}
+    if project is None:
+        return {**unknown, 'required': False, 'reason': 'no_project'}
+    try:
+        root = project_memory._artifact_project_root(folder)
+        brief = project.get('brief', '')
+        if not isinstance(brief, str):
+            return unknown
+        legacy = browser_check_required(project)
+        basis = planning_basis(project)
+        if hashlib.sha256(brief.encode()).hexdigest() != basis['brief']:
+            return {**unknown, 'reason': 'instructions_changed'}
+        scanner = _FinalDeliveryScanner(basis)
+        for offset in range(0, len(brief), 16384):
+            scanner.feed(brief[offset:offset + 16384])
+        scanner.finish_source('followups')
+        path = root / '.local-ai/USER-REQUESTS.md'
+        try:
+            path.lstat()
+        except FileNotFoundError:
+            if basis['followups'] is not None:
+                return {**unknown, 'reason': 'instructions_changed'}
+        else:
+            identity = project_memory._receipt_file_identity(path)
+            decoder = codecs.getincrementaldecoder('utf-8-sig')(errors='replace')
+            class Sink:
+                def write(self, chunk):
+                    scanner.feed(decoder.decode(chunk))
+            digest = project_memory._receipt_stream(path, identity, float('inf'), Sink())
+            scanner.feed(decoder.decode(b'', final=True))
+            if digest != basis['followups']:
+                return {**unknown, 'reason': 'instructions_changed'}
+        scanner.finish_source()
+        if planning_basis(project) != basis:
+            return {**unknown, 'reason': 'instructions_changed'}
+        suite_trigger = (root / '.local-ai/webapp-check.json').is_file()
+        return {**scanner.projection(legacy, suite_trigger), 'basis': basis}
+    except (OSError, ValueError, TypeError, KeyError, RecursionError):
+        return unknown
+
+
+def final_browser_check_required(folder, project):
+    """Observational compatibility helper; final evaluation acquires its own scope."""
+    return _final_delivery_scope(folder, project)['required']
+
+
+def _persistence_completion_issue_for_scope(folder, project, scope):
+    """Require a fresh measured reload witness only for an explicit request.
+
+    This proves one observed retained mutation, not complete semantic coverage.
+    The real independent verifier remains required by completion_issue.
+    """
+    import project_memory
+    import task_context
+    import webapp_check
+    suite=Path(folder)/'.local-ai/webapp-check.json'
+    if project is None:
+        return ('Cannot confirm the current project requirements for the saved browser suite; '
+                'use its registered project before final handoff.')
+    if scope['required'] is None:
+        return 'Cannot confirm which current output owns reload persistence; inspect the original instructions before final handoff.'
+    if planning_basis(project) != scope['basis']:
+        return 'The current instructions changed during final persistence validation; read them again before handoff.'
+    if suite.is_file() != scope.get('suite_trigger', False):
+        return 'The saved browser suite appeared or disappeared during final validation; refresh its current evidence before handoff.'
+    if not scope.get('persistence_eligible'):return ''
+    obligations=scope['obligations']
+    if not obligations:return ''
+    required={effect for row in obligations for effect in row['required_effects']}
+    if not suite.is_file():return 'The original request explicitly requires persistence after reload. Add and run a same-sequence browser case that changes data, asserts its new outcome, reloads, and asserts that same outcome without filling or clicking again.'
+    with suite.open('rb') as stream:raw=stream.read(64001)
+    if len(raw)>64000:return 'The saved browser suite exceeds the bounded persistence evidence limit; restore its valid retained checks.'
+    saved=json.loads(raw)
+    digest=hashlib.sha256(raw).hexdigest()
+    source_status={}
+    receipts=project_memory.current_check_receipts(folder,project,checker_file=webapp_check.__file__,source_status=source_status)
+    for receipt in receipts:
+        if (receipt.get('checker')=='check_webapp_saved' and receipt.get('suite_sha256')==digest
+                and receipt.get('source_after',{}).get('scope') in {'full_project_source','application_source'}
+                and receipt.get('dependency_scope')=='project_local_dependencies'
+                and receipt.get('check_sha256')==project_memory._verification_digest({'suite_sha256':digest})
+                and valid_persistence_witnesses(receipt.get('persistence_witnesses'),saved)):
+            groups={}
+            pages=[name for name in requested_root_files(str(project.get('brief',''))) if Path(name).suffix.lower() in {'.html','.htm'}]
+            for witness in receipt['persistence_witnesses']:
+                if len(pages)==1 and witness['path']!=pages[0]:continue
+                groups.setdefault((witness['path'],witness['sequence'],witness['target']),set()).add(witness['effect'])
+            if any(('mutation' not in required or observed) and required-{'mutation'}<=observed for observed in groups.values()):
+                if planning_basis(project) != scope['basis']:
+                    return 'The current instructions changed during final persistence validation; read them again before handoff.'
+                return ''
+    limitations=', '.join(source_status.get('limitations',[]))
+    scope_note=(' Source scope: '+str(source_status.get('scope','unknown'))+
+                (('; limitations: '+limitations) if limitations else '')+'.')
+    return ('The original request explicitly requires persistence after reload, but no fresh complete-source and local-dependency browser witness records it. '
+            'Use check_webapp with one saved sequence: change data through its controls, assert the changed text/state/count, '
+            'then reload in a later case and assert that same value with no new fill/click/key actions. Retain all earlier cases '
+            'and run the actual saved verifier after the final source edit. Static visibility or SQL done rows are not reload proof. '
+            +scope_note+' Required measured effects: '+', '.join(sorted(required))+'. A removal/deletion needs an earlier successful reload baseline, then an observed collection decrease, then another reload retaining the new outcome. Supported counts are table rows, UL/OL items, or exported array.length state; add-only evidence does not cover deletion. For click/key-only mutation, first assert a reload baseline. Returning to the initial empty/zero without a persisted baseline is not evidence.')
+
+
+_REQUEST_MODE_VERSION = "host-request-mode-v1"
+
+
+_REQUEST_MODES = frozenset({"ordinary_implementation", "initial_step_planning", "focused_browser_check",
+                          "active_step_checker_repair", "capability_recovery", "whole_goal_work"})
+
+
+def authored_notes_from_request(request: str) -> set[str]:
+    """Pure shared phrase semantics; callers own bounded instruction acquisition."""
+    # Mask filename dots before splitting instructions into short clauses.
+    request = re.sub(r"(?i)\b(PLAN|PROGRESS)\.md\b", lambda m: "__NOTE_" + m[1].upper() + "__", request)
+    required = set()
+    action = r"\b(?:keep|maintain|update|write|create|record|replace)\b"
+    for clause in re.split(r"[.!?;\n]", request):
+        names = {name + ".md" for name in re.findall(r"__NOTE_(PLAN|PROGRESS)__", clause)}
+        if not names or not re.search(action, clause, re.I):
+            continue
+        if re.search(r"(?i)\b(?:explain|describe)\b.*\bhow\b|\bhow\s+(?:do|can|to)\b", clause):
+            continue  # A question about notes is not a request to author notes.
+        if re.search(r"(?i)\b(?:do\s+not|don't|no\s+longer|needn't)\s+(?:\w+\s+){0,2}" + action, clause):
+            required.difference_update(names)
+        else:
+            required.update(names)
+    return required
+
+
+def _post_queue_candidate(project, queue):
+    if not (isinstance(queue, dict) and type(queue.get('total')) is int and queue['total'] > 0
+            and type(queue.get('remaining')) is int and queue['remaining'] == 0):
+        return False
+    if browser_check_required(project):
+        return True  # Preserve the existing recognized browser/game arm.
+    # The added arm uses the reviewed full-stream classifier, not the optional
+    # 64KB artifact-preview acquisition. Unknown is never completion authority.
+    return _final_delivery_scope(project['folder'], project)['required'] is True
+
+
+def _post_queue_read(root, path, limit, deadline):
+    import io
+    import project_memory
+    path = project_path(root, path.relative_to(root).as_posix())
+    try:
+        path.lstat()
+    except FileNotFoundError:
+        return None
+    identity = project_memory._receipt_file_identity(path)
+    if identity[2] > limit:
+        raise ValueError('frontier_document_bounds')
+    output = io.BytesIO()
+    digest = project_memory._receipt_stream(path, identity, deadline, output)
+    return (path.relative_to(root).as_posix(), digest, output.getvalue())
+
+
+def _post_queue_instruction_frame(project):
+    """Full streamed identity with bounded excerpts; long valid requests are not64k-rejected.
+
+    The cooperative deadline cannot preempt filesystem calls. Unknown identity
+    defers one slice without an RPC; optional evidence has its separate limits.
+    """
+    import project_memory
+    root = project_memory._artifact_project_root(project['folder'])
+    if (not isinstance(project.get('brief'), str)
+            or Path(project['folder']).resolve(strict=True) != root):
+        raise ValueError('instruction_basis_unavailable')
+    deadline = time.monotonic() + project_memory._RECEIPT_RO_COPY_SECONDS
+    brief = project['brief']
+    digest = hashlib.sha256()
+    brief_bytes = 0
+    for start in range(0, len(brief), 16384):
+        if time.monotonic() >= deadline:
+            raise ValueError('instruction_read_budget')
+        chunk = brief[start:start+16384].encode('utf-8')
+        brief_bytes += len(chunk)
+        digest.update(chunk)
+    basis = {'brief': digest.hexdigest()}
+    identities = {}
+    contents = {}
+    class Edges:
+        def __init__(self):
+            self.head = b''
+            self.tail = b''
+            self.raw = bytearray()
+        def write(self, chunk):
+            self.head = (self.head + chunk)[:8192]
+            self.tail = (self.tail + chunk)[-8192:]
+            if self.raw is not None:
+                if len(self.raw) + len(chunk) <= 64000:
+                    self.raw.extend(chunk)
+                else:
+                    self.raw = None
+        def text(self):
+            def decode(raw):
+                return raw.decode('utf-8-sig', errors='replace').replace('\r\n','\n').replace('\r','\n')
+            if self.raw is not None:
+                return decode(self.raw)
+            return (decode(self.head)[:2000] + '\n… rules excerpt omitted; read AGENTS.md if needed …\n'
+                    + decode(self.tail)[-2000:])
+    for name, relative in (('rules','AGENTS.md'), ('followups','.local-ai/USER-REQUESTS.md')):
+        path = root/relative
+        try:
+            path.lstat()
+        except FileNotFoundError:
+            basis[name] = None;identities[name] = None;contents[name] = None
+            continue
+        identity = project_memory._receipt_file_identity(path)
+        edges = Edges()
+        value = project_memory._receipt_stream(path, identity, deadline, edges)
+        basis[name] = value;identities[name] = identity;contents[name] = edges
+    sources = None
+    if brief_bytes <= 64000 and (contents['followups'] is None or contents['followups'].raw is not None):
+        sources = [('brief', brief)]
+        if contents['followups'] is not None:
+            sources.append(('followups', contents['followups'].raw.decode('utf-8', errors='replace')))
+    return {'basis': basis, 'request': basis['followups'] or hashlib.sha256(b'').hexdigest(),
+            'identities': identities, 'identity': (project.get('id'), str(root)),
+            'brief': brief, 'rules': contents['rules'].text() if contents['rules'] is not None else '',
+            'sources': sources}
+
+
+def _post_queue_frame_identity(frame):
+    return (frame['basis'], frame['request'], frame['identities'], frame['identity'])
+
+
+def _post_queue_instruction_defer(project, state, reason):
+    """Return a fresh transient result, never publish a stale checkpoint.
+
+    Public save_state has no compare-and-swap writer contract. worker_main
+    ignores this return value; no deferred reason is claimed durable here.
+    A fresh supervisor slice will read the preserved latest checkpoint.
+    """
+    latest = read_state(project)
+    if latest.get('status') in {'paused', 'stopped', 'done'}:
+        return latest
+    return {**latest, 'status': 'continue',
+            'current': 'Refreshing changed or unavailable task instructions before continuing',
+            'post_queue_instruction_defer': reason}
+
+
+def _post_queue_snapshot(project, instruction_frame):
+    import project_memory
+    import task_context
+    root = project_memory._artifact_project_root(project['folder'])
+    deadline = time.monotonic() + project_memory._RECEIPT_RO_COPY_SECONDS
+    documents = {name: _post_queue_read(root, task_context.document_path(root, name), 256000, deadline)
+                 for name in ('PLAN.md', 'PROGRESS.md')}
+    documents['suite'] = _post_queue_read(root, root/'.local-ai/webapp-check.json', 64000, deadline)
+    return {'documents': documents, 'source': project_memory.verification_source_state(root, deadline=deadline),
+            'instruction_identity': _post_queue_frame_identity(instruction_frame)}
+
+
+def _post_queue_measured_effects(groups, required):
+    """Choose one coherent target group for advisory facts; never union groups."""
+    wanted = set(required)
+    def rank(value):
+        covered = value | ({'mutation'} if value else set())
+        return (len(covered & wanted), len(value & {'creation', 'removal'}),
+                len(value), tuple(sorted(value)))
+    measured = max(groups.values(), key=rank, default=set())
+    return sorted(measured | ({'mutation'} if measured else set()))
+
+
+def post_queue_frontier(project, state, queue, request_hash, *, instruction_frame=None):
+    """Host work selection after component exhaustion; NEVER completion authority.
+
+    No browser/command runs or project SQLite opens. Only the dedicated bounded
+    TEMP-copy preview supplies saved facts. Missing/limited evidence stays
+    unproven and restores ordinary work; it never requires invented cases.
+    """
+    if not _post_queue_candidate(project, queue):
+        return None
+    import project_memory
+    import task_context
+    import webapp_check
+    frontier = {'facts': {'artifacts': {}, 'required_effects': [], 'planned_effects': [],
+                         'measured_effects': [], 'global_browser': 'unknown',
+                         'verifier': 'recorded_success_unbound' if state.get('verify_passed') else 'unknown',
+                         'evidence': 'unknown'}, 'binding': None, 'plan_snapshot': None, 'instruction_frame': instruction_frame, 'expected_request': request_hash}
+    try:
+        frame = instruction_frame or _post_queue_instruction_frame(project)
+        frontier['instruction_frame'] = frame
+        binding = _post_queue_snapshot(project, frame)
+        frontier['binding'] = binding
+        basis, request = frame['basis'], frame['request']
+        if request != request_hash:
+            return frontier
+        sources = frame['sources']
+        if sources is None:
+            frontier['facts']['required_effects'] = None
+            return frontier  # Long instructions remain available in the real frame; optional facts are unknown.
+        required = sorted({effect for row in task_context.parse_persistence_obligations(sources, basis)
+                           for effect in row['required_effects']})
+        frontier['facts']['required_effects'] = required
+        requested_notes = authored_notes_from_request('\n'.join(text for _, text in sources))
+        for name in sorted(requested_notes):
+            document = binding['documents'][name]
+            if document is None:
+                status = 'required_missing'
+            else:
+                text = document[2].decode('utf-8-sig')
+                excerpt = task_context.project_note_excerpt(name, text, 1)
+                status = ('required_placeholder' if not text.strip() or excerpt.startswith('[Untouched startup placeholder;')
+                          else 'present_unproven')
+            frontier['facts']['artifacts'][name] = status
+        preview = project_memory.readonly_check_receipts(project['folder'], project,
+            checker_file=webapp_check.__file__, include_plan=True)
+        if preview['status'] != 'available':
+            return frontier
+        if (preview['planning_basis'] != basis or preview['request_hash'] != request
+                or preview['source'] != binding['source']):
+            return frontier
+        plan = preview['plan']
+        if (not plan['total'] or plan['remaining']
+                or any(plan[key] != queue.get(key) for key in ('total','done','remaining'))):
+            frontier['queue_changed'] = True
+            return frontier
+        frontier['plan_snapshot'] = preview['_plan_snapshot']
+        frontier['facts']['evidence'] = 'fresh_snapshot'
+        frontier['facts']['planned_effects'] = task_context.planned_persistence_effects(plan['browser_specifications'])
+        document = binding['documents']['suite']
+        if document is None:
+            return frontier
+        saved = json.loads(document[2])
+        if not isinstance(saved, dict) or not isinstance(saved.get('checks'), list):
+            return frontier
+        groups = {}
+        pages = [name for name in requested_root_files(project['brief']) if Path(name).suffix.lower() in {'.html', '.htm'}]
+        for receipt in preview['receipts']:
+            if (receipt.get('checker') != 'check_webapp_saved' or receipt.get('suite_sha256') != document[1]
+                    or receipt.get('source_after', {}).get('scope') not in {'full_project_source', 'application_source'}
+                    or receipt.get('dependency_scope') != 'project_local_dependencies'
+                    or receipt.get('check_sha256') != project_memory._verification_digest({'suite_sha256': document[1]})):
+                continue
+            if not state.get('failed_checks') and state.get('browser_verified') is not False:
+                frontier['facts']['global_browser'] = 'current_pass'
+            if not valid_persistence_witnesses(receipt.get('persistence_witnesses'), saved):
+                continue
+            for witness in receipt['persistence_witnesses']:
+                if len(pages) == 1 and witness['path'] != pages[0]:
+                    continue
+                groups.setdefault((witness['path'], witness['sequence'], witness['target']), set()).add(witness['effect'])
+        frontier['facts']['measured_effects'] = _post_queue_measured_effects(groups, required)
+    except (OSError, ValueError, TypeError, KeyError, RecursionError, sqlite3.Error):
+        # This only selects ordinary work; no unknown snapshot becomes a pass.
+        frontier['facts']['evidence'] = 'unknown'
+    return frontier
+
+
+def post_queue_frontier_current(project, frontier):
+    """Instruction failures defer; optional evidence failures only suppress facts."""
+    import project_memory
+    previous_frame = frontier.get('instruction_frame')
+    if previous_frame is None:
+        return 'instructions_unknown'
+    if previous_frame['request'] != frontier.get('expected_request'):
+        return 'instructions_changed'
+    if frontier.get('queue_changed'):
+        return 'queue_changed'
+    try:
+        current_frame = _post_queue_instruction_frame(project)
+    except (OSError, ValueError, TypeError, KeyError, RecursionError):
+        return 'instructions_unknown'
+    if _post_queue_frame_identity(current_frame) != _post_queue_frame_identity(previous_frame):
+        return 'instructions_changed'
+    previous = frontier.get('binding')
+    if previous is None:
+        return 'changed'
+    try:
+        current = _post_queue_snapshot(project, current_frame)
+        if current != previous:
+            return 'changed'
+        if frontier.get('plan_snapshot'):
+            database = Path(project['folder'])/'.local-ai/memory.sqlite3'
+            paths = project_memory._receipt_source_paths(database)
+            if {path.name for path in paths} != set(frontier['plan_snapshot']):
+                return 'changed'
+            deadline = time.monotonic() + project_memory._RECEIPT_RO_COPY_SECONDS
+            for path in paths:
+                identity, digest = frontier['plan_snapshot'][path.name]
+                if project_memory._receipt_stream(path, identity, deadline) != digest:
+                    return 'changed'
+        return 'current'
+    except (OSError, ValueError, TypeError, KeyError, RecursionError):
+        return 'changed'
+
+
+def post_queue_frontier_notice(frontier):
+    facts = frontier['facts']
+    missing_structure = set(facts['required_effects'] or []) - set(facts['planned_effects'])
+    if facts['evidence'] == 'unknown':
+        action = ('Inspect the current implementation and retained checks; evidence is unavailable or limited. '
+                  'Do not invent integration cases or infer a pass from unknown data.')
+    elif missing_structure:
+        action = ('Inspect/build as necessary, then use task_steps action=plan to append a normal integration phase '
+                  'derived from the original requirements. Author its actual inputs/outcomes yourself; retain prior checks.')
+    else:
+        action = ('Continue ordinary implementation, explicit test-definition repair when needed, and real saved verification. '
+                  'A declaration or selected-case pass does not establish the whole request.')
+    return {'role': 'system', 'content': '[Whole-goal work] The component queue is exhausted; original-goal work remains separate. '
+        + json.dumps(facts, sort_keys=True) + '\n' + action
+        + ' Ordinary source/read/plan/check tools remain available. These are work-selection observations only, '
+          'not new completion authority. No step credit, repair allowance or case retirement was granted; the unchanged final gates still apply.'}
+
+
+def selected_request_mode(request, *, planning=False, focus=False):
+    """Read only host factory markers, not model text or advertised tool names."""
+    return ("whole_goal_work" if request.get("_native_whole_goal_work") else
+            "initial_step_planning" if planning else "focused_browser_check" if focus else
+            "capability_recovery" if request.get("_native_capability_recovery") else
+            "active_step_checker_repair" if request.get("_native_workload") == "active_step_checker_repair"
+            else "ordinary_implementation")
+
+
+def remember_request_mode(state, mode, request, basis, scope):
+    """Value-free record of the actual host-selected main-loop request path.
+
+    template_sha256 digests the version/mode IDENTIFIER only, not the template
+    contents or rendered private prompt. Source bindings are recorded separately
+    by qualification; this event does not attest a complete outbound workpack.
+    Never log model-supplied names, source, literals or arbitrary private keys.
+    """
+    if mode not in _REQUEST_MODES:
+        raise ValueError("Unknown host request mode")
+    known = {tool["function"]["name"] for tool in TOOLS} | {EXPRESSION_HELPER_TOOL["function"]["name"]}
+    offered = request.get("tools", [])
+    offered = offered if isinstance(offered, list) else []
+    names = set()
+    for tool in offered[:128]:
+        function = tool.get("function") if isinstance(tool, dict) else None
+        name = function.get("name") if isinstance(function, dict) else None
+        if isinstance(name, str) and name in known:
+            names.add(name)
+    def digest(value):
+        if value is None:
+            return None, 'unavailable'
+        try:
+            encoded = json.dumps(value, sort_keys=True, allow_nan=False).encode()
+            return hashlib.sha256(encoded).hexdigest(), "available"
+        except (ValueError, TypeError, RecursionError):
+            # Legacy malformed data must remain repairable. This is explicitly
+            # missing observational identity, never a valid substitute hash or
+            # permission to relax the original acceptance/control validators.
+            return None, "unavailable"
+    basis_hash, basis_status = digest(basis)
+    scope_hash, scope_status = digest(scope)
+    event = {"mode": mode, "template_version": _REQUEST_MODE_VERSION,
+             "template_sha256": digest([_REQUEST_MODE_VERSION, mode])[0],
+             "tools": sorted(names), "tool_count": min(len(offered), 128),
+             "basis_sha256": basis_hash, "basis_status": basis_status,
+             "scope_sha256": scope_hash, "scope_status": scope_status}
+    records = state.setdefault("request_mode_events", [])
+    if not isinstance(records, list):
+        records = state["request_mode_events"] = []
+    records.append(event)
+    del records[:-32]
+
+
+class _AuthoredNoteMatcher:
+    """Constant-state matcher for authored_notes_from_request's phrase rules.
+
+    Filenames are masked before clause splitting. Raw marker substrings retain
+    the reference behavior even inside long words; actions still need real
+    Unicode regex word boundaries. No clause or total input is retained.
+    """
+    _FILENAMES = ('PLAN.md', 'PROGRESS.md')
+    _MARKERS = (('__NOTE_PLAN__', 'PLAN.md'), ('__NOTE_PROGRESS__', 'PROGRESS.md'))
+    _KEYWORDS = tuple((word, re.compile(re.escape(word), re.I)) for word in (
+        'keep', 'maintain', 'update', 'write', 'create', 'record', 'replace',
+        'explain', 'describe', 'how', 'do', 'can', 'to', 'not', 'no', 'longer',
+        'don', 'needn', 't'))
+    _ACTIONS = frozenset({'keep', 'maintain', 'update', 'write', 'create', 'record', 'replace'})
+    RETAINED_CHARACTER_BOUND = 44  # filename11 + word16 + marker suffix17
+
+    def __init__(self):
+        self._required = set()
+        self._mask_pending = ''
+        self._mask_options = ()
+        self._raw_word = False
+        self._finished = False
+        self._reset_clause()
+
+    def _reset_clause(self):
+        self._names = set()
+        self._action = False
+        self._negative_action = False
+        self._seen_explain = False
+        self._explanation = False
+        self._pending_negative = set()
+        self._previous_kind = ''
+        self._gap = 'none'
+        self._word = ''
+        self._word_over = False
+        self._word_active = False
+        self._marker_tail = ''
+
+    @staticmethod
+    def _word_character(character):
+        return re.fullmatch(r'\w', character) is not None
+
+    @staticmethod
+    def _same_letter(expected, character):
+        return re.fullmatch(re.escape(expected), character, re.I) is not None
+
+    def _finish_word(self):
+        if not self._word_active:
+            return
+        kind = ''
+        if not self._word_over:
+            kind = next((word for word, pattern in self._KEYWORDS
+                         if pattern.fullmatch(self._word)), '')
+        whitespace = self._gap == 'space'
+        if self._previous_kind == 'how' and whitespace and kind in {'do', 'can', 'to'}:
+            self._explanation = True
+        if kind == 'how' and self._seen_explain:
+            self._explanation = True
+        if kind in {'explain', 'describe'}:
+            self._seen_explain = True
+        if kind in self._ACTIONS:
+            self._action = True
+            if whitespace and self._pending_negative:
+                self._negative_action = True
+        # Each intervening word must be followed by whitespace. Non-whitespace
+        # punctuation breaks a candidate exactly as the reference regex does.
+        self._pending_negative = ({count + 1 for count in self._pending_negative if count < 2}
+                                  if whitespace else set())
+        prefix = ((kind == 'not' and self._previous_kind == 'do' and whitespace)
+                  or (kind == 'longer' and self._previous_kind == 'no' and whitespace)
+                  or (kind == 't' and self._previous_kind in {'don', 'needn'}
+                      and self._gap == 'apostrophe'))
+        if prefix:
+            self._pending_negative.add(0)
+        self._previous_kind = kind
+        self._gap = 'none'
+        self._word = ''
+        self._word_over = False
+        self._word_active = False
+
+    def _commit_clause(self):
+        self._finish_word()
+        if self._names and self._action and not self._explanation:
+            if self._negative_action:
+                self._required.difference_update(self._names)
+            else:
+                self._required.update(self._names)
+        self._reset_clause()
+
+    def _emit(self, character):
+        if character in '.!?;\n':
+            self._commit_clause()
+            return
+        self._marker_tail = (self._marker_tail + character)[-17:]
+        for marker, name in self._MARKERS:
+            if self._marker_tail.endswith(marker):
+                self._names.add(name)
+        if self._word_character(character):
+            self._word_active = True
+            if len(self._word) < 16:
+                self._word += character
+            else:
+                self._word_over = True
+            return
+        self._finish_word()
+        if re.fullmatch(r'\s', character):
+            self._gap = 'space' if self._gap in {'none', 'space'} else 'other'
+        elif character == "'" and self._gap == 'none':
+            self._gap = 'apostrophe'
+        else:
+            self._gap = 'other'
+
+    def _flush_mask(self, *, boundary):
+        pending, options = self._mask_pending, self._mask_options
+        self._mask_pending = ''
+        self._mask_options = ()
+        complete = next((name for name in options if len(name) == len(pending)), None)
+        output = '__NOTE_' + complete.split('.')[0] + '__' if boundary and complete else pending
+        for character in output:
+            self._emit(character)
+
+    def _push(self, character):
+        previous_word = self._raw_word
+        current_word = self._word_character(character)
+        self._raw_word = current_word
+        if self._mask_pending:
+            if any(len(name) == len(self._mask_pending) for name in self._mask_options):
+                self._flush_mask(boundary=not current_word)
+            else:
+                possible = tuple(name for name in self._mask_options
+                                 if self._same_letter(name[len(self._mask_pending)], character))
+                if possible:
+                    self._mask_pending += character
+                    self._mask_options = possible
+                    return
+                self._flush_mask(boundary=False)
+        if not previous_word and self._same_letter('P', character):
+            self._mask_pending = character
+            self._mask_options = self._FILENAMES
+        else:
+            self._emit(character)
+
+    def feed(self, text):
+        if self._finished:
+            raise ValueError('Authored-note matcher is already finished')
+        if not isinstance(text, str):
+            raise TypeError('Authored-note chunks must be text')
+        for character in text:
+            self._push(character)
+
+    def finish_source(self):
+        if self._finished:
+            raise ValueError('Authored-note matcher is already finished')
+        self._flush_mask(boundary=True)
+        self._commit_clause()
+        self._raw_word = False
+
+    def finish(self):
+        if not self._finished:
+            self.finish_source()
+            self._finished = True
+        return frozenset(self._required)
+
+    def retained_state(self):
+        """Value-free bounds diagnostic; never returns source/token text."""
+        return {'retained_characters': len(self._mask_pending) + len(self._word) + len(self._marker_tail),
+                'character_bound': self.RETAINED_CHARACTER_BOUND,
+                'negative_states': len(self._pending_negative), 'clause_names': len(self._names),
+                'required_names': len(self._required)}
+
+
+def _authored_note_scope(folder, project, *, deadline=None):
+    """Fresh full-stream note requirements, or UNKNOWN without an empty-set claim.
+
+    No SQLite, checkpoint writes, arbitrary total-length cap, or whole-file
+    decode is used. Cooperative checkpoints cannot preempt filesystem calls.
+    This internal result is not caller/model-supplied completion authority.
+    """
+    import codecs
+    import math
+    import project_memory
+    import task_context
+
+    unknown = {'status': 'unknown', 'required': None, 'reason': 'source_unavailable'}
+    try:
+        if deadline is not None:
+            try:
+                finite = type(deadline) in (int, float) and math.isfinite(deadline)
+            except (OverflowError, ValueError):
+                finite = False
+            if not finite:
+                return {**unknown, 'reason': 'invalid_deadline'}
+        limit = time.monotonic() + project_memory._RECEIPT_RO_COPY_SECONDS
+        if deadline is not None:
+            limit = min(limit, deadline)
+        root = project_memory._artifact_project_root(folder)
+        if (not isinstance(project, dict) or not isinstance(project.get('brief'), str)
+                or Path(project.get('folder', '')).resolve(strict=True) != root):
+            return {**unknown, 'reason': 'invalid_project'}
+        identity = (project.get('id'), str(root))
+        brief = project['brief']
+        matcher = _AuthoredNoteMatcher()
+        def checked():
+            if time.monotonic() >= limit:
+                raise ValueError('note_read_budget')
+        def brief_hash(value, sink=None):
+            result = hashlib.sha256()
+            for start in range(0, len(value), 16384):
+                checked()
+                chunk = value[start:start + 16384]
+                result.update(chunk.encode('utf8'))
+                if sink is not None:
+                    sink.feed(chunk)
+            return result.hexdigest()
+        basis = {'brief': brief_hash(brief, matcher)}
+        matcher.finish_source()  # Same newline boundary as the reference acquisition.
+        def paths():
+            return {'rules': root / 'AGENTS.md',
+                    'followups': task_context.document_path(root, 'USER-REQUESTS.md')}
+        selected = paths()
+        observations = {}
+        for name, path in selected.items():
+            checked()
+            if not path.resolve().is_relative_to(root):
+                raise ValueError('note_source_changed')
+            try:
+                path.lstat()
+            except FileNotFoundError:
+                basis[name] = None
+                observations[name] = None
+                continue
+            file_identity = project_memory._receipt_file_identity(path)
+            sink = None
+            if name == 'followups':
+                # Match text-open universal newline translation, including CR
+                # and BOM/multibyte boundaries split across transport chunks.
+                decoder = io.IncrementalNewlineDecoder(
+                    codecs.getincrementaldecoder('utf-8-sig')(errors='replace'), translate=True)
+                class Sink:
+                    def write(self, chunk):
+                        decoded = decoder.decode(chunk)
+                        for offset in range(0, len(decoded), 16384):
+                            checked()
+                            matcher.feed(decoded[offset:offset + 16384])
+                        return len(chunk)
+                sink = Sink()
+            digest = project_memory._receipt_stream(path, file_identity, limit, sink)
+            if name == 'followups':
+                checked()
+                matcher.feed(decoder.decode(b'', final=True))
+            basis[name] = digest
+            observations[name] = file_identity
+        required = matcher.finish()
+        # Re-read byte identities, not an mtime-only cache, after all sources.
+        checked()
+        if paths() != selected or (project.get('id'), str(Path(project['folder']).resolve(strict=True))) != identity:
+            raise ValueError('note_source_changed')
+        for name, path in selected.items():
+            checked()
+            if observations[name] is None:
+                try:
+                    path.lstat()
+                except FileNotFoundError:
+                    continue
+                raise ValueError('note_source_changed')
+            if project_memory._receipt_stream(path, observations[name], limit) != basis[name]:
+                raise ValueError('note_source_changed')
+        if (not isinstance(project.get('brief'), str) or brief_hash(project['brief']) != basis['brief']
+                or paths() != selected
+                or (project.get('id'), str(Path(project['folder']).resolve(strict=True))) != identity):
+            raise ValueError('note_source_changed')
+        # An early file can change while a later source is rehashed. Recheck
+        # all path identities after those reads, sharing the original budget.
+        for name, path in selected.items():
+            checked()
+            if observations[name] is None:
+                try:
+                    path.lstat()
+                except FileNotFoundError:
+                    continue
+                raise ValueError('note_source_changed')
+            if project_memory._receipt_file_identity(path) != observations[name]:
+                raise ValueError('note_source_changed')
+        checked()
+        if project.get('brief') != brief:
+            raise ValueError('note_source_changed')
+        return {'status': 'known', 'reason': None, 'required': sorted(required), 'basis': basis,
+                'request_hash': basis['followups'] or hashlib.sha256(b'').hexdigest(),
+                'source_identities': observations, 'retained_state': matcher.retained_state()}
+    except (OSError, ValueError, TypeError, KeyError, UnicodeError, RecursionError) as error:
+        reason = ('deadline' if str(error) in {'note_read_budget', 'copy_budget'} else
+                  'source_changed' if str(error) in {'note_source_changed', 'source_changed'} else 'source_unavailable')
+        return {**unknown, 'reason': reason}
+
+
+def authored_notes_issue(folder, project):
+    """Bounded fresh note prerequisite, not a semantic accuracy verdict."""
+    if project is None:
+        return ''
+    import long_tasks
+    import project_memory
+    import task_context
+    deadline = time.monotonic() + project_memory._RECEIPT_RO_COPY_SECONDS
+    brief = project.get('brief')
+    scope = _authored_note_scope(folder, project, deadline=deadline)
+    if scope['status'] != 'known':
+        return 'Cannot confirm the latest requested authored notes; refresh instructions before handoff.'
+    try:
+        root = project_memory._artifact_project_root(folder)
+        notes = []
+        for name in scope['required']:
+            path = task_context.document_path(root, name)
+            observed = _post_queue_read(root, path, 256000, deadline)
+            if observed is None:
+                return f'The request requires authored {name}; record the actual work and checks before handoff.'
+            identity = project_memory._receipt_file_identity(path)
+            notes.append((name, path, observed[1], identity))
+            text = observed[2].decode('utf-8-sig')
+            template = long_tasks.INITIAL_PLAN if name == 'PLAN.md' else long_tasks.INITIAL_PROGRESS
+            body = re.sub(r'(?m)^\s*#+[^\n]*(?:\n|$)', '', text).strip()
+            initial = re.sub(r'(?m)^\s*#+[^\n]*(?:\n|$)', '', template).strip()
+            normalized = ' '.join(body.split()).casefold()
+            host_placeholder = task_context.project_note_excerpt(name, template, 1)
+            if (not body or ' '.join(initial.split()).casefold() in normalized
+                    or normalized == ' '.join(host_placeholder.split()).casefold()):
+                return f'The request requires authored {name}; replace the untouched note with actual work and checks.'
+        current = _authored_note_scope(folder, project, deadline=deadline)
+        if current['status'] != 'known' or any(current[key] != scope[key] for key in ('basis', 'request_hash', 'source_identities')):
+            return 'Requested note instructions changed or became unavailable; refresh them before handoff.'
+        # A note read early can change during another note or instruction read.
+        # Rehash every observed note, then recheck ALL path identities after
+        # those reads, under the original cooperative deadline.
+        for name, path, digest, identity in notes:
+            if task_context.document_path(root, name) != path or project_memory._receipt_stream(path, identity, deadline) != digest:
+                return 'Requested authored notes changed during confirmation; reread them before handoff.'
+        for name, path, digest, identity in notes:
+            if time.monotonic() >= deadline:
+                raise ValueError('copy_budget')
+            if task_context.document_path(root, name) != path or project_memory._receipt_file_identity(path) != identity:
+                return 'Requested authored notes changed during confirmation; reread them before handoff.'
+        # Instruction files can also change during the final note rehashes.
+        # Their full hashes were checked by scope above; finish with all path
+        # identities, including absent sources, before granting this prerequisite.
+        for name, path in (('rules', root / 'AGENTS.md'),
+                           ('followups', task_context.document_path(root, 'USER-REQUESTS.md'))):
+            if time.monotonic() >= deadline:
+                raise ValueError('copy_budget')
+            try:
+                identity = project_memory._receipt_file_identity(path)
+            except FileNotFoundError:
+                identity = None
+            if identity != current['source_identities'][name]:
+                return 'Requested note instructions changed during confirmation; refresh them before handoff.'
+        if project.get('brief') != brief or time.monotonic() >= deadline:
+            return 'Requested note instructions changed or became unavailable; refresh them before handoff.'
+    except (OSError, ValueError, TypeError, KeyError, UnicodeError, RecursionError):
+        return 'Cannot confirm readable authored notes for the current request before handoff.'
+    return ''
+
+
+def _saved_browser_replay_owner(project):
+    """Read the current supervisor owner/control, without schema initialization."""
+    import long_tasks
+    from contextlib import closing
+    root = Path(project['folder']).resolve(strict=True)
+    identifier = project.get('id')
+    if not isinstance(identifier, str) or not 1 <= len(identifier) <= 128:
+        raise ValueError('replay_owner_unknown')
+    database = Path(long_tasks.STATE) / 'projects.db'
+    if not database.is_file() or database.is_symlink():
+        raise ValueError('replay_owner_unknown')
+    until = time.monotonic() + .1
+    with closing(sqlite3.connect(database.resolve().as_uri() + '?mode=ro', uri=True, timeout=0)) as conn:
+        conn.set_progress_handler(lambda: int(time.monotonic() >= until), 1000)
+        conn.execute('BEGIN')
+        rows = conn.execute("""SELECT id,
+            CASE WHEN typeof(folder)='text' AND length(CAST(folder AS BLOB))<=32768 THEN folder END,
+            CASE WHEN typeof(brief)='text' AND length(CAST(brief AS BLOB))<=64000 THEN brief END,
+            generation,status FROM projects WHERE id=? LIMIT 2""", (identifier,)).fetchall()
+        pending = conn.execute("SELECT 1 FROM requests WHERE project=? AND status='pending' "
+                               "AND action IN ('pause','stop','delete','note','resume') LIMIT 1", (identifier,)).fetchone()
+    if (len(rows) != 1 or pending or rows[0][1] is None or rows[0][2] != project.get('brief')
+            or Path(rows[0][1]).resolve(strict=True) != root
+            or type(rows[0][3]) is not int or rows[0][3] < 0
+            or rows[0][4] not in {'working', 'retrying'}):
+        raise ValueError('replay_owner_superseded')
+    control = read_state(project)
+    if control.get('status') not in {'running', 'continue'}:
+        raise ValueError('replay_control_unknown_or_inactive')
+    return {'id': identifier, 'folder': str(root), 'generation': rows[0][3], 'status': rows[0][4]}
+
+
+def _saved_browser_replay_basis(project, queue, *, frame=None):
+    """Optional execution basis, never completion authority or a command string."""
+    import project_memory
+    import webapp_check
+    if (not isinstance(queue, dict) or type(queue.get('total')) is not int or queue['total'] <= 0
+            or type(queue.get('remaining')) is not int or queue['remaining'] != 0 or queue.get('active')):
+        return None
+    if project.get('read_only') is True:
+        return None
+    owner = _saved_browser_replay_owner(project)
+    root = project_memory._artifact_project_root(project['folder'])
+    frame = frame or _post_queue_instruction_frame(project)
+    deadline = time.monotonic() + project_memory._RECEIPT_RO_COPY_SECONDS
+    instructions = [frame['brief']]
+    # Missing/oversized/unreadable policy text is not permission from an excerpt.
+    for relative in ('AGENTS.md', '.local-ai/USER-REQUESTS.md'):
+        value = _post_queue_read(root, root / relative, 64000, deadline)
+        if value is not None:
+            instructions.append(value[2].decode('utf-8-sig'))
+    text = '\n'.join(instructions)
+    # Deny-only compatibility guard, not positive authorization from prose.
+    # Normal authority is the current native task's existing typed-check scope.
+    prohibited = (r"(?i)\b(?:read[ -]?only|inspect[ -]?only|inspection[ -]?only)\b|"
+        r"\b(?:do\s+not|don't|never|must\s+not|shall\s+not|should\s+not|avoid|refrain\s+from)\b"
+        r"[^.!?\n]{0,120}\b(?:run|running|execute|executing|launch|launching|perform)\b"
+        r"[^.!?\n]{0,120}\b(?:tests?|checks?|scripts?|commands?|browser|code)\b|"
+        r"\bno\s+(?:test|check|command|script|code|browser)?\s*execution\b")
+    if re.search(prohibited, text):
+        return None
+    suite = _post_queue_read(root, root / '.local-ai/webapp-check.json', 64000, deadline)
+    if suite is None:
+        return None
+    def invalid_number(value):
+        raise ValueError('replay_suite_invalid_number')
+    saved = json.loads(suite[2], parse_constant=invalid_number)
+    if (not isinstance(saved, dict) or set(saved) != {'suite_version', 'request_hash', 'checks'}
+            or type(saved.get('suite_version')) is not int or saved['suite_version'] != 1
+            or saved.get('request_hash') != frame['request']
+            or not isinstance(saved.get('checks'), list) or not saved['checks']):
+        return None
+    # Do not call saved_suite here: it re-reads the unbounded request hash.
+    # The fixed, family-bounded child validates all typed sequences before
+    # opening a page. This admission only binds their existing exact bytes.
+    preview = project_memory.readonly_check_receipts(root, project,
+        checker_file=webapp_check.__file__, include_plan=True)
+    if (preview.get('status') != 'available' or preview.get('request_hash') != frame['request']
+            or preview.get('planning_basis') != frame['basis']
+            or any(preview.get('plan', {}).get(key) != queue.get(key) for key in ('total', 'done', 'remaining'))):
+        return None
+    source = preview['source']
+    if (source.get('scope') not in {'full_project_source', 'application_source'}
+            or source.get('scope') == 'full_project_source' and source.get('omitted') != 0
+            or source.get('scope') == 'application_source' and source.get('limitations') != ['excluded_runtime']):
+        return None
+    checker = Path(webapp_check.__file__).resolve()
+    checker_identity = project_memory._receipt_file_identity(checker)
+    if checker_identity[2] > 4 * 1024 * 1024:
+        return None
+    checker_sha = project_memory._receipt_stream(checker, checker_identity, deadline)
+    if checker_sha != webapp_check._LOADED_CHECKER_SHA256:
+        return None
+    verifier = _post_queue_read(root, root / '.local-ai/verify.ps1', 64000, deadline)
+    # _post_queue_read returns (relative_path, digest, bytes), not a stat
+    # identity. Bind the monitor's cheap tuple to those exact streamed bytes.
+    suite_identity = project_memory._receipt_file_identity(root/'.local-ai/webapp-check.json')
+    if project_memory._receipt_stream(root/'.local-ai/webapp-check.json', suite_identity, deadline) != suite[1]:
+        return None
+    verifier_identity = None
+    if verifier is not None:
+        verifier_identity = project_memory._receipt_file_identity(root/'.local-ai/verify.ps1')
+        if project_memory._receipt_stream(root/'.local-ai/verify.ps1', verifier_identity, deadline) != verifier[1]:
+            return None
+    monitor = {'suite': suite_identity, 'checker': checker_identity,
+        'verifier': verifier_identity}
+    basis = {'version': 1, 'owner': owner, 'instructions': _post_queue_frame_identity(frame),
+        'monitor': monitor,
+        'source': source, 'suite_sha256': suite[1], 'checker_sha256': checker_sha,
+        'verifier_sha256': verifier[1] if verifier is not None else None,
+        'queue': {key: queue.get(key) for key in ('total', 'done', 'remaining')}}
+    basis['key'] = hashlib.sha256(json.dumps(basis, sort_keys=True, allow_nan=False).encode()).hexdigest()
+    return basis
+
+
+def _saved_browser_replay_monitor(project, basis):
+    """Cheap deny-only identity/control check, never content-source proof."""
+    import project_memory
+    try:
+        if _saved_browser_replay_owner(project) != basis['owner']:
+            return False
+        root = project_memory._artifact_project_root(project['folder'])
+        brief = project.get('brief')
+        if (not isinstance(brief, str) or len(brief) > 64000
+                or hashlib.sha256(brief.encode('utf-8')).hexdigest() != basis['instructions'][0]['brief']):
+            return False
+        paths = {'rules': root/'AGENTS.md', 'followups': root/'.local-ai/USER-REQUESTS.md'}
+        for name, path in paths.items():
+            expected = basis['instructions'][2][name]
+            try:
+                current = project_memory._receipt_file_identity(path)
+            except FileNotFoundError:
+                current = None
+            if current != expected:
+                return False
+        import webapp_check
+        for name, path in (('suite', root/'.local-ai/webapp-check.json'),
+                           ('checker', Path(webapp_check.__file__).resolve()),
+                           ('verifier', root/'.local-ai/verify.ps1')):
+            try:
+                current = project_memory._receipt_file_identity(path)
+            except FileNotFoundError:
+                current = None
+            if current != basis['monitor'][name]:
+                return False
+        return True
+    except (OSError, ValueError, TypeError, KeyError, RuntimeError, sqlite3.Error):
+        return False
+
+
+def _saved_browser_replay_cache(root, *, entry=None, claim=None):
+    """Bounded diagnostic/attempt cache; stored data never grants a pass.
+
+    A started record prevents automatic crash/restart repeats. Explicit tools
+    remain available. Cache loss can only lose this optimization, not authority.
+    """
+    import design_tools
+    import project_memory
+    root = project_memory._artifact_project_root(root)
+    notes = root / '.local-ai'
+    target = notes / 'saved-browser-feedback.json'
+    if os.name != 'nt':
+        raise ValueError('replay_cache_platform_unavailable')
+    import msvcrt
+    from contextlib import ExitStack
+    with design_tools._game_directory_guard(root, notes), ExitStack() as stack:
+        lock_path = notes / 'saved-browser-feedback.lock'
+        marker = b'cale-browser-cache-v1\n'
+        try:
+            descriptor = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_RDWR, 0o600)
+        except FileExistsError:
+            lock_identity = project_memory._receipt_file_identity(lock_path)
+            if lock_identity[2] != len(marker) or lock_path.stat().st_nlink != 1:
+                raise ValueError('replay_cache_lock_unknown')
+            lock = stack.enter_context(lock_path.open('r+b'))
+            opened = os.fstat(lock.fileno())
+            if (opened.st_dev, opened.st_ino, opened.st_size, opened.st_mtime_ns) != lock_identity[:4] or lock.read(len(marker) + 1) != marker:
+                raise ValueError('replay_cache_lock_changed')
+        else:
+            lock = stack.enter_context(os.fdopen(descriptor, 'w+b'))
+            lock.write(marker); lock.flush(); os.fsync(lock.fileno())
+        lock.seek(0)
+        msvcrt.locking(lock.fileno(), msvcrt.LK_NBLCK, 1)
+        def unlock():
+            lock.seek(0)
+            msvcrt.locking(lock.fileno(), msvcrt.LK_UNLCK, 1)
+        stack.callback(unlock)
+        records = []
+        try:
+            identity = project_memory._receipt_file_identity(target)
+        except FileNotFoundError:
+            pass
+        else:
+            if identity[2] > 160000 or target.stat().st_nlink != 1:
+                raise ValueError('replay_cache_unknown')
+            buffer = io.BytesIO()
+            project_memory._receipt_stream(target, identity, time.monotonic() + .1, buffer)
+            raw = buffer.getvalue()
+            value = json.loads(raw)
+            if (not isinstance(value, dict) or set(value) != {'version', 'records'}
+                    or value['version'] != 1 or not isinstance(value['records'], list)
+                    or len(value['records']) > 8):
+                raise ValueError('replay_cache_unknown')
+            for row in value['records']:
+                if (not isinstance(row, dict) or set(row) != {'key', 'status', 'output'}
+                        or not isinstance(row['key'], str) or not re.fullmatch('[0-9a-f]{64}', row['key'])
+                        or row['status'] not in {'started', 'returned', 'unavailable'}
+                        or not isinstance(row['output'], str) or len(row['output']) > MAX_TOOL_OUTPUT):
+                    raise ValueError('replay_cache_unknown')
+            records = value['records']
+        if claim is not None:
+            if any(row['key'] == claim for row in records):
+                return False
+            entry = {'key': claim, 'status': 'started', 'output': ''}
+        if entry is None:
+            return records
+        records = [row for row in records if row['key'] != entry['key']] + [entry]
+        records = records[-8:]
+        raw = json.dumps({'version': 1, 'records': records}, ensure_ascii=True, allow_nan=False).encode()
+        while len(raw) > 160000 and len(records) > 1:
+            records.pop(0)
+            raw = json.dumps({'version': 1, 'records': records}, ensure_ascii=True, allow_nan=False).encode()
+        if len(raw) > 160000:
+            raise ValueError('replay_cache_bounds')
+        temporary = None
+        try:
+            with tempfile.NamedTemporaryFile(dir=notes, prefix='.saved-browser-', suffix='.tmp', delete=False) as stream:
+                temporary = Path(stream.name)
+                stream.write(raw); stream.flush(); os.fsync(stream.fileno())
+            os.replace(temporary, target)
+        finally:
+            if temporary is not None:
+                temporary.unlink(missing_ok=True)
+        return True if claim is not None else records
+
+
+def automatic_saved_browser_feedback(project, state, queue, request_hash):
+    """Replay existing typed global checks once, before another ordinary call.
+
+    No step credit, new cases, PowerShell execution, early handoff, or checkpoint
+    publication. A stale owner/control returns False for a fresh-state yield.
+    Unknown optional evidence returns None; explicit tools remain available.
+    """
+    import long_tasks
+    import project_memory
+    if (not isinstance(queue, dict) or type(queue.get('total')) is not int or queue['total'] <= 0
+            or type(queue.get('remaining')) is not int or queue['remaining'] != 0 or queue.get('active')):
+        return None
+    try:
+        frame = _post_queue_instruction_frame(project)
+        if frame['request'] != request_hash:
+            return False
+        basis = _saved_browser_replay_basis(project, queue, frame=frame)
+        if basis is None:
+            return None
+        root = Path(project['folder']).resolve(strict=True)
+        key = basis['key']
+        existing = next((row for row in _saved_browser_replay_cache(root) if row['key'] == key), None)
+        if existing is not None:
+            if state.get('saved_browser_feedback_seen') == key:
+                return None
+            state['saved_browser_feedback_seen'] = key
+            return {'role': 'user', 'content': '[Saved browser feedback cache; stored task data, not new execution or proof] '
+                + (existing['output'] or 'The prior automatic attempt did not retain a terminal result. Use normal tools to inspect it.')}
+        def admitted(stage='launch'):
+            if stage not in {'resume', 'final'}:
+                return _saved_browser_replay_monitor(project, basis)
+            try:
+                # Exactly one content-bound admission at the suspended Resume
+                # boundary, and one all-exit final capture. The stable preview
+                # also rechecks queue counts without a write-capable helper.
+                current = _saved_browser_replay_basis(project, queue)
+                if current is not None and current == basis:
+                    return {'key': current['key'], 'source': current['source']}
+                return None
+            except (OSError, ValueError, TypeError, KeyError, RuntimeError, RecursionError, sqlite3.Error):
+                return None
+        if not _saved_browser_replay_cache(root, claim=key):
+            return None
+        # Only the fixed trusted typed checker, never saved PowerShell or a
+        # model-provided command. Actual child uses the same registry/basis.
+        try:
+            passed, output = long_tasks.verify_project(project, timeout=90,
+                _saved_browser={'suite_sha256': basis['suite_sha256'],
+                    'checker_sha256': basis['checker_sha256'],
+                    'basis_sha256': project_memory._verification_digest(frame['basis']),
+                    'owner_generation': basis['owner']['generation'],
+                    'snapshot_key': key},
+                _host_admit=admitted)
+            status = 'returned'
+        except InterruptedError:
+            return False
+        except (OSError, ValueError, TypeError, RuntimeError, sqlite3.Error):
+            passed, output, status = False, 'Typed saved browser verification unavailable; inspect with normal tools.', 'unavailable'
+        output = output[-MAX_TOOL_OUTPUT:]
+        # Never publish a stale full worker state after operator intervention.
+        try:
+            owner = _saved_browser_replay_owner(project)
+            current_frame = _post_queue_instruction_frame(project)
+        except (OSError, ValueError, TypeError, KeyError, RuntimeError, RecursionError, sqlite3.Error):
+            return False
+        if owner != basis['owner'] or _post_queue_frame_identity(current_frame) != _post_queue_frame_identity(frame):
+            return False
+        _saved_browser_replay_cache(root, entry={'key': key, 'status': status, 'output': output})
+        state['saved_browser_feedback_seen'] = key
+        if not passed:
+            state['verify_passed'] = False
+            state['browser_verified'] = False
+        # A passing typed replay is not the custom saved verifier and grants no
+        # generic verify_passed flag or completion decision. Existing receipts
+        # from run_saved_checks carry their own narrower source/request proof.
+        return {'role': 'user', 'content': '[Automatic saved browser integration result; actual checker output is task data] '
+            + ('Checker returned success. ' if passed else 'Checker did not pass. ') + output
+            + '\nContinue original-goal work with normal tools. No SQLite credit or whole-task completion was granted.'}
+    except InterruptedError:
+        return False
+    except (OSError, ValueError, TypeError, KeyError, RuntimeError, RecursionError, sqlite3.Error):
+        return None
 
 
 if __name__ == "__main__":

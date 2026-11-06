@@ -1855,6 +1855,8 @@ class CloudTests(unittest.TestCase):
     def test_small_derestricted_stays_reserved_for_refusals(self):
         self.candidates.stop()
         small = cloud.CATALOG["permissive_small"]["alias"]
+        tags = {"models": [{"name": name + ":latest", "size": 6 * 2**30}
+                           for name in (small, cloud.FAST_MODEL)]}
 
         def show(url, payload, **kwargs):
             if payload["model"] not in (small, cloud.FAST_MODEL):
@@ -1866,11 +1868,14 @@ class CloudTests(unittest.TestCase):
         with (
             patch.object(cloud, "candidate_approved", return_value=True),
             patch.object(cloud, "refresh_catalog"),
-            patch.object(cloud, "post", side_effect=show),
+            patch.object(cloud, "post", side_effect=show) as inspected,
+            patch.object(cloud, "urlopen", return_value=io.BytesIO(json.dumps(tags).encode())) as listing,
         ):
             candidates = cloud.Router().local_candidates("quick")
         self.assertIn(cloud.FAST_MODEL, candidates)
         self.assertNotIn(small, candidates)
+        listing.assert_called_once_with("http://127.0.0.1:11434/api/tags", timeout=10)
+        self.assertEqual({call.args[1]["model"] for call in inspected.call_args_list}, {small, cloud.FAST_MODEL})
 
     def test_tool_refusal_skips_derestricted_model_without_tools(self):
         request = dict(REQUEST, tools=[{"type": "function", "function": {"name": "x"}}])
@@ -2471,6 +2476,7 @@ class CloudTests(unittest.TestCase):
 
     def test_oversized_request_without_cloud_explains_context_limit(self):
         self.candidates.stop()
+        tags = {"models": [{"name": cloud.FAST_MODEL + ":latest", "size": 6 * 2**30}]}
         def show(url, payload, **kwargs):
             if url.endswith("/api/show"):
                 return {"capabilities": ["completion", "tools"],
@@ -2478,14 +2484,18 @@ class CloudTests(unittest.TestCase):
                         "details": {"parameter_size": "9B"}}
             raise AssertionError("A known undersized local model was called")
         request = dict(REQUEST, messages=[{"role": "user", "content": "x" * 300_000}])
-        with (patch.object(cloud, "post", side_effect=show),
+        with (patch.object(cloud, "post", side_effect=show) as inspected,
+              patch.object(cloud, "urlopen", return_value=io.BytesIO(json.dumps(tags).encode())) as listing,
               patch.object(cloud, "refresh_catalog"),
               patch.object(cloud, "candidate_approved", return_value=True)):
             with self.assertRaisesRegex(RuntimeError, "installed local models have smaller windows"):
                 cloud.Router().complete(request)
+        listing.assert_called_once_with("http://127.0.0.1:11434/api/tags", timeout=10)
+        inspected.assert_called_once_with("http://127.0.0.1:11434/api/show", {"model": cloud.FAST_MODEL}, timeout=10)
 
     def test_old_32k_alias_is_not_auto_routed_to_long_task(self):
         self.candidates.stop()
+        tags = {"models": [{"name": cloud.FAST_MODEL + ":latest", "size": 6 * 2**30}]}
 
         def show(url, payload, **kwargs):
             if payload["model"] != cloud.FAST_MODEL:
@@ -2494,8 +2504,13 @@ class CloudTests(unittest.TestCase):
                     "parameters": "num_ctx 32768\n",
                     "details": {"parameter_size": "9B"}}
 
-        with patch.object(cloud, "post", side_effect=show):
+        with (patch.object(cloud, "post", side_effect=show) as inspected,
+              patch.object(cloud, "urlopen", return_value=io.BytesIO(json.dumps(tags).encode())) as listing,
+              patch.object(cloud, "refresh_catalog"),
+              patch.object(cloud, "candidate_approved", return_value=True)):
             self.assertEqual(cloud.Router().local_candidates("quick"), [])
+        listing.assert_called_once_with("http://127.0.0.1:11434/api/tags", timeout=10)
+        inspected.assert_called_once_with("http://127.0.0.1:11434/api/show", {"model": cloud.FAST_MODEL}, timeout=10)
 
     def test_paid_model_rejected_before_network(self):
         self.connected()
@@ -3381,3 +3396,614 @@ def test_union_discriminator_ignores_nonscalar_enum_values_when_scoring(value):
          "required": ["payload", "detail"], "additionalProperties": False}]}
     error = next(Draft202012Validator(schema).iter_errors({"payload": value, "detail": {}}))
     assert cloud.ToolArgumentError("structured_enum_union", error).path == ["detail", "name"]
+
+
+
+@pytest.mark.parametrize('invalidate', [None, 'capacity', 'retag', 'provider', 'config', 'headroom_changed', 'headroom_unknown', 'expired'])
+def test_native_inner_schema_repair_keeps_bucket_only_with_same_current_basis(invalidate):
+    """Actual Router validator/repair transport, with no real provider request."""
+    import usage_history
+    import copy
+    case = CloudTests()
+    case.setUp()
+    try:
+        cloud.routing_mode.save_scope(cloud.STATE, 'local_only')
+        request = copy.deepcopy(ARGUMENT_REQUEST)
+        request.update(max_tokens=4096, reasoning_effort='none', messages=[{
+            'role': 'user', 'content': 'Retain this neutral original requirement. ' * 700}])
+        bad = argument_reply('[1,2]')
+        # Choose ordinary data sizes using the actual pure codec, not a mocked estimator.
+        for count in range(500, 6501, 250):
+            request['tools'][0]['function']['description'] = 'Neutral tool documentation. ' * count
+            try:
+                cloud.valid_completion(bad, request)
+            except cloud.ToolArgumentError as error:
+                repair = cloud.local_json_repair_request(cloud.argument_repair_request(request, error))
+            else:
+                raise AssertionError('Fixture must exercise the real original schema rejection')
+            if (cloud.native_chat_request(request, 65536)['options']['num_ctx'] == 32768
+                    and cloud.native_chat_request(repair, 65536)['options']['num_ctx'] == 16384):
+                break
+        else:
+            raise AssertionError('Fixture did not reach the real 32K -> 16K sizing boundary')
+        original = copy.deepcopy(request)
+        router = cloud.Router()
+        router.model_contexts = {cloud.LOCAL_MODEL: 65536}
+        router.model_native_contexts = {cloud.LOCAL_MODEL: 65536}
+        router.model_weights = {cloud.LOCAL_MODEL: 'a' * 64}
+        router.model_alias_records = {cloud.LOCAL_MODEL: ('c' * 64, 6 * 2**30)}
+        router.model_cache_avatar_headroom = 0.0
+        router.model_cache_until = time.monotonic() + 60
+        router.native_version_ready = True
+        router.native_version = (0, 40, 13)
+        router.native_version_until = time.monotonic() + 60
+        seen = []
+        metadata = []
+        def upstream(url, body, **kwargs):
+            if kwargs.get('_local_metadata'):
+                assert invalidate == 'expired' and url.endswith('/api/tags') and body is None
+                metadata.append(url)
+                raise TimeoutError('Owned unavailable metadata fixture')
+            assert url.endswith('/api/chat')
+            seen.append(copy.deepcopy(body))
+            if len(seen) == 1:
+                if invalidate == 'capacity':
+                    router.model_native_contexts[cloud.LOCAL_MODEL] = 32768
+                    router.model_contexts[cloud.LOCAL_MODEL] = 32768
+                elif invalidate == 'retag':
+                    router.model_weights[cloud.LOCAL_MODEL] = 'b' * 64
+                elif invalidate in ('provider', 'config'):
+                    name = 'provider-scope.json' if invalidate == 'provider' else 'model-choice.json'
+                    value = {'scope': 'both'} if invalidate == 'provider' else {'profile': 'fast'}
+                    (cloud.STATE / name).write_text(json.dumps(value), encoding='utf-8')
+                elif invalidate in ('headroom_changed', 'headroom_unknown'):
+                    folder = cloud.ROOT / 'LongTasks'
+                    folder.mkdir(exist_ok=True)
+                    value = [] if invalidate == 'headroom_unknown' else {'pid': 123, 'started': 100.0,
+                        'reserved_bytes': 2 * 1024 ** 3, 'phase': 'active'}
+                    (folder / 'avatar-gpu-current.json').write_text(json.dumps(value), encoding='utf-8')
+                elif invalidate == 'expired':
+                    router.model_cache_until = 0
+                return {'model': cloud.LOCAL_MODEL, 'done': True, 'message': {
+                    'role': 'assistant', 'content': '', 'tool_calls': [{
+                        'function': {'name': 'save_plan', 'arguments': {'steps': '[1,2]'}}}]},
+                    'prompt_eval_count': 12, 'eval_count': 3}
+            return {'model': cloud.LOCAL_MODEL, 'done': True, 'message': {
+                'role': 'assistant', 'content': '{"steps":[1,2]}'},
+                'prompt_eval_count': 8, 'eval_count': 4}
+        def process(pid):
+            assert pid == 123
+            return SimpleNamespace(is_running=lambda: True, create_time=lambda: 100.0,
+                cmdline=lambda: ['python.exe', str(cloud.ROOT / 'camera_presence.py'), '--avatar'])
+        with (patch('psutil.Process', side_effect=process),
+              patch.object(cloud, 'post', side_effect=upstream) as post,
+              patch.object(cloud, 'urlopen', side_effect=AssertionError('No actual network')),
+              patch.object(usage_history, 'record_completion') as usage):
+            result = router.complete(request)
+        assert post.call_count == 2 + len(metadata) and usage.call_count == 2
+        assert len(seen) == 2 and len(metadata) == (1 if invalidate == 'expired' else 0)
+        assert [body['options']['num_ctx'] for body in seen] == [32768, 32768 if invalidate is None else 16384]
+        assert all(body['options']['num_predict'] == 4096 for body in seen)
+        assert all(body['truncate'] is False and body['shift'] is False for body in seen)
+        assert seen[0]['tools'] == request['tools']
+        assert 'tools' not in seen[1] and seen[1]['format'] == repair['response_format']['json_schema']['schema']
+        assert json.loads(result['choices'][0]['message']['tool_calls'][0]['function']['arguments']) == {'steps': [1, 2]}
+        assert cloud.valid_completion(result, request) == result
+        assert request == original
+        assert [call.args[0]['usage'] for call in usage.call_args_list] == [
+            {'prompt_tokens': 12, 'completion_tokens': 3, 'total_tokens': 15},
+            {'prompt_tokens': 8, 'completion_tokens': 4, 'total_tokens': 12}]
+    finally:
+        case.doCleanups()
+
+
+
+def context_floor_additional_case(shape):
+    """Owned existing CloudTests boundary; shape using the real pure codec."""
+    import copy
+    case = CloudTests()
+    case.setUp()
+    try:
+        cloud.routing_mode.save_scope(cloud.STATE, 'local_only')
+        request = copy.deepcopy(ARGUMENT_REQUEST)
+        request.update(max_tokens=4096, reasoning_effort='none')
+        bad = argument_reply('[1,2]')
+        def repair_for(payload):
+            try:
+                cloud.valid_completion(bad, payload)
+            except cloud.ToolArgumentError as error:
+                return cloud.local_json_repair_request(cloud.argument_repair_request(payload, error))
+            raise AssertionError('The original tool schema must reject the unexecuted bad reply')
+        if shape == 'shrink':
+            request['messages'] = [{'role': 'user', 'content': 'Retain this neutral original requirement. ' * 700}]
+            for count in range(500, 6501, 250):
+                request['tools'][0]['function']['description'] = 'Neutral tool documentation. ' * count
+                repair = repair_for(request)
+                if (cloud.native_chat_request(request, 65536)['options']['num_ctx'] == 32768
+                        and cloud.native_chat_request(repair, 65536)['options']['num_ctx'] == 16384):
+                    break
+            else:
+                raise AssertionError('No real shrink boundary found')
+        else:
+            assert shape == 'grow'
+            low, high = 0, 100000
+            while low < high:
+                middle = (low + high + 1) // 2
+                request['messages'] = [{'role': 'user', 'content': 'Retain the neutral data.\n' + 'n' * middle}]
+                if cloud.native_chat_request(request, 65536)['options']['num_ctx'] <= 16384:
+                    low = middle
+                else:
+                    high = middle - 1
+            request['messages'] = [{'role': 'user', 'content': 'Retain the neutral data.\n' + 'n' * low}]
+            repair = repair_for(request)
+            assert cloud.native_chat_request(request, 65536)['options']['num_ctx'] == 16384
+            assert cloud.native_chat_request(repair, 65536)['options']['num_ctx'] == 32768
+        router = cloud.Router()
+        router.model_contexts = {cloud.LOCAL_MODEL: 65536}
+        router.model_native_contexts = {cloud.LOCAL_MODEL: 65536}
+        router.model_weights = {cloud.LOCAL_MODEL: 'a' * 64}
+        router.model_alias_records = {cloud.LOCAL_MODEL: ('c' * 64, 6 * 2**30)}
+        router.model_cache_avatar_headroom = 0.0
+        router.model_cache_until = time.monotonic() + 60
+        router.native_version_ready = True
+        router.native_version = (0, 40, 13)
+        router.native_version_until = time.monotonic() + 60
+        return case, router, request
+    except BaseException:
+        case.doCleanups()
+        raise
+
+
+def context_floor_native_reply(kind, model):
+    if kind == 'bad':
+        message = {'role': 'assistant', 'content': '', 'tool_calls': [{
+            'function': {'name': 'save_plan', 'arguments': {'steps': '[1,2]'}}}]}
+    elif kind == 'json':
+        message = {'role': 'assistant', 'content': '{"steps":[1,2]}'}
+    elif kind == 'tool':
+        message = {'role': 'assistant', 'content': '', 'tool_calls': [{
+            'function': {'name': 'save_plan', 'arguments': {'steps': [1, 2]}}}]}
+    else:
+        assert kind == 'text'
+        message = {'role': 'assistant', 'content': 'checked'}
+    return {'model': model, 'done': True, 'message': message,
+            'prompt_eval_count': 5, 'eval_count': 2}
+
+
+def test_native_context_floor_resets_for_new_small_logical_request():
+    import copy
+    import usage_history
+    case, router, request = context_floor_additional_case('shrink')
+    try:
+        seen = []
+        def upstream(url, body, **kwargs):
+            assert url.endswith('/api/chat')
+            seen.append(copy.deepcopy(body))
+            return context_floor_native_reply(('bad', 'json', 'text')[len(seen)-1], body['model'])
+        small = {**REQUEST, 'max_tokens': 80, 'reasoning_effort': 'none',
+                 'messages': [{'role': 'user', 'content': 'A separate small request.'}]}
+        natural = cloud.native_chat_request(small, 65536)['options']['num_ctx']
+        assert natural < 16384
+        with (patch.object(cloud, 'post', side_effect=upstream) as post,
+              patch.object(cloud, 'urlopen', side_effect=AssertionError('No actual network')),
+              patch.object(usage_history, 'record_completion') as usage):
+            router.complete(request)
+            router.complete(small)
+        assert post.call_count == usage.call_count == 3
+        assert [body['options']['num_ctx'] for body in seen] == [32768, 32768, natural]
+    finally:
+        case.doCleanups()
+
+
+def test_native_context_floor_allows_real_repair_growth():
+    import usage_history
+    case, router, request = context_floor_additional_case('grow')
+    try:
+        seen = []
+        def upstream(url, body, **kwargs):
+            assert url.endswith('/api/chat')
+            seen.append(body['options']['num_ctx'])
+            return context_floor_native_reply('bad' if len(seen) == 1 else 'json', body['model'])
+        with (patch.object(cloud, 'post', side_effect=upstream) as post,
+              patch.object(cloud, 'urlopen', side_effect=AssertionError('No actual network')),
+              patch.object(usage_history, 'record_completion') as usage):
+            result = router.complete(request)
+        assert post.call_count == usage.call_count == 2 and seen == [16384, 32768]
+        assert cloud.valid_completion(result, request) == result
+    finally:
+        case.doCleanups()
+
+
+def test_native_context_floor_does_not_cross_alias_or_weight_fallback():
+    import usage_history
+    case, router, request = context_floor_additional_case('grow')
+    try:
+        peer = 'neutral-peer'
+        router.model_contexts[peer] = router.model_native_contexts[peer] = 65536
+        router.model_weights[peer] = 'b' * 64
+        router.model_alias_records[peer] = ('d' * 64, 7 * 2**30)
+        seen = []
+        def upstream(url, body, **kwargs):
+            assert url.endswith('/api/chat')
+            seen.append((body['model'], body['options']['num_ctx']))
+            if len(seen) == 2:
+                # A returned response records the grown32K bucket and usage,
+                # then fails the unchanged original integer-array contract.
+                result = context_floor_native_reply('json', body['model'])
+                result['message']['content'] = '{"steps":["wrong"]}'
+                return result
+            return context_floor_native_reply('bad' if len(seen) == 1 else 'tool', body['model'])
+        with (patch.object(router, 'local_candidates', return_value=[cloud.LOCAL_MODEL, peer]),
+              patch.object(cloud, 'post', side_effect=upstream) as post,
+              patch.object(cloud, 'urlopen', side_effect=AssertionError('No actual network')),
+              patch.object(usage_history, 'record_completion') as usage):
+            result = router.complete(request)
+        assert post.call_count == usage.call_count == 3
+        assert seen == [(cloud.LOCAL_MODEL, 16384), (cloud.LOCAL_MODEL, 32768), (peer, 16384)]
+        assert cloud.valid_completion(result, request) == result
+        assert router.last_local_model == peer
+        # Equal-weight aliases remain deduplicated by the existing selector;
+        # this fixture does not monkeypatch that policy to invent another retry.
+        assert cloud.fitting_weight_aliases([cloud.LOCAL_MODEL, peer],
+            {cloud.LOCAL_MODEL: 'a'*64, peer: 'a'*64}, router.model_contexts) == [cloud.LOCAL_MODEL]
+    finally:
+        case.doCleanups()
+
+
+def test_native_context_floor_observation_cancellation_cannot_send_repair_post():
+    import model_fitness
+    import usage_history
+    case, router, request = context_floor_additional_case('shrink')
+    try:
+        observed = []
+        cancelled = [False]
+        actual_observation = model_fitness.avatar_headroom_observation
+        def observation(*args, **kwargs):
+            result = actual_observation(*args, **kwargs)
+            observed.append(result)
+            if len(observed) == 2:
+                cancelled[0] = True
+            return result
+        with (patch.object(model_fitness, 'avatar_headroom_observation', side_effect=observation),
+              patch.object(cloud, 'post', return_value=context_floor_native_reply('bad', cloud.LOCAL_MODEL)) as post,
+              patch.object(cloud, 'urlopen', side_effect=AssertionError('No actual network')),
+              patch.object(usage_history, 'record_completion') as usage):
+            with pytest.raises(InterruptedError):
+                router.complete(request, cancel=lambda: cancelled[0])
+        assert len(observed) == 2 and all(value['status'] == 'known' for value in observed)
+        assert post.call_count == usage.call_count == 1
+    finally:
+        case.doCleanups()
+
+
+
+@pytest.mark.parametrize('elapsed', [59, 61])
+def test_native_context_floor_cold_elapsed_reply_refreshes_only_expired_selected_alias(elapsed):
+    import copy
+    import usage_history
+    case, router, request = context_floor_additional_case('shrink')
+    try:
+        clock = [100.0]
+        clock_module = SimpleNamespace(**{**vars(time), 'monotonic': lambda: clock[0]})
+        router.model_cache_until = 160.0
+        router.native_version_until = 1000.0  # Isolate model TTL from existing version TTL.
+        before = copy.deepcopy((router.model_contexts, router.model_native_contexts,
+                                 router.model_weights, router.model_alias_records))
+        native, metadata = [], []
+        def upstream(url, body, **options):
+            if options.get('_local_metadata'):
+                metadata.append((url, copy.deepcopy(body)))
+                assert 0 < options['timeout'] <= 3 and 'key' not in options
+                if url.endswith('/api/tags'):
+                    assert body is None
+                    return {'models': [{'name': cloud.LOCAL_MODEL.removesuffix(':latest') + ':latest',
+                        'digest': 'c' * 64, 'size': 6 * 2**30}]}
+                assert url.endswith('/api/show') and body == {'model': cloud.LOCAL_MODEL}
+                return {'modelfile': 'FROM /owned/blobs/sha256-' + 'a' * 64,
+                    'parameters': 'num_ctx 65536', 'capabilities': ['tools'],
+                    'model_info': {'general.architecture': 'neutral', 'neutral.context_length': 65536}}
+            assert url.endswith('/api/chat')
+            native.append(copy.deepcopy(body))
+            if len(native) == 1:
+                clock[0] = 100.0 + elapsed
+            return context_floor_native_reply('bad' if len(native) == 1 else 'json', body['model'])
+        with (patch.object(cloud, 'time', clock_module),
+              patch.object(cloud, 'post', side_effect=upstream) as post,
+              patch.object(cloud, 'urlopen', side_effect=AssertionError('No actual network')),
+              patch.object(usage_history, 'record_completion') as usage):
+            result = router.complete(request)
+        assert [body['options']['num_ctx'] for body in native] == [32768, 32768]
+        assert len(metadata) == (0 if elapsed == 59 else 2)
+        if metadata:
+            assert metadata == [('http://127.0.0.1:11434/api/tags', None),
+                                ('http://127.0.0.1:11434/api/show', {'model': cloud.LOCAL_MODEL})]
+        assert post.call_count == 2 + len(metadata) and usage.call_count == 2
+        assert router.model_cache_until == 160.0
+        assert before == (router.model_contexts, router.model_native_contexts,
+                          router.model_weights, router.model_alias_records)
+        assert cloud.valid_completion(result, request) == result
+    finally:
+        case.doCleanups()
+
+
+@pytest.mark.parametrize('fault', ['manifest', 'weights', 'lower_cap', 'lower_native', 'unknown_tags',
+                                  'unknown_show', 'headroom', 'config', 'guard', 'cancel'])
+def test_native_expired_selected_refresh_cannot_grant_changed_or_unknown_floor(fault):
+    import copy
+    import usage_history
+    case, router, request = context_floor_additional_case('shrink')
+    try:
+        clock, cancelled = [100.0], [False]
+        clock_module = SimpleNamespace(**{**vars(time), 'monotonic': lambda: clock[0]})
+        router.model_cache_until = 160.0
+        router.native_version_until = 1000.0
+        native, metadata = [], []
+        refusal = InterruptedError('Owned resource admission refusal')
+        def process(pid):
+            assert pid == 123
+            return SimpleNamespace(is_running=lambda: True, create_time=lambda: 100.0,
+                cmdline=lambda: ['python.exe', str(cloud.ROOT / 'camera_presence.py'), '--avatar'])
+        def upstream(url, body, **options):
+            if options.get('_local_metadata'):
+                metadata.append(url)
+                if fault == 'guard':
+                    raise refusal
+                if url.endswith('/api/tags'):
+                    assert body is None
+                    if fault == 'unknown_tags':
+                        return {}
+                    if fault == 'cancel':
+                        cancelled[0] = True
+                    return {'models': [{'name': cloud.LOCAL_MODEL.removesuffix(':latest') + ':latest',
+                        'digest': ('d' if fault == 'manifest' else 'c') * 64, 'size': 6 * 2**30}]}
+                assert url.endswith('/api/show') and body == {'model': cloud.LOCAL_MODEL}
+                if fault == 'unknown_show':
+                    return []
+                if fault == 'headroom':
+                    folder = cloud.ROOT / 'LongTasks'
+                    folder.mkdir(exist_ok=True)
+                    (folder / 'avatar-gpu-current.json').write_text(json.dumps({
+                        'pid': 123, 'started': 100.0, 'reserved_bytes': 2 * 1024 ** 3,
+                        'phase': 'active'}), encoding='utf-8')
+                if fault == 'config':
+                    (cloud.STATE / 'model-choice.json').write_text('{"profile":"fast"}', encoding='utf-8')
+                return {'modelfile': 'FROM /owned/blobs/sha256-' + ('b' if fault == 'weights' else 'a') * 64,
+                    'parameters': 'num_ctx ' + ('16384' if fault == 'lower_cap' else '65536'),
+                    'capabilities': ['tools'],
+                    'model_info': {'general.architecture': 'neutral',
+                                   'neutral.context_length': 16384 if fault == 'lower_native' else 65536}}
+            assert url.endswith('/api/chat')
+            native.append(copy.deepcopy(body))
+            if len(native) == 1:
+                clock[0] = 161.0
+            return context_floor_native_reply('bad' if len(native) == 1 else 'json', body['model'])
+        refused = fault in ('manifest', 'weights', 'lower_cap', 'lower_native', 'config', 'guard', 'cancel')
+        with (patch.object(cloud, 'time', clock_module), patch('psutil.Process', side_effect=process),
+              patch.object(cloud, 'post', side_effect=upstream) as post,
+              patch.object(cloud, 'urlopen', side_effect=AssertionError('No actual network')),
+              patch.object(usage_history, 'record_completion') as usage):
+            if refused:
+                with pytest.raises(InterruptedError) as caught:
+                    router.complete(request, cancel=lambda: cancelled[0])
+                if fault == 'guard':
+                    assert caught.value is refusal
+            else:
+                result = router.complete(request)
+                assert cloud.valid_completion(result, request) == result
+        assert [body['options']['num_ctx'] for body in native] == ([32768] if refused else [32768, 16384])
+        assert len(metadata) == (1 if fault in ('manifest', 'unknown_tags', 'guard', 'cancel') else 2)
+        assert post.call_count == len(native) + len(metadata) and usage.call_count == len(native)
+        assert router.model_cache_until == 160.0
+    finally:
+        case.doCleanups()
+
+
+@pytest.mark.parametrize('url,payload,key', [
+    ('https://example.invalid/api/tags', None, ''),
+    ('http://127.0.0.1:11434/api/tags', None, 'do-not-send'),
+    ('http://127.0.0.1:11434/api/show', {'model': 'neutral', 'extra': True}, ''),
+    ('http://127.0.0.1:11434/api/create', {'model': 'neutral'}, ''),
+])
+def test_bounded_metadata_transport_rejects_remote_auth_and_mutating_options(url, payload, key):
+    with (patch.object(cloud, 'build_opener', side_effect=AssertionError('No connection')),
+          patch.object(cloud, 'urlopen', side_effect=AssertionError('No connection'))):
+        with pytest.raises(ValueError):
+            cloud.post(url, payload, key, _local_metadata=True)
+
+
+@pytest.mark.parametrize('endpoint,payload,method', [('tags', None, 'GET'), ('show', {'model': 'neutral'}, 'POST')])
+def test_bounded_metadata_transport_keeps_guarded_post_and_rejects_redirects(endpoint, payload, method):
+    calls = []
+    class Response:
+        def __enter__(self): return self
+        def __exit__(self, *args): return False
+        def read(self, size):
+            calls.append(size)
+            return b'{"models":[]}'
+    opener = SimpleNamespace(open=lambda request, timeout: Response())
+    with (patch.object(cloud, 'build_opener', return_value=opener) as build,
+          patch.object(cloud, 'urlopen', side_effect=AssertionError('No default client'))):
+        result = cloud.post('http://127.0.0.1:11434/api/' + endpoint, payload,
+                            timeout=2, _local_metadata=True)
+    assert result == {'models': []} and calls == [1048577]
+    handlers = build.call_args.args
+    assert handlers[0].proxies == {}
+    assert isinstance(handlers[1], cloud._LocalMetadataNoRedirect)
+    assert handlers[1].redirect_request(None, None, 302, '', {}, 'https://example.invalid/') is None
+    # Capture Request construction separately to preserve the exact HTTP verb.
+    with (patch.object(cloud, 'build_opener', return_value=SimpleNamespace(open=lambda request, timeout:
+            (calls.append((request.full_url, request.get_method(), request.data, dict(request.header_items()))) or Response()))),
+          patch.object(cloud, 'urlopen', side_effect=AssertionError('No default client'))):
+        cloud.post('http://127.0.0.1:11434/api/' + endpoint, payload, _local_metadata=True)
+    captured = next(value for value in calls if isinstance(value, tuple))
+    assert captured[0] == 'http://127.0.0.1:11434/api/' + endpoint and captured[1] == method
+    if method == 'GET':
+        assert captured[2] is None
+    else:
+        assert json.loads(captured[2]) == payload
+    assert not any(name.lower() == 'authorization' for name in captured[3])
+
+
+def test_bounded_metadata_transport_rejects_oversized_before_json_parse():
+    class Response:
+        def __enter__(self): return self
+        def __exit__(self, *args): return False
+        def read(self, size):
+            assert size == 1048577
+            return b'x' * size
+    with (patch.object(cloud, 'build_opener', return_value=SimpleNamespace(open=lambda *args, **kwargs: Response())),
+          patch.object(cloud.json, 'loads', side_effect=AssertionError('Must bound before parse'))):
+        with pytest.raises(ValueError, match='exceeds'):
+            cloud.post('http://127.0.0.1:11434/api/tags', None, _local_metadata=True)
+
+
+
+def test_default_post_transport_keeps_original_auth_body_and_client():
+    url = 'http://127.0.0.1:11434/api/chat'
+    payload = {'model': 'neutral', 'messages': []}
+    with (patch.object(cloud, 'urlopen', return_value=io.BytesIO(b'{"done":true}')) as original,
+          patch.object(cloud, 'build_opener', side_effect=AssertionError('Default transport must not change'))):
+        assert cloud.post(url, payload, 'owned-test-key', timeout=7) == {'done': True}
+    request = original.call_args.args[0]
+    assert request.full_url == url and request.get_method() == 'POST'
+    assert json.loads(request.data) == payload
+    assert request.get_header('Authorization') == 'Bearer owned-test-key'
+    assert original.call_args.kwargs == {'timeout': 7}
+
+
+
+def test_native_context_floor_repair_envelope_16k_refuses_before_second_post():
+    import copy
+    import usage_history
+    case, router, request = context_floor_additional_case('shrink')
+    try:
+        original = copy.deepcopy(request)
+        seen = []
+        def upstream(url, body, **options):
+            assert url.endswith('/api/chat') and not options.get('_local_metadata')
+            seen.append(copy.deepcopy(body))
+            assert len(seen) == 1
+            router.model_native_contexts[cloud.LOCAL_MODEL] = 16384
+            router.model_contexts[cloud.LOCAL_MODEL] = 16384
+            return context_floor_native_reply('bad', body['model'])
+        with (patch.object(cloud, 'post', side_effect=upstream) as post,
+              patch.object(cloud, '_refresh_selected_context', side_effect=AssertionError('No metadata repair allowed')) as refresh,
+              patch.object(cloud, 'urlopen', side_effect=AssertionError('No actual network')),
+              patch.object(usage_history, 'record_completion') as usage):
+            with pytest.raises(cloud.ToolArgumentError) as caught:
+                router.complete(request)
+        assert caught.value.tool == 'save_plan'
+        assert len(seen) == post.call_count == usage.call_count == 1
+        assert seen[0]['options']['num_ctx'] == 32768
+        refresh.assert_not_called()
+        assert request == original
+    finally:
+        case.doCleanups()
+
+
+
+@pytest.mark.parametrize('change', ['expired', 'config', 'headroom', 'headroom_unknown',
+                                   'weights', 'alias_manifest', 'capacity', 'cancel', 'second503'])
+def test_native_503_retry_revalidates_one_dispatch_floor_and_preserves_shared_usage_clock(change):
+    import copy
+    import model_fitness
+    import usage_history
+    case, router, request = context_floor_additional_case('shrink')
+    errors = []
+    try:
+        original = copy.deepcopy(request)
+        clock, cancelled = [100.0], [False]
+        clock_module = SimpleNamespace(**{**vars(time), 'monotonic': lambda: clock[0]})
+        router.model_cache_until = 160.0
+        router.native_version_until = 1000.0
+        native, metadata, observations = [], [], []
+        actual_observation = model_fitness.avatar_headroom_observation
+        def observe(*args, **kwargs):
+            if len(observations) == 3:
+                clock[0] += 2.0  # Retry observation time must be in the same usage interval.
+            result = actual_observation(*args, **kwargs)
+            observations.append(result)
+            return result
+        def process(pid):
+            assert pid == 123
+            return SimpleNamespace(is_running=lambda: True, create_time=lambda: 100.0,
+                cmdline=lambda: ['python.exe', str(cloud.ROOT / 'camera_presence.py'), '--avatar'])
+        def upstream(url, body, **options):
+            if options.get('_local_metadata'):
+                metadata.append(url)
+                if url.endswith('/api/tags'):
+                    assert body is None
+                    return {'models': [{'name': cloud.LOCAL_MODEL.removesuffix(':latest') + ':latest',
+                        'digest': 'c' * 64, 'size': 6 * 2**30}]}
+                assert url.endswith('/api/show') and body == {'model': cloud.LOCAL_MODEL}
+                return {'modelfile': 'FROM /owned/blobs/sha256-' + 'a' * 64,
+                    'parameters': 'num_ctx 65536', 'capabilities': ['tools'],
+                    'model_info': {'general.architecture': 'neutral', 'neutral.context_length': 65536}}
+            assert url.endswith('/api/chat')
+            native.append((copy.deepcopy(body), options['timeout']))
+            assert len(native) <= 3
+            if len(native) == 1:
+                clock[0] = 161.0
+                return context_floor_native_reply('bad', body['model'])
+            if len(native) == 2:
+                clock[0] = 222.0  # The previous selected proof no longer authorizes another RPC.
+                if change == 'config':
+                    (cloud.STATE / 'model-choice.json').write_text('{"profile":"fast"}', encoding='utf-8')
+                elif change in ('headroom', 'headroom_unknown'):
+                    folder = cloud.ROOT / 'LongTasks'
+                    folder.mkdir(exist_ok=True)
+                    value = [] if change == 'headroom_unknown' else {'pid': 123, 'started': 100.0,
+                        'reserved_bytes': 2 * 1024 ** 3, 'phase': 'active'}
+                    (folder / 'avatar-gpu-current.json').write_text(json.dumps(value), encoding='utf-8')
+                elif change == 'weights':
+                    router.model_weights[cloud.LOCAL_MODEL] = 'b' * 64
+                elif change == 'alias_manifest':
+                    router.model_alias_records[cloud.LOCAL_MODEL] = ('d' * 64, 6 * 2**30)
+                elif change == 'capacity':
+                    router.model_native_contexts[cloud.LOCAL_MODEL] = 16384
+                elif change == 'cancel':
+                    cancelled[0] = True
+                error = HTTPError(url, 503, 'Owned fake transient response', {}, io.BytesIO(b''))
+                errors.append(error)
+                raise error
+            clock[0] += 3.0
+            if change == 'second503':
+                error = HTTPError(url, 503, 'Owned second transient response', {}, io.BytesIO(b''))
+                errors.append(error)
+                raise error
+            return context_floor_native_reply('json', body['model'])
+        with (patch.object(cloud, 'time', clock_module), patch('psutil.Process', side_effect=process),
+              patch.object(model_fitness, 'avatar_headroom_observation', side_effect=observe),
+              patch.object(cloud, 'post', side_effect=upstream) as post,
+              patch.object(cloud, 'urlopen', side_effect=AssertionError('No actual network')),
+              patch.object(usage_history, 'record_completion') as usage):
+            if change == 'cancel':
+                with pytest.raises(InterruptedError):
+                    router.complete(request, cancel=lambda: cancelled[0])
+            elif change == 'second503':
+                with pytest.raises(HTTPError) as caught:
+                    router.complete(request)
+                assert caught.value.code == 503
+            else:
+                result = router.complete(request)
+                assert cloud.valid_completion(result, request) == result
+        assert [body['options']['num_ctx'] for body, _timeout in native] == (
+            [32768, 32768] if change == 'cancel' else [32768, 32768, 16384])
+        assert len(observations) == (3 if change == 'cancel' else 4)
+        assert metadata == ['http://127.0.0.1:11434/api/tags', 'http://127.0.0.1:11434/api/show']
+        assert post.call_count == len(native) + 2
+        assert [timeout for _body, timeout in native] == ([1800, 120] if change == 'cancel' else [1800, 120, 60])
+        assert usage.call_count == (1 if change in ('cancel', 'second503') else 2)
+        assert usage.call_args_list[0].args[2] == 61.0
+        if change not in ('cancel', 'second503'):
+            assert usage.call_args_list[1].args[2] == 66.0  # failedHTTP61 + fresh-observation2 + retry3
+        if len(native) == 3:
+            first_repair, retry = copy.deepcopy(native[1][0]), copy.deepcopy(native[2][0])
+            first_repair['options'].pop('num_ctx')
+            retry['options'].pop('num_ctx')
+            assert retry == first_repair
+        assert router.model_cache_until == 160.0 and request == original
+    finally:
+        for error in errors:
+            error.close()
+        case.doCleanups()

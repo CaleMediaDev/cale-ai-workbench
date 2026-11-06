@@ -8691,3 +8691,1735 @@ def test_large_prompt_keeps_budget_with_installed_paths_and_skill_catalog(tmp_pa
     assert str(item["folder"]) in text
     assert "Match explicitly requested output paths exactly." in text
     assert "do not invoke another LLM server" in text
+
+
+
+
+@pytest.mark.parametrize('text,effects', [
+    ('Added and removed records must persist after reload.', {'creation', 'removal'}),
+    ('Save the selected theme across refreshes.', {'mutation'}),
+    ('Do not persist the draft after reload.', set()),
+    ('Explain how data could persist after reload.', set()),
+    ('Keep the heading visible after reload.', set()),
+])
+def test_public548_pure_persistence_parser_does_not_write_obligation_authority(text, effects):
+    basis = {'brief': 'a' * 64, 'rules': None, 'followups': None}
+    with patch.object(project_memory, 'connection', side_effect=AssertionError('Pure parsing must not open SQLite')):
+        rows = task_context.parse_persistence_obligations([('brief', text)], basis)
+    assert {effect for row in rows for effect in row['required_effects']} == effects
+    for row in rows:
+        assert row['planning_basis'] == basis
+        assert row['span_sha256'] == hashlib.sha256(text[row['span'][0]:row['span'][1]].encode()).hexdigest()
+        assert row['source'] == 'brief'
+
+
+@pytest.mark.parametrize('effect,cases', [
+    ('creation', [
+        {'row_counts': {'items': 0}},
+        {'set': {'name': 'Violet'}, 'click': ['add'], 'row_counts': {'items': 1}},
+        {'reload': True, 'row_counts': {'items': 1}},
+    ]),
+    ('removal', [
+        {'reload': True, 'row_counts': {'items': 1}},
+        {'click': ['remove'], 'row_counts': {'items': 0}},
+        {'reload': True, 'row_counts': {'items': 0}},
+    ]),
+])
+def test_public548_planned_persistence_is_typed_advisory_not_a_measured_pass(effect, cases):
+    specification = {'path': 'index.html', 'cases': cases}
+    with patch.object(project_memory, 'connection', side_effect=AssertionError('Plan projection must not open SQLite')):
+        result = task_context.planned_persistence_effects([specification])
+    assert set(result) == {'mutation', effect}
+    broken = copy.deepcopy(specification)
+    broken['cases'][-1]['row_counts']['items'] = 99
+    assert task_context.planned_persistence_effects([broken]) == []
+
+
+def test_public548_planned_persistence_does_not_union_unrelated_collections():
+    creation = {'path': 'index.html', 'cases': [
+        {'row_counts': {'alpha': 0}}, {'click': ['add'], 'row_counts': {'alpha': 1}},
+        {'reload': True, 'row_counts': {'alpha': 1}}]}
+    removal = {'path': 'index.html', 'cases': [
+        {'reload': True, 'row_counts': {'beta': 1}}, {'click': ['remove'], 'row_counts': {'beta': 0}},
+        {'reload': True, 'row_counts': {'beta': 0}}]}
+    result = task_context.planned_persistence_effects([creation, removal])
+    assert 'mutation' in result
+    assert not {'creation', 'removal'} <= set(result)
+
+
+
+def test_tiny_context_preserves_goal_unfinished_plan_and_recent_steering(tmp_path):
+    item = project(tmp_path / "page")
+    folder = Path(item["folder"])
+    plan = "- [x] Build widget\n- [ ] Verify violet widget\n" + "\n".join(
+        f"- [x] Earlier fixture checkpoint {number}: widget baseline retained for inspection."
+        for number in range(40))
+    progress = "\n".join(
+        f"Earlier fixture detail {number}: violet widget baseline retained for later inspection."
+        for number in range(40))
+    assert len(plan) <= task_context.LIMITS["PLAN.md"]
+    assert len(progress) <= task_context.LIMITS["PROGRESS.md"]
+    (folder / ".local-ai/PLAN.md").write_text(plan)
+    (folder / ".local-ai/PROGRESS.md").write_text(progress)
+    goal = {"role": "system", "content": "Build and verify the violet widget."}
+    steering = {"role": "user", "content": "Keep the violet label."}
+    messages = [goal] + [{"role": "user", "content": "old note " * 100} for _ in range(40)] + [steering]
+    original_tools = copy.deepcopy(native_agent.TOOLS)
+    checkpoint = {"role": "system", "content": task_context.recovery_snapshot(folder)}
+    checkpoint_estimate = cloud_ai.estimated_input_tokens({
+        "messages": [goal, checkpoint, steering], "tools": native_agent.TOOLS})
+    assert checkpoint_estimate > 4500, ("Fixture must force checkpoint shrinking", checkpoint_estimate)
+    result = native_agent.compact_messages(messages, folder, context_limit=6000)
+    assert result[0] == goal
+    assert "Verify violet widget" in result[1]["content"]
+    assert "saved data excerpt" in result[1]["content"]
+    assert result[-1] == steering
+    assert native_agent.TOOLS == original_tools
+    assert cloud_ai.estimated_input_tokens({"messages": result, "tools": native_agent.TOOLS}) <= 4500
+
+
+
+@pytest.mark.parametrize("checkpoint", [
+    "Current task checkpoint: malformed PLAN.md data without a section", 
+    "Current task checkpoint:\nPLAN.md:\n- [x] Finished task\nPROGRESS.md:\nNo unfinished plan entry.",
+])
+def test_tiny_checkpoint_without_unfinished_plan_keeps_bounded_fallback(tmp_path, checkpoint):
+    messages = [{"role": "system", "content": "Keep the original goal."},
+                {"role": "system", "content": checkpoint + " note" * 2000},
+                {"role": "user", "content": "Latest steering."}]
+    before_estimate = cloud_ai.estimated_input_tokens({"messages": messages, "tools": native_agent.TOOLS})
+    assert before_estimate > 4500, ("Fixture must require compaction", before_estimate)
+    result = native_agent.compact_messages(messages, tmp_path, context_limit=6000)
+    assert result[0] == messages[0]
+    assert result[-1] == messages[-1]
+    assert "Next step:" not in result[1]["content"]
+    assert "PLAN.md: - [ ]" not in result[1]["content"]
+    assert cloud_ai.estimated_input_tokens({"messages": result, "tools": native_agent.TOOLS}) <= 4500
+
+
+
+def test_fitting_checkpoint_is_unchanged_by_priority_projection(tmp_path):
+    messages = [{"role": "system", "content": "Original goal"},
+                {"role": "system", "content": "Current task checkpoint:\nPLAN.md:\n- [ ] Verify widget"}]
+    assert cloud_ai.estimated_input_tokens({"messages": messages, "tools": native_agent.TOOLS}) <= 24576
+    assert native_agent.compact_messages(messages, tmp_path, context_limit=32768) is messages
+
+
+
+def test_tiny_context_keeps_explicit_next_step_and_unfinished_plan_when_both_fit(tmp_path):
+    plan = "- [x] Build widget\n- [ ] Inspect violet result\n" + "\n".join(
+        f"- [x] Earlier fixture checkpoint {number}: widget baseline retained for inspection."
+        for number in range(40))
+    progress = "\n".join(
+        f"Earlier fixture detail {number}: violet widget baseline retained for later inspection."
+        for number in range(40))
+    assert len(plan) <= task_context.LIMITS["PLAN.md"]
+    assert len(progress) <= task_context.LIMITS["PROGRESS.md"]
+    checkpoint = ("Current task checkpoint (saved data):\nNext step: Verify violet widget\n"
+                  "PLAN.md:\n" + plan + "\nPROGRESS.md:\n" + progress)
+    goal = {"role": "system", "content": "Build and verify the widget."}
+    steering = {"role": "user", "content": "Retain violet."}
+    messages = [goal, {"role": "system", "content": checkpoint},
+                {"role": "user", "content": "old note " * 2000}, steering]
+    checkpoint_estimate = cloud_ai.estimated_input_tokens({
+        "messages": [goal, messages[1], steering], "tools": native_agent.TOOLS})
+    assert checkpoint_estimate > 4500, ("Fixture must force checkpoint shrinking", checkpoint_estimate)
+    result = native_agent.compact_messages(messages, tmp_path, context_limit=6000)
+    assert result[0] == goal
+    assert "Next step: Verify violet widget" in result[1]["content"]
+    assert "PLAN.md: - [ ] Inspect violet result" in result[1]["content"]
+    assert result[-1] == steering
+    assert cloud_ai.estimated_input_tokens({"messages": result, "tools": native_agent.TOOLS}) <= 4500
+
+
+
+def test_fitting_checkpoint_survives_compaction_of_oversized_history_unchanged(tmp_path):
+    checkpoint = {"role": "system", "content": "Current task checkpoint:\nNext step: Verify widget"}
+    messages = [{"role": "system", "content": "Original goal"}, checkpoint,
+                {"role": "user", "content": "obsolete note " * 5000},
+                {"role": "user", "content": "Recent steering."}]
+    assert cloud_ai.estimated_input_tokens({"messages": messages, "tools": native_agent.TOOLS}) > 4500
+    assert cloud_ai.estimated_input_tokens({
+        "messages": [messages[0], checkpoint, messages[-1]], "tools": native_agent.TOOLS}) <= 4500
+    result = native_agent.compact_messages(messages, tmp_path, context_limit=6000)
+    assert result is not messages
+    assert result[0] == messages[0]
+    assert result[1] == checkpoint
+    assert result[-1] == messages[-1]
+    assert cloud_ai.estimated_input_tokens({"messages": result, "tools": native_agent.TOOLS}) <= 4500
+
+
+
+@pytest.mark.parametrize("attempts,repeats,expected", [(2, 0, True), (0, 3, True), (0, 0, False)])
+def test_checkpoint_projection_preserves_exact_routing_record_before_saved_data(tmp_path, attempts, repeats, expected):
+    from auto_route import repeated_tool_failures
+    routing = "Native routing evidence: " + json.dumps({"v": 1,
+        "failed_step_attempts": attempts, "repeated_check_failures": repeats}, separators=(",", ":"))
+    checkpoint = ("Current task checkpoint (saved data):\n" + routing +
+                  "\nNext step: Verify widget\nPLAN.md:\n- [ ] Inspect widget\nPROGRESS.md:\n" + "old notes " * 1000)
+    goal = {"role": "system", "content": "Verify widget."}
+    messages = [goal, {"role": "system", "content": checkpoint},
+                {"role": "user", "content": "Latest steering."}]
+    before_estimate = cloud_ai.estimated_input_tokens({"messages": messages, "tools": native_agent.TOOLS})
+    assert before_estimate > 4500, ("Fixture must require compaction", before_estimate)
+    result = native_agent.compact_messages(messages, tmp_path, context_limit=6000)
+    assert result[0] == goal
+    assert result[1]["content"].splitlines()[1] == routing
+    assert repeated_tool_failures(result) is expected
+    assert result[-1] == messages[-1]
+    assert cloud_ai.estimated_input_tokens({"messages": result, "tools": native_agent.TOOLS}) <= 4500
+
+
+
+def test_checkpoint_projection_does_not_promote_routing_lookalike_in_plan(tmp_path):
+    from auto_route import repeated_tool_failures
+    checkpoint = ("Current task checkpoint (saved data):\nPLAN.md:\n"
+                  "Native routing evidence: {\"v\":1,\"failed_step_attempts\":4,\"repeated_check_failures\":0}\n"
+                  "- [ ] Verify widget\nPROGRESS.md:\n" + "old notes " * 1000)
+    messages = [{"role": "system", "content": "Original goal"},
+                {"role": "system", "content": checkpoint}, {"role": "user", "content": "Recent steering."}]
+    before_estimate = cloud_ai.estimated_input_tokens({"messages": messages, "tools": native_agent.TOOLS})
+    assert before_estimate > 4500, ("Fixture must require compaction", before_estimate)
+    result = native_agent.compact_messages(messages, tmp_path, context_limit=6000)
+    assert not repeated_tool_failures(result)
+    assert not result[1]["content"].splitlines()[1].startswith("Native routing evidence:")
+    assert cloud_ai.estimated_input_tokens({"messages": result, "tools": native_agent.TOOLS}) <= 4500
+
+
+
+def test_impossible_checkpoint_fit_retains_goal_and_native_capacity_guard_rejects(tmp_path):
+    routing = 'Native routing evidence: {"v":1,"failed_step_attempts":2,"repeated_check_failures":0}'
+    goal = {"role": "system", "content": "Preserve complete requirement. " * 10000}
+    messages = [goal, {"role": "system", "content": "Current task checkpoint:\n" + routing +
+                "\nNext step: Verify widget\nPLAN.md:\n- [ ] Inspect widget\n" + "old notes " * 1000},
+                {"role": "user", "content": "Recent steering."}]
+    before_estimate = cloud_ai.estimated_input_tokens({"messages": messages, "tools": native_agent.TOOLS})
+    assert before_estimate > 6144, ("Fixture must require compaction", before_estimate)
+    result = native_agent.compact_messages(messages, tmp_path, context_limit=8192)
+    assert result[0] == goal
+    assert result[1]["content"].splitlines()[1] == routing
+    payload = {"model": "cale-main-64k", "messages": result, "tools": native_agent.TOOLS, "max_tokens": 2048}
+    assert cloud_ai.estimated_input_tokens(payload) > 8192
+    with patch.object(cloud_ai, "post") as post:
+        with pytest.raises(ValueError, match="approved context capacity"):
+            cloud_ai.native_chat_request(payload, 8192)
+        post.assert_not_called()
+
+
+
+@pytest.mark.parametrize('brief, expected', [
+    ('Build an offline bookmarks app in index.html. Users add and delete bookmarks with title and URL. Save bookmarks across page reloads. Reloading must preserve added bookmarks and deletions.', True),
+    ('Create single-file HTML bookmarks. Reloading must preserve added bookmarks and deletions.', True),
+    ('Write index.html documentation. Build a CLI store. Save records across restarts.', False),
+    ('Create index.html documentation and a command-line store. Save records across restarts.', False),
+    ('Build a CLI store. Save records across restarts.', False),
+    ('Create index.html and a CLI store. Save records across restarts.', None),
+    ('Use example index.html as a reference. Build a CLI store. Save records across reloads.', False),
+    ('Explain how to create index.html. Save records across reloads.', False),
+    ('Create index.html. Save screenshots after reloading.', False),
+    ('Create index.html. Do not save records across reloads.', False),
+])
+def test_final_scope_binds_persistence_to_explicit_output_owner(tmp_path, brief, expected):
+    item = project(tmp_path / 'scope')
+    item['brief'] = brief
+    folder = Path(item['folder'])
+    (folder / '.local-ai/USER-REQUESTS.md').write_text('')
+    (folder / 'index.html').write_text('<input><button>Add</button><script>localStorage.setItem("x", "y")</script>')
+    scope = native_agent._final_delivery_scope(folder, item)
+    assert scope['required'] is expected
+    if expected is True:
+        assert scope['obligations'] and scope['basis'] == native_agent.planning_basis(item)
+    else:
+        assert not scope['obligations']
+
+
+
+@pytest.mark.parametrize('negative', ['must not', 'shall not', 'should not', 'do not', 'never', 'need not', 'no need to'])
+@pytest.mark.parametrize('width', [1, 2, 7, 16384])
+def test_final_scope_negative_html_ownership_survives_chunk_boundaries(negative, width):
+    scanner = native_agent._FinalDeliveryScanner({})
+    text = 'You ' + negative + ' create index.html. Build a CLI store. Save records across reloads.'
+    for offset in range(0, len(text), width):
+        scanner.feed(text[offset:offset + width])
+    scanner.finish_source()
+    assert scanner.projection(False)['required'] is False
+
+
+
+@pytest.mark.parametrize('width', [1, 2, 7, 16384])
+def test_final_scope_html_filename_and_reload_grammar_survive_chunk_boundaries(width):
+    scanner = native_agent._FinalDeliveryScanner({})
+    text = 'Create nested/bookmarks.html. Reloading must preserve added bookmarks and deletions.'
+    for offset in range(0, len(text), width):
+        scanner.feed(text[offset:offset + width])
+    scanner.finish_source()
+    scope = scanner.projection(False)
+    assert scope['required'] is True
+    assert {'creation', 'removal'} <= {effect for row in scope['obligations'] for effect in row['required_effects']}
+
+
+
+@pytest.mark.parametrize('location', ['brief', 'followup'])
+def test_final_scope_long_cli_does_not_inherit_optional_preview_cap(tmp_path, location):
+    item = project(tmp_path / 'long-cli')
+    folder = Path(item['folder'])
+    text = ('Document the command-line arguments. ' * 4000) + 'Build a CLI store. Save records across restarts.'
+    item['brief'] = text if location == 'brief' else 'Build a CLI store.'
+    (folder / '.local-ai/USER-REQUESTS.md').write_text(text if location == 'followup' else '')
+    assert len(text) > 64000
+    assert native_agent._final_delivery_scope(folder, item)['required'] is False
+
+
+
+def test_final_scope_long_followup_retains_actual_required_effects(tmp_path):
+    item = project(tmp_path / 'long-html')
+    item['brief'] = 'Build a bookmarks utility.'
+    folder = Path(item['folder'])
+    text = ('Document the command-line arguments. ' * 4000) + 'Create index.html. Reloading must preserve added bookmarks and deletions.'
+    (folder / '.local-ai/USER-REQUESTS.md').write_text(text)
+    scope = native_agent._final_delivery_scope(folder, item)
+    assert scope['required'] is True
+    assert {'creation', 'removal'} <= {effect for row in scope['obligations'] for effect in row['required_effects']}
+    assert all(row['source'] == 'followups' and row['planning_basis'] == scope['basis'] for row in scope['obligations'])
+    assert native_agent.persistence_completion_issue(folder, item)
+
+
+
+def test_final_scope_unknown_is_not_absence_and_does_not_open_sqlite(tmp_path):
+    item = project(tmp_path / 'unknown')
+    item['brief'] = 'Create index.html. Reloading must preserve added bookmarks and deletions.'
+    folder = Path(item['folder'])
+    with patch.object(project_memory, 'connection', side_effect=AssertionError('No project DB in classifier')):
+        assert native_agent._final_delivery_scope(folder, item)['required'] is True
+    assert not (folder / '.local-ai/memory.sqlite3').exists()
+    with patch.object(native_agent, 'planning_basis', side_effect=OSError('private details')):
+        assert native_agent._final_delivery_scope(folder, item)['required'] is None
+
+
+
+def test_final_scope_changed_followup_is_unknown_not_empty_obligations(tmp_path):
+    item = project(tmp_path / 'changed')
+    item['brief'] = 'Build a bookmarks utility.'
+    folder = Path(item['folder'])
+    followup = folder / '.local-ai/USER-REQUESTS.md'
+    followup.write_text('Create index.html. Reloading must preserve added bookmarks and deletions.')
+    original = native_agent.planning_basis
+    calls = []
+    def changed(*args, **kwargs):
+        result = original(*args, **kwargs)
+        calls.append(True)
+        if len(calls) == 1:
+            followup.write_text('Build a CLI store instead. Save records across restarts.')
+        return result
+    with patch.object(native_agent, 'planning_basis', side_effect=changed):
+        assert native_agent._final_delivery_scope(folder, item)['required'] is None
+
+
+
+def test_final_scope_obligation_limit_is_explicit_not_silently_empty():
+    scanner = native_agent._FinalDeliveryScanner({})
+    scanner.feed('Create index.html. ' + 'Reloading must preserve added bookmarks. ' * 33)
+    scanner.finish_source()
+    scope = scanner.projection(False)
+    assert scope['required'] is None and scope['reason'] == 'obligation_limit'
+    assert scope['obligation_limit'] == 32 and scope['overflow']
+
+
+
+def test_final_scope_preserves_legacy_browser_recognition(tmp_path):
+    item = project(tmp_path / 'legacy')
+    folder = Path(item['folder'])
+    (folder / 'index.html').write_text('<button>Play</button>')
+    for brief in ('Build index.html with title input and Add button.', 'Build a playable HTML game.'):
+        item['brief'] = brief
+        assert native_agent.browser_check_required(item)
+        assert native_agent._final_delivery_scope(folder, item)['required'] is True
+
+
+
+def test_final_scope_saved_suite_preserves_preexisting_persistence_trigger(tmp_path):
+    item = project(tmp_path / 'saved-suite')
+    item['brief'] = 'Save bookmarks across page reloads. Reloading must preserve added bookmarks and deletions.'
+    folder = Path(item['folder'])
+    assert not native_agent.browser_check_required(item)
+    assert native_agent._final_delivery_scope(folder, item)['required'] is False
+    assert native_agent.persistence_completion_issue(folder, item) == ''
+    suite = folder / '.local-ai/webapp-check.json'
+    suite.write_text(json.dumps({'version': 1, 'request_hash': task_context.request_identity(folder),
+        'checks': [{'path': 'page.html', 'cases': [{'visible': ['heading']}]}]}))
+    scope = native_agent._final_delivery_scope(folder, item)
+    assert scope['required'] is False  # Old suite path does not require legacy browser-state flags.
+    assert scope['persistence_eligible'] and scope['suite_trigger']
+    assert {'creation', 'removal'} <= {effect for row in scope['obligations'] for effect in row['required_effects']}
+    assert native_agent.persistence_completion_issue(folder, item)
+
+
+
+def test_final_scope_saved_suite_does_not_depend_on_new_output_ownership(tmp_path):
+    item = project(tmp_path / 'mixed-suite')
+    item['brief'] = 'Create index.html and a CLI store. Save records across reloads.'
+    folder = Path(item['folder'])
+    assert native_agent._final_delivery_scope(folder, item)['required'] is None
+    (folder / '.local-ai/webapp-check.json').write_text(json.dumps({'version': 1,
+        'request_hash': task_context.request_identity(folder), 'checks': []}))
+    scope = native_agent._final_delivery_scope(folder, item)
+    assert scope['required'] is False and scope['persistence_eligible']
+    assert scope['obligations'] and scope['reason'] == 'legacy_suite'
+    assert native_agent.persistence_completion_issue(folder, item)
+
+
+
+def test_final_scope_saved_suite_long_followup_keeps_real_obligations(tmp_path):
+    item = project(tmp_path / 'long-suite')
+    item['brief'] = 'Build a bookmarks utility.'
+    folder = Path(item['folder'])
+    (folder / '.local-ai/USER-REQUESTS.md').write_text(
+        ('Document command-line arguments. ' * 4000) + 'Reloading must preserve added bookmarks and deletions.')
+    (folder / '.local-ai/webapp-check.json').write_text(json.dumps({'checks': []}))
+    scope = native_agent._final_delivery_scope(folder, item)
+    assert scope['required'] is False and scope['persistence_eligible']
+    assert {'creation', 'removal'} <= {effect for row in scope['obligations'] for effect in row['required_effects']}
+    assert native_agent.persistence_completion_issue(folder, item)
+
+
+
+def test_final_persistence_direct_none_project_without_suite_remains_noop(tmp_path):
+    with patch.object(native_agent, 'planning_basis', side_effect=AssertionError('No project basis to read')):
+        assert native_agent.persistence_completion_issue(tmp_path, None) == ''
+
+
+
+def test_final_scope_saved_suite_presence_change_is_not_silent_noop(tmp_path):
+    item = project(tmp_path / 'suite-change')
+    item['brief'] = 'Save records across page reloads.'
+    folder = Path(item['folder'])
+    scope = native_agent._final_delivery_scope(folder, item)
+    (folder / '.local-ai/webapp-check.json').write_text(json.dumps({'checks': []}))
+    assert 'appeared or disappeared' in native_agent._persistence_completion_issue_for_scope(folder, item, scope)
+
+
+
+@pytest.mark.parametrize('description', [
+    'expense report editor',
+    'travel guide app',
+    'data export tool',
+    'documentation manager',
+    'report dashboard',
+])
+@pytest.mark.parametrize('width', [1, 2, 7, 16384])
+def test_final_scope_document_noun_does_not_discard_interactive_delivery(description, width):
+    scanner = native_agent._FinalDeliveryScanner({})
+    text = 'Create index.html ' + description + '. Reloading must preserve added reports and deletions.'
+    for offset in range(0, len(text), width):
+        scanner.feed(text[offset:offset + width])
+    scanner.finish_source()
+    scope = scanner.projection(False)
+    assert scope['required'] is None and scope['reason'] == 'mixed_ownership'
+    assert scanner.records and scanner.html_seen
+
+
+
+@pytest.mark.parametrize('description', [
+    'documentation',
+    'a static expense report',
+    'a printable travel guide',
+    'a downloadable data export document',
+    'a written manual',
+])
+@pytest.mark.parametrize('with_cli', [False, True])
+def test_final_scope_actual_static_document_delivery_and_cli_remain_outside(tmp_path, description, with_cli):
+    item = project(tmp_path / 'static-document')
+    item['brief'] = ('Create index.html ' + description + '.'
+        + (' Build a CLI store.' if with_cli else '') + ' Save records across restarts.')
+    assert not native_agent.browser_check_required(item)
+    folder = Path(item['folder'])
+    scope = native_agent._final_delivery_scope(folder, item)
+    assert scope['required'] is False and not scope['persistence_eligible']
+    assert native_agent.persistence_completion_issue(folder, item) == ''
+
+
+
+def test_final_scope_static_html_docs_with_explicit_cli_application_not_ambiguous(tmp_path):
+    item = project(tmp_path / 'cli-document')
+    item['brief'] = 'Create index.html documentation and a CLI application. Save records across restarts.'
+    scope = native_agent._final_delivery_scope(Path(item['folder']), item)
+    assert scope['required'] is False and not scope['persistence_eligible']
+
+
+
+def test_final_scope_report_editor_full_final_scope_is_not_known_absent(tmp_path):
+    item = project(tmp_path / 'report-editor')
+    item['brief'] = 'Create index.html expense report editor. Reloading must preserve added reports and deletions.'
+    assert not native_agent.browser_check_required(item)
+    scope = native_agent._final_delivery_scope(Path(item['folder']), item)
+    assert scope['required'] is None and scope['reason'] == 'mixed_ownership'
+    assert native_agent.persistence_completion_issue(Path(item['folder']), item)
+
+
+
+def test_public548_allocator_charges_actual_optional_helper_offer_without_mutating_catalog(tmp_path):
+    offered = [*copy.deepcopy(native_agent.TOOLS), copy.deepcopy(native_agent.EXPRESSION_HELPER_TOOL)]
+    original = copy.deepcopy(native_agent.TOOLS)
+    messages = [{'role': 'system', 'content': 'Original goal'},
+        {'role': 'system', 'content': 'Current task checkpoint:\nNext step: Verify widget'},
+        {'role': 'user', 'content': 'obsolete note ' * 10000}, {'role': 'user', 'content': 'Recent steering.'}]
+    before_estimate = cloud_ai.estimated_input_tokens({"messages": messages, "tools": offered})
+    assert before_estimate > 12000, ("Fixture must require compaction", before_estimate)
+    with patch.object(cloud_ai, 'estimated_input_tokens', wraps=cloud_ai.estimated_input_tokens) as estimate:
+        result = native_agent.compact_messages(messages, tmp_path, context_limit=16000, tools=offered)
+    assert result[0] == messages[0] and result[-1] == messages[-1]
+    assert native_agent.TOOLS == original
+    assert all(call.args[0]['tools'] == offered for call in estimate.call_args_list if call.args[0].get('tools'))
+    assert cloud_ai.estimated_input_tokens({'messages': result, 'tools': offered}) <= 12000
+
+
+def _public548_classifier_saved_cache_fixture(tmp_path):
+    """Synthetic gate inputs only; not an actual browser verification receipt."""
+    item = project(tmp_path / 'scope-cache')
+    item['brief'] = 'Save records across page reloads.'
+    folder = Path(item['folder'])
+    saved = {'checks': [{'path': 'index.html', 'cases': [
+        {'row_counts': {'items': 0}},
+        {'set': {'name': 'Violet'}, 'click': ['add'], 'row_counts': {'items': 1}},
+        {'reload': True, 'row_counts': {'items': 1}}]}]}
+    raw = json.dumps(saved).encode()
+    (folder / '.local-ai/webapp-check.json').write_bytes(raw)
+    digest = hashlib.sha256(raw).hexdigest()
+    one = hashlib.sha256(b'1').hexdigest()
+    zero = hashlib.sha256(b'0').hexdigest()
+    witness = {'sequence': 1, 'path': 'index.html', 'action_case': 2, 'reload_case': 3,
+        'target': 'rows:items', 'expected_sha256': one, 'observed_sha256': one,
+        'before_observed_sha256': zero, 'initial_observed_sha256': zero,
+        'effect': 'creation', 'count_before': 0, 'count_after': 1,
+        'baseline_reload_case': None, 'baseline_observed_sha256': None}
+    assert native_agent.valid_persistence_witnesses([witness], saved)
+    receipt = {'checker': 'check_webapp_saved', 'suite_sha256': digest,
+        'check_sha256': project_memory._verification_digest({'suite_sha256': digest}),
+        'dependency_scope': 'project_local_dependencies', 'persistence_witnesses': [witness]}
+    return folder, item, receipt
+
+
+@pytest.mark.parametrize('scope', ['full_project_source', 'application_source'])
+def test_public548_classifier_preserves_fresh_supported_legacy_suite_receipt_scopes(tmp_path, scope):
+    folder, item, receipt = _public548_classifier_saved_cache_fixture(tmp_path)
+    receipt['source_after'] = {'scope': scope}
+    calls = []
+    def current(*args, **kwargs):
+        calls.append(kwargs)
+        kwargs['source_status'].update(scope=scope, limitations=['excluded_runtime'] if scope == 'application_source' else [])
+        return [receipt]
+    with patch.object(project_memory, 'current_check_receipts', side_effect=current):
+        assert native_agent.persistence_completion_issue(folder, item) == ''
+    assert len(calls) == 1 and 'source_status' in calls[0]
+    # A saved legacy suite does not invent the newer browser-state flag duty.
+    observed = native_agent._final_delivery_scope(folder, item)
+    assert observed['required'] is False and observed['persistence_eligible']
+
+
+@pytest.mark.parametrize('source_scope,reason', [
+    ('application_source', 'changed_file'), ('limited_dependency_manifest', 'elapsed_budget'), ('unknown', 'unavailable')])
+def test_public548_classifier_retains_stale_unknown_source_diagnostics_and_no_pass(tmp_path, source_scope, reason):
+    folder, item, _ = _public548_classifier_saved_cache_fixture(tmp_path)
+    def current(*args, **kwargs):
+        kwargs['source_status'].update(scope=source_scope, limitations=[reason])
+        return []
+    with patch.object(project_memory, 'current_check_receipts', side_effect=current):
+        issue = native_agent.persistence_completion_issue(folder, item)
+    assert issue and 'Source scope: ' + source_scope in issue and reason in issue
+
+
+def test_public548_classifier_saved_suite_without_project_declines_without_cache_access(tmp_path):
+    (tmp_path / '.local-ai').mkdir()
+    (tmp_path / '.local-ai/webapp-check.json').write_text('{"checks": []}')
+    with patch.object(project_memory, 'current_check_receipts', side_effect=AssertionError('Unknown owner cannot access cache')):
+        assert 'registered project' in native_agent.persistence_completion_issue(tmp_path, None)
+
+
+def test_public548_script_run_dispatch_has_live_classifier_definitions_before_worker_call(tmp_path):
+    # Exercise the actual script dispatch, not an import. Only worker_main is
+    # replaced at the dispatch line, so no real project worker/inference starts.
+    native = Path(native_agent.__file__).resolve()
+    folder = tmp_path / 'entrypoint-project'
+    folder.mkdir()
+    (folder / '.local-ai').mkdir()
+    program = r'''
+import ast,hashlib,json,runpy,sys
+from pathlib import Path
+native=Path(sys.argv[1]).resolve();folder=Path(sys.argv[2]).resolve()
+assert hashlib.sha256(native.read_bytes()).hexdigest()==sys.argv[3]
+sys.path.insert(0,str(native.parent))
+import cloud_ai
+def denied(*args,**kwargs):raise AssertionError('No provider or API call belongs to this entrypoint probe')
+cloud_ai.post=denied;cloud_ai.urlopen=denied
+tree=ast.parse(native.read_text(encoding='utf8'))
+dispatch=next(n.lineno for n in tree.body if isinstance(n,ast.If) and ast.unparse(n.test)=="__name__ == '__main__'")
+calls=[]
+native_filename=str(native)
+def trace(frame,event,arg):
+    if event=='call':
+        return trace if frame.f_code.co_filename==native_filename else None
+    if frame.f_code.co_filename!=native_filename:
+        return None
+    if event=='line' and frame.f_lineno==dispatch:
+        globals_=frame.f_globals
+        def probe(task_id):
+            assert task_id=='owned-entrypoint-probe'
+            required=['_final_affirmative_html_output','_final_clause_owner','_FinalDeliveryScanner',
+                      '_final_delivery_scope','final_browser_check_required','_persistence_completion_issue_for_scope']
+            assert all(name in globals_ for name in required),'Classifier definitions unavailable at script dispatch'
+            project={'id':task_id,'folder':str(folder),'brief':'Create a single-file HTML app. Save records across page reloads.'}
+            scope=globals_['_final_delivery_scope'](folder,project)
+            assert scope['required'] is True and scope['obligations']
+            assert globals_['final_browser_check_required'](folder,project) is True
+            assert 'same-sequence browser case' in globals_['persistence_completion_issue'](folder,project)
+            calls.append(task_id)
+            print(json.dumps({'worker_probe_called':True,'classifier_required':scope['required'],'model_calls':0}))
+            return 0
+        globals_['worker_main']=probe
+        sys.settrace(None)
+        return None
+    return trace
+sys.argv=[str(native),'run','owned-entrypoint-probe']
+sys.settrace(trace)
+try:runpy.run_path(str(native),run_name='__main__')
+except SystemExit as error:
+    assert error.code==0 and calls==['owned-entrypoint-probe']
+finally:sys.settrace(None)
+'''
+    result = subprocess.run([sys.executable, '-I', '-B', '-c', program, str(native), str(folder),
+        hashlib.sha256(native.read_bytes()).hexdigest()], cwd=tmp_path, capture_output=True, text=True,
+        timeout=30, creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+    assert result.returncode == 0, result.stderr
+    observed = json.loads(result.stdout)
+    assert observed == {'worker_probe_called': True, 'classifier_required': True, 'model_calls': 0}
+
+
+@pytest.mark.parametrize('status', ['continue', 'running', 'paused', 'stopped', 'done'])
+def test_public548_stage2_instruction_defer_is_readonly_and_preserves_latest_control(tmp_path, status):
+    item = project(tmp_path / 'defer')
+    folder = Path(item['folder'])
+    latest = {'status': status, 'messages': [{'role': 'user', 'content': 'Latest owned instruction'}], 'turns': 7}
+    native_agent.save_state(item, latest)
+    path = native_agent.state_file(item)
+    before = path.read_bytes()
+    stale = {'status': 'continue', 'messages': [{'role': 'user', 'content': 'Obsolete instruction'}]}
+    with patch.object(native_agent, 'save_state', side_effect=AssertionError('Defer must not publish')):
+        result = native_agent._post_queue_instruction_defer(item, stale, 'instructions_changed')
+    assert path.read_bytes() == before
+    assert result['messages'] == latest['messages']
+    assert stale['messages'][0]['content'] == 'Obsolete instruction'
+    if status in {'paused', 'stopped', 'done'}:
+        assert result == latest
+    else:
+        assert result['status'] == 'continue'
+        assert result['post_queue_instruction_defer'] == 'instructions_changed'
+        assert 'post_queue_instruction_defer' not in json.loads(path.read_bytes())
+
+
+@pytest.mark.parametrize('action', ['note', 'pause'])
+def test_public548_stage2_defer_does_not_overwrite_injected_note_or_pause(tmp_path, action):
+    item = project(tmp_path / 'defer-race')
+    folder = Path(item['folder'])
+    native_agent.save_state(item, {'status': 'continue', 'messages': []})
+    checkpoint = native_agent.state_file(item)
+    followup = folder / '.local-ai/USER-REQUESTS.md'
+    latest = {'status': 'paused' if action == 'pause' else 'continue',
+              'messages': [{'role': 'user', 'content': 'New operator instruction'}], 'turns': 11}
+    operator_bytes = json.dumps(latest).encode()
+    original = native_agent.read_state
+    def operator_then_read(project):
+        checkpoint.write_bytes(operator_bytes)
+        followup.write_bytes(b'Keep the new instruction.\n')
+        return original(project)
+    with (patch.object(native_agent, 'read_state', side_effect=operator_then_read),
+          patch.object(native_agent, 'save_state', side_effect=AssertionError('No checkpoint write permitted'))):
+        result = native_agent._post_queue_instruction_defer(item, {'messages': ['stale']}, 'instructions_unknown')
+    assert checkpoint.read_bytes() == operator_bytes
+    assert followup.read_bytes() == b'Keep the new instruction.\n'
+    assert result['messages'] == latest['messages']
+    assert result['status'] == latest['status']
+
+
+def test_public548_stage2_known_128k_frame_survives_unknown_optional_receipt_preview(tmp_path):
+    item = project(tmp_path / 'long-frame')
+    item['brief'] = 'Create index.html as an offline app. Save records across page reloads.'
+    folder = Path(item['folder'])
+    (folder / 'index.html').write_text('<p id="result">Ready</p>')
+    followup = (b'Neutral instruction fixture.\n' * 6000)[:128 * 1024]
+    assert len(followup) == 128 * 1024
+    (folder / '.local-ai/USER-REQUESTS.md').write_bytes(followup)
+    frame = native_agent._post_queue_instruction_frame(item)
+    assert frame['basis']['followups'] == hashlib.sha256(followup).hexdigest()
+    assert frame['sources'] is None  # Optional full-text projection has its separate64KB limit.
+    queue = {'total': 1, 'done': 1, 'remaining': 0}
+    assert native_agent._post_queue_candidate(item, queue)
+    with patch.object(project_memory, 'connection', side_effect=AssertionError('No live SQLite expected')):
+        preview = project_memory.readonly_check_receipts(folder, item, checker_file=native_agent.__file__, include_plan=True)
+        assert preview['status'] == 'unknown' and preview['receipts'] == []
+        with patch.object(native_agent, 'save_state', side_effect=AssertionError('Unknown optional facts must not publish a defer')):
+            frontier = native_agent.post_queue_frontier(item, {}, queue, frame['request'], instruction_frame=frame)
+            assert frontier is not None and frontier['facts']['evidence'] == 'unknown'
+            assert native_agent.post_queue_frontier_current(item, frontier) == 'current'
+    # Actual ordinary-tool-offer coverage is held until the worker hooks exist;
+    # this control establishes the instruction/evidence prerequisite, not a model turn.
+
+
+def test_public548_stage2_added_candidate_never_treats_unknown_scope_as_known_html_work(tmp_path):
+    item = project(tmp_path / 'unknown-candidate')
+    item['brief'] = 'Create index.html and a CLI store. Save records across restarts.'
+    queue = {'total': 1, 'done': 1, 'remaining': 0}
+    with (patch.object(native_agent, 'browser_check_required', return_value=False),
+          patch.object(native_agent, '_final_delivery_scope', return_value={'required': None})):
+        assert not native_agent._post_queue_candidate(item, queue)
+    with patch.object(native_agent, 'browser_check_required', return_value=True):
+        assert native_agent._post_queue_candidate(item, queue)
+
+
+def test_public548_stage2_mode_record_includes_actual_optional_helper_without_resetting_state():
+    state = {'turns': 7, 'step_focus_turns': 2, 'repair_focus_turns': 3}
+    tools = [*copy.deepcopy(native_agent.TOOLS), copy.deepcopy(native_agent.EXPRESSION_HELPER_TOOL)]
+    before = copy.deepcopy(tools)
+    request = {'tools': tools, '_native_whole_goal_work': True}
+    mode = native_agent.selected_request_mode(request)
+    assert mode == 'whole_goal_work'
+    native_agent.remember_request_mode(state, mode, request, {'request': 'same'}, {'step': None})
+    event = state['request_mode_events'][-1]
+    assert native_agent.EXPRESSION_HELPER_TOOL['function']['name'] in event['tools']
+    assert event['tools'] == sorted({tool['function']['name'] for tool in tools})
+    assert tools == before
+    assert state['turns'] == 7 and state['step_focus_turns'] == 2 and state['repair_focus_turns'] == 3
+
+
+def _public548_stream_note_result(text, width):
+    matcher = native_agent._AuthoredNoteMatcher()
+    for offset in range(0, len(text), width):
+        matcher.feed(text[offset:offset + width])
+        state = matcher.retained_state()
+        assert state['retained_characters'] <= state['character_bound'] == 44
+        assert state['negative_states'] <= 3 and state['clause_names'] <= 2 and state['required_names'] <= 2
+    return set(matcher.finish())
+
+
+@pytest.mark.parametrize('text', [
+    'Write PLAN.md.',
+    'Write PROGRESS.md and maintain PLAN.md.',
+    "Write PLAN.md. Don't write PLAN.md.",
+    'Write PLAN.md; create PROGRESS.md. No longer maintain PLAN.md.',
+    "Write PLAN.md. Needn't really now update PLAN.md.",
+    "Write PLAN.md. Needn't really ever now update PLAN.md.",
+    'do not write PLAN.md',
+    'do not, write PLAN.md',
+    'don’t write PLAN.md',
+    'Write PLAN.md__suffix',
+    'Write PLAN.mdx',
+    'Write XPLAN.md',
+    'Write .PLAN.md',
+    'Keep __NOTE_PROGRESS__ current.',
+    'Keep x__NOTE_PLAN__y current.',
+    'Keep __note_PLAN__ current.',
+    'Wrıte PLAN.md and update PROGREſſ.md.',
+    'Wrİte PLAN.md.',
+    'Keep PLAN.md.',
+    '\u0301write PLAN.md',
+    'xwrite PLAN.md',
+    'Explain strangely how to write PLAN.md.',
+    'How can I write PROGRESS.md?',
+    'How, can I write PROGRESS.md?',
+    'Describe how to update PLAN.md.',
+    'Update PLAN.md and do not create PROGRESS.md.',
+    'Create PLAN.md\rdo not write PLAN.md',
+    'Create PLAN.md\ndo not write PLAN.md',
+])
+@pytest.mark.parametrize('width', [1, 2, 3, 7, 16, 8192])
+def test_public548_note_stream_matches_unchanged_reference_at_chunk_boundaries(text, width):
+    expected = native_agent.authored_notes_from_request(text)
+    assert _public548_stream_note_result(text, width) == expected
+
+
+def test_public548_note_stream_preserves_every_two_chunk_split_and_ordered_sources():
+    texts = [
+        "Write PLAN.md. Don't update PLAN.md; maintain PROGRESS.md.",
+        'Wrıte PROGREſſ.md and keep x__NOTE_PLAN__y. How can I write PLAN.md?',
+        "Do not really now write PLAN.md; keep PROGRESS.md.",
+    ]
+    for text in texts:
+        expected = native_agent.authored_notes_from_request(text)
+        for split in range(len(text) + 1):
+            matcher = native_agent._AuthoredNoteMatcher()
+            matcher.feed(text[:split])
+            matcher.feed(text[split:])
+            assert set(matcher.finish()) == expected, (text, split)
+    brief = 'Write PLAN.md and PROGRESS.md'
+    followup = 'Do not keep PLAN.md'
+    matcher = native_agent._AuthoredNoteMatcher()
+    matcher.feed(brief)
+    matcher.finish_source()
+    matcher.feed(followup)
+    assert set(matcher.finish()) == native_agent.authored_notes_from_request(brief + '\n' + followup) == {'PROGRESS.md'}
+
+
+@pytest.mark.parametrize('separator', [' ', '-'])
+def test_public548_note_stream_long_generic_words_and_clauses_retain_bounded_state(separator):
+    # A long word remains one generic regex word, never a truncated keyword.
+    text = "Write PLAN.md. Do not " + 'x' * (128 * 1024) + separator + 'now update PLAN.md; keep PROGRESS.md.'
+    expected = native_agent.authored_notes_from_request(text)
+    assert _public548_stream_note_result(text, 8192) == expected
+    long_clause = 'prefix' * 30000 + ' keep __NOTE_PLAN__ and write PROGRESS.md'
+    assert _public548_stream_note_result(long_clause, 7) == native_agent.authored_notes_from_request(long_clause)
+    embedded = 'write ' + 'x' * 40000 + '__NOTE_PLAN__' + 'y' * 40000
+    assert _public548_stream_note_result(embedded, 7) == native_agent.authored_notes_from_request(embedded) == {'PLAN.md'}
+
+
+def test_public548_note_stream_lifecycle_and_metrics_do_not_expose_source_text():
+    matcher = native_agent._AuthoredNoteMatcher()
+    matcher.feed('private-fixture-token ' * 1000 + 'write PLAN.md')
+    assert set(matcher.finish()) == {'PLAN.md'}
+    assert matcher.finish() == frozenset({'PLAN.md'})
+    assert 'private-fixture-token' not in json.dumps(matcher.retained_state())
+    with pytest.raises(ValueError, match='finished'):
+        matcher.feed('write PROGRESS.md')
+
+
+def _public548_note_scope_fixture(tmp_path, brief='Write PLAN.md and PROGRESS.md.'):
+    item = project(tmp_path / 'note-scope')
+    item['brief'] = brief
+    folder = Path(item['folder'])
+    (folder / 'AGENTS.md').write_text('Owned fixture rules only.\n', encoding='utf8')
+    return folder, item
+
+
+def test_public548_note_scope_streams_bom_newlines_unicode_and_long_followup_without_sqlite(tmp_path):
+    folder, item = _public548_note_scope_fixture(tmp_path)
+    text = ('Neutral fixture paragraph.\r\n' * 5000) + "Do not keep PLAN.md.\rWrıte PROGREſſ.md."
+    raw = b'\xef\xbb\xbf' + text.encode('utf8')
+    path = folder / '.local-ai/USER-REQUESTS.md'
+    path.write_bytes(raw)
+    before = {str(p.relative_to(folder)): p.read_bytes() for p in folder.rglob('*') if p.is_file()}
+    with patch.object(project_memory, 'connection', side_effect=AssertionError('Note scope must not open SQLite')):
+        result = native_agent._authored_note_scope(folder, item)
+    decoded = text.replace('\r\n', '\n').replace('\r', '\n')
+    assert len(raw) > 128 * 1024
+    assert result['status'] == 'known'
+    assert set(result['required']) == native_agent.authored_notes_from_request(item['brief'] + '\n' + decoded) == {'PROGRESS.md'}
+    assert result['basis']['followups'] == hashlib.sha256(raw).hexdigest()
+    assert result['basis'] == native_agent.planning_basis(item)
+    assert result['request_hash'] == task_context.request_identity(folder)
+    assert result['retained_state']['retained_characters'] <= 44
+    assert {str(p.relative_to(folder)): p.read_bytes() for p in folder.rglob('*') if p.is_file()} == before
+    assert not (folder / '.local-ai/memory.sqlite3').exists()
+
+
+def test_public548_note_scope_decoder_preserves_multibyte_and_filename_across_transport_chunks(tmp_path):
+    folder, item = _public548_note_scope_fixture(tmp_path, brief='Keep PROGRESS.md.')
+    raw = b'\xef\xbb\xbf' + 'Wrıte PLAN.md. Do not keep PROGRESS.md.\r\n'.encode('utf8')
+    (folder / '.local-ai/USER-REQUESTS.md').write_bytes(raw)
+    original = project_memory._receipt_stream
+    def tiny_sink(path, identity, deadline, destination=None):
+        if destination is None:
+            return original(path, identity, deadline)
+        class Split:
+            def write(self, chunk):
+                for value in chunk:
+                    destination.write(bytes([value]))
+        return original(path, identity, deadline, Split())
+    with patch.object(project_memory, '_receipt_stream', side_effect=tiny_sink):
+        result = native_agent._authored_note_scope(folder, item)
+    assert result['status'] == 'known' and result['required'] == ['PLAN.md']
+
+
+@pytest.mark.parametrize('change', ['followups', 'rules', 'brief'])
+def test_public548_note_scope_rechecks_early_source_after_later_stream_changes(tmp_path, change):
+    folder, item = _public548_note_scope_fixture(tmp_path)
+    followup = folder / '.local-ai/USER-REQUESTS.md'
+    followup.write_text('Keep PLAN.md.\n', encoding='utf8')
+    original = project_memory._receipt_stream
+    changed = []
+    def mutate(path, identity, deadline, destination=None):
+        digest = original(path, identity, deadline, destination)
+        if path == followup and not changed:
+            changed.append(True)
+            if change == 'brief':
+                item['brief'] = 'Do not write PLAN.md or PROGRESS.md.'
+            else:
+                target = followup if change == 'followups' else folder / 'AGENTS.md'
+                target.write_text('New instruction bytes.\n', encoding='utf8')
+        return digest
+    with patch.object(project_memory, '_receipt_stream', side_effect=mutate):
+        result = native_agent._authored_note_scope(folder, item)
+    assert changed and result['status'] == 'unknown' and result['required'] is None
+    assert result['reason'] == 'source_changed'
+
+
+def test_public548_note_scope_same_size_timestamp_edit_before_rehash_is_unknown(tmp_path):
+    folder, item = _public548_note_scope_fixture(tmp_path)
+    rules = folder / 'AGENTS.md'
+    followup = folder / '.local-ai/USER-REQUESTS.md'
+    followup.write_text('Keep PLAN.md.', encoding='utf8')
+    original = project_memory._receipt_stream
+    changed = []
+    def mutate_late(path, identity, deadline, destination=None):
+        digest = original(path, identity, deadline, destination)
+        if path == followup and destination is not None and not changed:
+            changed.append(True)
+            old = rules.stat()
+            content = rules.read_bytes()
+            rules.write_bytes(b'X' + content[1:])
+            os.utime(rules, ns=(old.st_atime_ns, old.st_mtime_ns))
+        return digest
+    with patch.object(project_memory, '_receipt_stream', side_effect=mutate_late):
+        result = native_agent._authored_note_scope(folder, item)
+    assert changed and result['status'] == 'unknown' and result['required'] is None
+
+
+def test_public548_note_scope_final_identity_check_detects_early_file_changed_during_later_rehash(tmp_path):
+    folder, item = _public548_note_scope_fixture(tmp_path)
+    rules = folder / 'AGENTS.md'
+    followup = folder / '.local-ai/USER-REQUESTS.md'
+    followup.write_text('Keep PLAN.md.', encoding='utf8')
+    original = project_memory._receipt_stream
+    changed = []
+    def mutate_late(path, identity, deadline, destination=None):
+        digest = original(path, identity, deadline, destination)
+        if path == followup and destination is None and not changed:
+            changed.append(True)
+            rules.write_bytes(rules.read_bytes() + b'ordinary concurrent edit\n')
+        return digest
+    with patch.object(project_memory, '_receipt_stream', side_effect=mutate_late):
+        result = native_agent._authored_note_scope(folder, item)
+    assert changed and result['status'] == 'unknown' and result['required'] is None
+
+
+@pytest.mark.parametrize('deadline', [True, False, float('nan'), float('inf'), 'soon', 10 ** 400])
+def test_public548_note_scope_invalid_or_exhausted_acquisition_is_not_empty_requirement_set(tmp_path, deadline):
+    folder, item = _public548_note_scope_fixture(tmp_path)
+    result = native_agent._authored_note_scope(folder, item, deadline=deadline)
+    assert result['status'] == 'unknown' and result['required'] is None
+    expired = native_agent._authored_note_scope(folder, item, deadline=-1)
+    assert expired['status'] == 'unknown' and expired['required'] is None
+
+
+def test_public548_note_scope_unavailable_source_or_changed_project_never_authorizes_empty_scope(tmp_path):
+    folder, item = _public548_note_scope_fixture(tmp_path)
+    path = folder / '.local-ai/USER-REQUESTS.md'
+    path.mkdir()
+    result = native_agent._authored_note_scope(folder, item)
+    assert result['status'] == 'unknown' and result['required'] is None
+    result = native_agent._authored_note_scope(folder, {**item, 'folder': str(tmp_path / 'other')})
+    assert result['status'] == 'unknown' and result['required'] is None
+
+
+def public549_worker_frontier_fixture(tmp_path, monkeypatch, *, long_followup=False, cli_only=False, followup_html=False):
+    """Owned registered component success, not browser/whole-goal proof."""
+    item = project(tmp_path / 'records')
+    folder = Path(item['folder'])
+    item['brief'] = ('Create index.html as an offline records app. Save added records across page reloads. '
+                     'Maintain PLAN.md and PROGRESS.md with actual checks and remaining work.')
+    if cli_only or followup_html:
+        item['brief'] = 'Build a local utility in component.py. Maintain PLAN.md and PROGRESS.md with actual checks.'
+    runtime = tmp_path / 'owned-registry'; runtime.mkdir()
+    monkeypatch.setattr(long_tasks, 'STATE', runtime)
+    with long_tasks.database() as db:
+        db.execute('INSERT INTO projects(id,title,folder,brief,status,created,updated) VALUES(?,?,?,?,?,?,?)',
+                   (item['id'], 'Neutral records', item['folder'], item['brief'], 'working', time.time(), time.time()))
+    (folder / 'index.html').write_text('<!doctype html><p id="status">Records</p>', encoding='utf-8')
+    (folder / 'component.py').write_text('def normalize(value):\n    return value.strip()\n', encoding='utf-8')
+    (folder / '.local-ai/PLAN.md').write_text(long_tasks.INITIAL_PLAN, encoding='utf-8')
+    (folder / '.local-ai/PROGRESS.md').write_text(long_tasks.INITIAL_PROGRESS, encoding='utf-8')
+    followup = 'Keep the record label readable. Do not remove my reload requirement.\n'
+    if cli_only:
+        followup = 'Keep the local utility readable.\n'
+    elif followup_html:
+        followup = 'Create index.html and save added records across page reloads.\n'
+    if long_followup:
+        followup += 'Neutral background detail.\n' * 6000
+        assert len(followup.encode('utf-8')) > 128 * 1024
+    (folder / '.local-ai/USER-REQUESTS.md').write_text(followup, encoding='utf-8')
+    task_context.plan_steps(folder, [{'title': 'Normalize a label', 'phase': 'Component',
+        'check_tool': 'check_python_function', 'check_arguments': {'path': 'component.py',
+            'function': 'normalize', 'cases': [{'args': ['  Cedar  '], 'expected': 'Cedar'}]}}])
+    with project_memory.verification_context(item):
+        queue = task_context.step_status(folder)
+        result = json.loads(native_agent.execute_tool(folder, 'task_steps', {'action': 'complete', 'step_id': queue['active']['id']}))
+        assert result['passed']
+    assert task_context.step_status(folder)['remaining'] == 0
+    steering = {'role': 'user', 'content': 'Retain my exact current steering: keep the record label readable.'}
+    state = native_agent.read_state(item)
+    state.update(status='continue', turns=7, verify_passed=False,
+                 messages=[{'role': 'system', 'content': native_agent.prompt(item)}, steering])
+    native_agent.save_state(item, state)
+    return item, folder, steering
+
+
+@pytest.mark.parametrize('long_followup', [False, True])
+@pytest.mark.parametrize('automatic_router', [False, True])
+def test_public549_actual_whole_goal_request_preserves_tools_context_and_host_metadata_boundary(
+        tmp_path, monkeypatch, long_followup, automatic_router):
+    item, folder, steering = public549_worker_frontier_fixture(tmp_path, monkeypatch, long_followup=long_followup)
+    original_tools = copy.deepcopy(native_agent.TOOLS)
+    before_queue = task_context.step_status(folder)
+    before_html = (folder / 'index.html').read_bytes()
+    before_budget = copy.deepcopy(native_agent.read_state(item).get('capability_recovery_budget'))
+    captured, modes, compactions, offered = [], [], [], []
+    class Captured(BaseException): pass
+    def capture(request, *args, **kwargs):
+        captured.append(copy.deepcopy(request)); raise Captured()
+    original_mode = native_agent.remember_request_mode
+    def mode(*args, **kwargs):
+        original_mode(*args, **kwargs)
+        modes.append(copy.deepcopy(args[0]['request_mode_events'][-1]))
+    original_compact = native_agent.compact_messages
+    def compact(messages, *args, **kwargs):
+        compactions.append(copy.deepcopy(kwargs['tools']))
+        return original_compact(messages, *args, **kwargs)
+    original_offer = native_agent.expression_helper_tools
+    def offer(project, tools):
+        result = original_offer(project, tools)
+        offered.append(copy.deepcopy(result)); return result
+    monkeypatch.setattr(native_agent, 'remember_request_mode', mode)
+    monkeypatch.setattr(native_agent, 'compact_messages', compact)
+    monkeypatch.setattr(native_agent, 'expression_helper_tools', offer)
+    monkeypatch.setattr(native_agent, 'configured_context', lambda *args: 32768)
+    if automatic_router:
+        # Actual automatic_call runs, including metadata stripping; its Router
+        # is an injected endpoint that cannot perform model discovery or RPC.
+        monkeypatch.setattr(cloud_ai, 'Router', lambda: SimpleNamespace(complete=capture))
+    with pytest.raises(Captured):
+        native_agent.run_slice(item, complete=None if automatic_router else capture)
+    assert len(captured) == len(modes) == 1 and modes[0]['mode'] == 'whole_goal_work'
+    request = captured[0]
+    assert request['tool_choice'] == 'auto' and request.get('response_format') is None
+    assert {t['function']['name'] for t in original_tools} <= {t['function']['name'] for t in request['tools']}
+    assert offered[-1] == compactions[-1] == request['tools']
+    assert native_agent.TOOLS == original_tools and steering in request['messages']
+    assert item['brief'] in request['messages'][0]['content']
+    assert cloud_ai.estimated_input_tokens(request) + request['max_tokens'] <= 32768
+    if automatic_router:
+        assert not any(key.startswith('_native_') for key in request)
+    else:
+        assert request['_native_whole_goal_work'] is True
+    if long_followup:
+        assert native_agent._post_queue_instruction_frame(item)['sources'] is None
+        assert '[Whole-goal work]' in '\n'.join(str(m.get('content', '')) for m in request['messages'])
+    assert task_context.step_status(folder) == before_queue
+    assert (folder / 'index.html').read_bytes() == before_html
+    after = native_agent.read_state(item)
+    assert after['turns'] == 7 and after['status'] != 'done'
+    assert after.get('capability_recovery_budget') == before_budget
+
+
+@pytest.mark.parametrize('unknown', [False, True])
+def test_public549_authored_notes_shared_completion_prerequisite_blocks_recovered_handoff(tmp_path, monkeypatch, unknown):
+    item, folder, steering = public549_worker_frontier_fixture(tmp_path, monkeypatch, cli_only=True)
+    (folder / '.local-ai/PLAN.md').write_text('# Plan\n- [x] Component checked\n', encoding='utf-8')
+    state = native_agent.read_state(item); state['verify_passed'] = True
+    if unknown:
+        monkeypatch.setattr(native_agent, '_authored_note_scope', lambda *args, **kwargs:
+            {'status': 'unknown', 'required': None, 'reason': 'source_unavailable'})
+    before = native_agent.state_file(item).read_bytes()
+    assert native_agent.authored_notes_issue(folder, item)
+    assert native_agent.completion_issue(folder, item, state)
+    assert native_agent.automatic_handoff_ready(folder, item, state) is False
+    assert native_agent.state_file(item).read_bytes() == before
+    assert (folder / '.local-ai/PROGRESS.md').read_text(encoding='utf-8') == long_tasks.INITIAL_PROGRESS
+
+
+def test_public549_authored_notes_gate_still_applies_after_an_ordinary_tool(tmp_path, monkeypatch):
+    item, folder, steering = public549_worker_frontier_fixture(tmp_path, monkeypatch, cli_only=True)
+    (folder / '.local-ai/PLAN.md').write_text('# Plan\n- [x] Component checked\n', encoding='utf-8')
+    state = native_agent.read_state(item); state['verify_passed'] = True
+    native_agent.save_state(item, state)
+    observed, calls = [], []
+    original = native_agent.authored_notes_issue
+    def notes(*args, **kwargs):
+        issue = original(*args, **kwargs); observed.append(issue); return issue
+    def provider(request):
+        calls.append(copy.deepcopy(request))
+        return {'choices': [{'message': {'role': 'assistant', 'content': '', 'tool_calls': [
+            {'id': 'owned-read', 'type': 'function', 'function': {'name': 'read_file',
+                'arguments': json.dumps({'path': 'component.py', 'max_lines': 8})}}]}}]}
+    monkeypatch.setattr(native_agent, 'authored_notes_issue', notes)
+    monkeypatch.setattr(native_agent, 'MAX_TURNS_PER_SLICE', 1)
+    result = native_agent.run_slice(item, complete=provider)
+    assert len(calls) == 1 and result['status'] != 'done'
+    assert len(observed) >= 2 and all(observed)
+    assert (folder / '.local-ai/PROGRESS.md').read_text(encoding='utf-8') == long_tasks.INITIAL_PROGRESS
+
+
+@pytest.mark.parametrize('control', ['continue', 'paused', 'stopped', 'done'])
+def test_public549_instruction_change_after_response_preserves_latest_checkpoint_without_writer(tmp_path, monkeypatch, control):
+    item, folder, steering = public549_worker_frontier_fixture(tmp_path, monkeypatch)
+    original_save = native_agent.save_state
+    changed = {'value': False}; latest_bytes = []
+    def guarded_save(*args, **kwargs):
+        assert not changed['value'], 'No stale checkpoint writer may run on the instruction-defer path'
+        return original_save(*args, **kwargs)
+    def provider(request):
+        (folder / '.local-ai/USER-REQUESTS.md').write_text('New real user steering after planning.\n', encoding='utf-8')
+        latest = native_agent.read_state(item)
+        latest.update(status=control, messages=[{'role': 'user', 'content': 'Newest owned instruction'}])
+        original_save(item, latest)
+        latest_bytes.append(native_agent.state_file(item).read_bytes()); changed['value'] = True
+        return {'choices': [{'message': {'role': 'assistant', 'content': '', 'tool_calls': [
+            {'id': 'obsolete', 'type': 'function', 'function': {'name': 'write_file',
+                'arguments': json.dumps({'path': 'must-not-exist.txt', 'content': 'obsolete response'})}}]}}]}
+    monkeypatch.setattr(native_agent, 'save_state', guarded_save)
+    result = native_agent.run_slice(item, complete=provider)
+    assert result['status'] == control
+    assert result['messages'] == [{'role': 'user', 'content': 'Newest owned instruction'}]
+    assert native_agent.state_file(item).read_bytes() == latest_bytes[0]
+    assert not (folder / 'must-not-exist.txt').exists()
+
+
+@pytest.mark.parametrize('cut', ['later_note_read', 'second_instruction_scope', 'later_note_rehash', 'instructions_during_note_rehash'])
+def test_public549_authored_note_confirmation_rejects_early_note_changes(tmp_path, monkeypatch, cut):
+    item, folder, steering = public549_worker_frontier_fixture(tmp_path, monkeypatch, cli_only=True)
+    plan = folder / '.local-ai/PLAN.md'; progress = folder / '.local-ai/PROGRESS.md'
+    plan.write_text('# Plan\n- [x] Neutral component checked\n', encoding='utf-8')
+    progress.write_text('# Progress\nCPU component check passed; integration work remains.\n', encoding='utf-8')
+    original_read = native_agent._post_queue_read
+    original_scope = native_agent._authored_note_scope
+    original_stream = project_memory._receipt_stream
+    changed = []; scopes = []
+    def change():
+        if not changed:
+            plan.write_text(long_tasks.INITIAL_PLAN, encoding='utf-8'); changed.append(True)
+    def read(root, path, *args, **kwargs):
+        result = original_read(root, path, *args, **kwargs)
+        if cut == 'later_note_read' and path.name == 'PROGRESS.md': change()
+        return result
+    def scope(*args, **kwargs):
+        result = original_scope(*args, **kwargs); scopes.append(result)
+        if cut == 'second_instruction_scope' and len(scopes) == 2: change()
+        return result
+    def stream(path, identity, deadline, sink=None):
+        result = original_stream(path, identity, deadline, sink)
+        if path.name == 'PROGRESS.md' and sink is None:
+            if cut == 'later_note_rehash': change()
+            elif cut == 'instructions_during_note_rehash' and not changed:
+                (folder / '.local-ai/USER-REQUESTS.md').write_text('New owned instructions.\n', encoding='utf-8')
+                changed.append(True)
+        return result
+    monkeypatch.setattr(native_agent, '_post_queue_read', read)
+    monkeypatch.setattr(native_agent, '_authored_note_scope', scope)
+    monkeypatch.setattr(project_memory, '_receipt_stream', stream)
+    issue = native_agent.authored_notes_issue(folder, item)
+    assert changed and issue
+    if cut != 'instructions_during_note_rehash':
+        assert plan.read_text(encoding='utf-8') == long_tasks.INITIAL_PLAN
+
+
+def test_public549_authored_notes_heading_only_is_not_an_authored_body(tmp_path, monkeypatch):
+    item, folder, steering = public549_worker_frontier_fixture(tmp_path, monkeypatch, cli_only=True)
+    (folder / '.local-ai/PLAN.md').write_text('# Plan\n', encoding='utf-8')
+    (folder / '.local-ai/PROGRESS.md').write_text('# Progress\nActual component checks remain.\n', encoding='utf-8')
+    assert native_agent.authored_notes_issue(folder, item)
+
+
+@pytest.mark.parametrize('wrapper', ['', '# Progress\n\n', '  # Progress\n\n\t'])
+def test_public549_host_placeholder_label_written_back_is_not_authored(tmp_path, monkeypatch, wrapper):
+    item, folder, steering = public549_worker_frontier_fixture(tmp_path, monkeypatch, cli_only=True)
+    label = task_context.project_note_excerpt('PROGRESS.md', long_tasks.INITIAL_PROGRESS, 1)
+    assert label == ('[Untouched startup placeholder; this note has not been authored. '
+                     'It is not a factual progress report. Requested note-writing remains unfinished.]')
+    (folder / '.local-ai/PLAN.md').write_text('# Plan\n- [x] Component checked\n', encoding='utf-8')
+    (folder / '.local-ai/PROGRESS.md').write_text(wrapper + label + '\n  ', encoding='utf-8')
+    assert native_agent.authored_notes_issue(folder, item)
+
+
+def test_public549_substantive_authored_note_may_quote_the_host_placeholder(tmp_path, monkeypatch):
+    item, folder, steering = public549_worker_frontier_fixture(tmp_path, monkeypatch, cli_only=True)
+    label = task_context.project_note_excerpt('PROGRESS.md', long_tasks.INITIAL_PROGRESS, 1)
+    (folder / '.local-ai/PLAN.md').write_text('# Plan\n- [x] CPU component checked\n', encoding='utf-8')
+    (folder / '.local-ai/PROGRESS.md').write_text('# Progress\n' + label +
+        '\nThe prior note above was a placeholder. The normalize component passed its actual CPU check; integration remains unfinished.\n', encoding='utf-8')
+    assert native_agent.authored_notes_issue(folder, item) == ''
+
+
+def test_public549_whole_goal_router_reuses_validated_identity_without_late_reader(tmp_path, monkeypatch):
+    item, folder, steering = public549_worker_frontier_fixture(tmp_path, monkeypatch)
+    original_mode = native_agent.remember_request_mode
+    original_avoid = native_agent.repair_avoid_models
+    expected = hashlib.sha256((folder / '.local-ai/USER-REQUESTS.md').read_bytes()).hexdigest()
+    calls, identities = [], []
+    class Captured(BaseException): pass
+    def deny(*args, **kwargs):
+        raise AssertionError('No late uncapped request_identity acquisition is allowed')
+    def mode(*args, **kwargs):
+        original_mode(*args, **kwargs)
+        # Arm only after the actual worker's final frame validation. Deliberate
+        # owned growth must not be acquired through a new uncapped late reader.
+        with (folder / '.local-ai/USER-REQUESTS.md').open('ab') as stream:
+            stream.write(b'Later owned data.\n' * 10000)
+        monkeypatch.setattr(task_context, 'request_identity', deny)
+    def avoid(state, request):
+        identities.append(request)
+        return original_avoid(state, request)
+    def provider(payload, *args, **kwargs):
+        calls.append(copy.deepcopy(payload)); raise Captured()
+    monkeypatch.setattr(native_agent, 'remember_request_mode', mode)
+    monkeypatch.setattr(native_agent, 'repair_avoid_models', avoid)
+    monkeypatch.setattr(cloud_ai, 'Router', lambda: SimpleNamespace(complete=provider))
+    with pytest.raises(Captured): native_agent.run_slice(item, complete=None)
+    assert identities == [expected] and len(calls) == 1
+    assert not any(key.startswith('_native_') for key in calls[0])
+    assert steering in calls[0]['messages']
+    assert native_agent.read_state(item)['status'] != 'done'
+
+
+def test_public549_followup_only_candidate_disappearing_defers_before_notice_or_provider(tmp_path, monkeypatch):
+    item, folder, steering = public549_worker_frontier_fixture(tmp_path, monkeypatch, followup_html=True)
+    assert not native_agent.browser_check_required(item)
+    assert native_agent._final_delivery_scope(folder, item)['required'] is True
+    original_fresh = native_agent.fresh_messages
+    original_save = native_agent.save_state
+    mutated = []; latest = []
+    def fresh(*args, **kwargs):
+        result = original_fresh(*args, **kwargs)
+        (folder / '.local-ai/USER-REQUESTS.md').write_text('Explain the existing local CLI only.\n', encoding='utf-8')
+        state = native_agent.read_state(item)
+        state.update(status='continue', messages=[{'role': 'user', 'content': 'Newest owned clarification'}])
+        original_save(item, state); latest.append(native_agent.state_file(item).read_bytes()); mutated.append(True)
+        return result
+    def save(*args, **kwargs):
+        assert not mutated, 'No stale checkpoint publication on a changed candidate'
+        return original_save(*args, **kwargs)
+    def provider(*args, **kwargs): raise AssertionError('No provider may see a vanished frontier')
+    monkeypatch.setattr(native_agent, 'fresh_messages', fresh)
+    monkeypatch.setattr(native_agent, 'save_state', save)
+    result = native_agent.run_slice(item, complete=provider)
+    assert mutated and result['status'] == 'continue'
+    assert result['messages'] == [{'role': 'user', 'content': 'Newest owned clarification'}]
+    assert native_agent.state_file(item).read_bytes() == latest[0]
+
+
+def test_public549_ordinary_cli_unreadable_rules_do_not_break_observational_mode_record(tmp_path, monkeypatch):
+    item = project(tmp_path / 'ordinary-cli'); folder = Path(item['folder'])
+    item['brief'] = 'Explain the existing local command-line utility.'
+    rules = folder / 'AGENTS.md'; rules.write_text('Owned unreadable rules fixture.', encoding='utf-8')
+    runtime = tmp_path / 'ordinary-registry'; runtime.mkdir(); monkeypatch.setattr(long_tasks, 'STATE', runtime)
+    state = native_agent.read_state(item)
+    state.update(status='continue', turns=7, messages=[{'role': 'system', 'content': native_agent.prompt(item)},
+                                                    {'role': 'user', 'content': 'Keep my CLI question.'}])
+    native_agent.save_state(item, state)
+    original_open = Path.open
+    def open_file(path, *args, **kwargs):
+        if path == rules: raise PermissionError('Owned unreadable file')
+        return original_open(path, *args, **kwargs)
+    observed, modes = [], []
+    original_mode = native_agent.remember_request_mode
+    class Captured(BaseException): pass
+    def mode(*args, **kwargs):
+        original_mode(*args, **kwargs); modes.append(copy.deepcopy(args[0]['request_mode_events'][-1]))
+    def provider(request): observed.append(request); raise Captured()
+    original_recovery = native_agent.capability_recovery_request
+    armed = []
+    def recovery(*args, **kwargs):
+        result = original_recovery(*args, **kwargs)
+        # The existing recovery reader is not the new observational mode read.
+        # Arm the actual file fault only after that unchanged earlier path.
+        monkeypatch.setattr(Path, 'open', open_file)
+        armed.append(True)
+        return result
+    monkeypatch.setattr(native_agent, 'capability_recovery_request', recovery)
+    monkeypatch.setattr(native_agent, 'remember_request_mode', mode)
+    with pytest.raises(Captured): native_agent.run_slice(item, complete=provider)
+    assert len(observed) == len(modes) == 1
+    assert modes[0]['mode'] == 'ordinary_implementation' and modes[0]['basis_status'] == 'unavailable'
+    assert not observed[0].get('_native_whole_goal_work')
+    assert armed == [True]
+
+
+# Host-only saved-suite replay controls. These tests use only owned temporary
+# projects and injected model endpoints; no real provider/TTS/device is involved.
+def saved_browser_feedback_fixture(tmp_path, monkeypatch):
+    import webapp_check
+    item, folder, steering = public549_worker_frontier_fixture(tmp_path, monkeypatch)
+    (folder / 'index.html').write_text("""<!doctype html><input id=name><button id=add>Add</button>
+<table><tbody id=items></tbody></table><script>
+add.onclick=()=>{let r=items.insertRow();r.insertCell().textContent=name.value};
+</script>""", encoding='utf-8')
+    spec = {'path': 'index.html', 'cases': [
+        {'row_counts': {'items': 0}},
+        {'set': {'name': 'Cedar'}, 'click': ['add'], 'row_counts': {'items': 1}},
+        {'reload': True, 'row_counts': {'items': 1}}]}
+    saved = webapp_check.saved_suite(folder, spec)
+    (folder / '.local-ai/webapp-check.json').write_text(json.dumps(saved), encoding='utf-8')
+    return item, folder, steering
+
+
+def test_saved_browser_replay_actual_failed_reload_reaches_ordinary_request_without_sql_credit(tmp_path, monkeypatch):
+    item, folder, steering = saved_browser_feedback_fixture(tmp_path, monkeypatch)
+    before_queue = task_context.step_status(folder)
+    html = (folder / 'index.html').read_bytes()
+    suite = (folder / '.local-ai/webapp-check.json').read_bytes()
+    before_state = native_agent.read_state(item)
+    captured = []
+    # Wrap the real transport; never replace its result with a fixture verdict.
+    import win32job
+    real_verify = long_tasks.verify_project
+    real_popen = long_tasks.subprocess.Popen
+    real_query = win32job.QueryInformationJobObject
+    executing = [False]
+    children, terminal_results, member_queries = [], [], []
+    def launch(*args, **kwargs):
+        process = real_popen(*args, **kwargs)
+        if executing[0]:
+            children.append(process)
+        return process
+    def query(job, kind):
+        result = real_query(job, kind)
+        if executing[0] and kind == win32job.JobObjectBasicProcessIdList:
+            member_queries.append(result)
+        return result
+    def verify(*args, **kwargs):
+        executing[0] = True
+        try:
+            result = real_verify(*args, **kwargs)
+            terminal_results.append(result)
+            return result
+        finally:
+            executing[0] = False
+    monkeypatch.setattr(long_tasks, 'verify_project', verify)
+    monkeypatch.setattr(long_tasks.subprocess, 'Popen', launch)
+    monkeypatch.setattr(win32job, 'QueryInformationJobObject', query)
+    class Captured(BaseException): pass
+    def capture(request):
+        captured.append(copy.deepcopy(request)); raise Captured()
+    monkeypatch.setattr(native_agent, 'configured_context', lambda *a: 32768)
+    with pytest.raises(Captured):
+        native_agent.run_slice(item, complete=capture)
+    assert len(captured) == 1
+    request = captured[0]
+    feedback = [m['content'] for m in request['messages'] if 'Automatic saved browser integration result;' in m.get('content', '')]
+    assert len(feedback) == 1 and 'Checker did not pass.' in feedback[0]
+    assert 'row' in feedback[0].lower() and 'SQL' in feedback[0]
+    # The older substring assertion above is retained, but is not proof:
+    # 'browser' also contains 'row'. Require the actual fixed child's report.
+    assert len(children) == 1 and children[0].poll() == 1
+    assert children[0].args[1:4] == ['-I', '-B', '-c']
+    assert children[0].args[4] == long_tasks._SAVED_BROWSER_BOOTSTRAP
+    assert member_queries and member_queries[-1] == ()
+    assert len(terminal_results) == 1 and terminal_results[0][0] is False
+    actual_output = terminal_results[0][1]
+    reports = [json.loads(line) for line in actual_output.splitlines() if line.lstrip().startswith('{')]
+    assert len(reports) == 1, actual_output
+    report = reports[0]
+    assert report['passed'] is False and report['case_count'] == 3
+    assert report['failed_case_count'] == 1
+    assert report['suite_sha256'] == hashlib.sha256(suite).hexdigest()
+    assert report['checks'][0]['page_sha256'] == hashlib.sha256(html).hexdigest()
+    failures = report['checks'][0]['cases']
+    assert len(failures) == 1 and failures[0]['case'] == 3
+    assert failures[0]['inputs']['reload'] is True
+    assert failures[0]['row_counts']['items']['actual'] == 0
+    assert failures[0]['row_counts']['items']['expected'] == 1
+    assert any(reason.startswith('Row count #items was 0; expected 1') for reason in failures[0]['failures'])
+    assert report['checks'][0]['javascript_errors'] == []
+    assert steering in request['messages'] and request['tool_choice'] == 'auto'
+    assert {x['function']['name'] for x in native_agent.TOOLS} <= {x['function']['name'] for x in request['tools']}
+    assert task_context.step_status(folder) == before_queue
+    assert (folder / 'index.html').read_bytes() == html
+    assert (folder / '.local-ai/webapp-check.json').read_bytes() == suite
+    assert native_agent.read_state(item).get('capability_recovery_budget') == before_state.get('capability_recovery_budget')
+    assert not native_agent.read_state(item).get('verify_passed')
+
+
+def test_saved_browser_replay_cache_claim_restart_and_changed_basis(tmp_path, monkeypatch):
+    item, folder, _ = saved_browser_feedback_fixture(tmp_path, monkeypatch)
+    queue = task_context.step_status(folder); state = native_agent.read_state(item)
+    calls = []
+    def verify(*args, **kwargs):
+        proof = kwargs['_host_admit']('resume')
+        assert set(proof) == {'key', 'source'} and proof['key'] == kwargs['_saved_browser']['snapshot_key']
+        assert kwargs['_host_admit']('final') == proof
+        calls.append(kwargs['_saved_browser'].copy())
+        return False, 'Owned checker says reload row count differs.'
+    monkeypatch.setattr(long_tasks, 'verify_project', verify)
+    request = task_context.request_identity(folder)
+    assert native_agent.automatic_saved_browser_feedback(item, state, queue, request)
+    assert native_agent.automatic_saved_browser_feedback(item, state, queue, request) is None
+    fresh = native_agent.read_state(item)
+    assert 'stored task data' in native_agent.automatic_saved_browser_feedback(item, fresh, queue, request)['content']
+    assert len(calls) == 1
+    (folder / 'index.html').write_text('<p>Changed source</p>', encoding='utf-8')
+    assert native_agent.automatic_saved_browser_feedback(item, fresh, queue, request)
+    assert len(calls) == 2
+    (folder / '.local-ai/verify.ps1').write_text('# Changed saved verifier, never executed here', encoding='utf-8')
+    assert native_agent.automatic_saved_browser_feedback(item, fresh, queue, request)
+    assert len(calls) == 3
+    assert all(not x.get('verify_passed') for x in (state, fresh))
+
+
+@pytest.mark.parametrize('policy', ['Read-only inspection.', 'Inspect-only; do not execute commands.',
+    'Do not run tests.', 'Never launch browser checks.', 'No execution.'])
+def test_saved_browser_replay_deny_only_policy_never_launches(tmp_path, monkeypatch, policy):
+    item, folder, _ = saved_browser_feedback_fixture(tmp_path, monkeypatch)
+    (folder / 'AGENTS.md').write_text(policy, encoding='utf-8')
+    monkeypatch.setattr(long_tasks, 'verify_project', lambda *a, **k: pytest.fail('Policy denied automatic execution'))
+    queue = task_context.step_status(folder)
+    assert native_agent.automatic_saved_browser_feedback(item, native_agent.read_state(item), queue,
+        task_context.request_identity(folder)) is None
+    assert not (folder / '.local-ai/saved-browser-feedback.json').exists()
+
+
+@pytest.mark.parametrize('action', ['pause', 'stop', 'delete', 'note', 'resume'])
+def test_saved_browser_replay_pending_control_never_launches_or_overwrites_state(tmp_path, monkeypatch, action):
+    item, folder, _ = saved_browser_feedback_fixture(tmp_path, monkeypatch)
+    queue = task_context.step_status(folder); state = native_agent.read_state(item)
+    # Real registered request row; leave application processing to its normal owner.
+    with long_tasks.database() as conn:
+        conn.execute("INSERT INTO requests(project,action,note,status) VALUES(?,?,?,?)",
+            (item['id'], action, 'Owned control', 'pending'))
+    before = native_agent.state_file(item).read_bytes()
+    monkeypatch.setattr(long_tasks, 'verify_project', lambda *a, **k: pytest.fail('Pending control must deny launch'))
+    assert native_agent.automatic_saved_browser_feedback(item, state, queue,
+        task_context.request_identity(folder)) is None
+    assert native_agent.state_file(item).read_bytes() == before
+
+
+def test_saved_browser_replay_optional_unknown_and_cli_leave_normal_tools_unchanged(tmp_path, monkeypatch):
+    item, folder, _ = public549_worker_frontier_fixture(tmp_path, monkeypatch, cli_only=True)
+    queue = task_context.step_status(folder); state = native_agent.read_state(item)
+    original_tools = copy.deepcopy(native_agent.TOOLS)
+    monkeypatch.setattr(long_tasks, 'verify_project', lambda *a, **k: pytest.fail('No saved suite must not launch'))
+    assert native_agent.automatic_saved_browser_feedback(item, state, queue, task_context.request_identity(folder)) is None
+    assert native_agent.TOOLS == original_tools
+    assert not (folder / '.local-ai/saved-browser-feedback.json').exists()
+
+
+@pytest.mark.parametrize('action', ['note', 'resume', 'pause', 'stop', 'delete'])
+def test_saved_browser_replay_real_late_control_preserves_new_checkpoint(tmp_path, monkeypatch, action):
+    item, folder, _ = saved_browser_feedback_fixture(tmp_path, monkeypatch)
+    queue = task_context.step_status(folder); state = native_agent.read_state(item)
+    checkpoint_after_control = []
+    def verify(*args, **kwargs):
+        assert not native_agent.process_alive(native_agent.read_state(item)), 'Owned fixture must have no worker PID'
+        native_agent.apply_request(item, action, 'Keep the exact later operator instruction.' if action in {'note', 'resume'} else '')
+        checkpoint_after_control.append(native_agent.state_file(item).read_bytes())
+        return True, 'Checker finished before operator action.'
+    monkeypatch.setattr(long_tasks, 'verify_project', verify)
+    assert native_agent.automatic_saved_browser_feedback(item, state, queue, task_context.request_identity(folder)) is False
+    assert native_agent.state_file(item).read_bytes() == checkpoint_after_control[0]
+    assert not native_agent.read_state(item).get('verify_passed')
+
+
+@pytest.mark.parametrize('polls', [0, 20])
+def test_saved_browser_actual_host_callback_full_captures_are_phase_bound(tmp_path, monkeypatch, polls):
+    item, folder, _ = saved_browser_feedback_fixture(tmp_path, monkeypatch)
+    queue = task_context.step_status(folder); state = native_agent.read_state(item)
+    original = native_agent._saved_browser_replay_basis
+    captures = []
+    def basis(*args, **kwargs):
+        captures.append('full')
+        return original(*args, **kwargs)
+    monkeypatch.setattr(native_agent, '_saved_browser_replay_basis', basis)
+    original_source = project_memory.verification_source_state
+    source_captures = []
+    def source(*args, **kwargs):
+        source_captures.append('content')
+        return original_source(*args, **kwargs)
+    monkeypatch.setattr(project_memory, 'verification_source_state', source)
+    def verify(*args, **kwargs):
+        admit = kwargs['_host_admit']
+        assert admit('launch') is True
+        before = admit('resume')
+        assert before['key'] == kwargs['_saved_browser']['snapshot_key']
+        for _ in range(polls):
+            assert admit('monitor') is True
+        assert admit('result') is True
+        assert admit('final') == before
+        return False, 'Owned injected terminal result, no execution.'
+    monkeypatch.setattr(long_tasks, 'verify_project', verify)
+    assert native_agent.automatic_saved_browser_feedback(item, state, queue, task_context.request_identity(folder))
+    assert len(captures) == 3  # cache-key + Resume + final, regardless of poll count
+    assert len(source_captures) == 6  # existing stable-byte preview scans twice per capture
+
+
+def test_saved_browser_monitor_pause_denies_without_a_full_capture(tmp_path, monkeypatch):
+    item, folder, _ = saved_browser_feedback_fixture(tmp_path, monkeypatch)
+    queue = task_context.step_status(folder)
+    basis = native_agent._saved_browser_replay_basis(item, queue)
+    assert basis is not None
+    native_agent.apply_request(item, 'pause', '')
+    monkeypatch.setattr(project_memory, 'verification_source_state', lambda *a, **k: pytest.fail('Monitor must not scan source'))
+    monkeypatch.setattr(project_memory, 'readonly_check_receipts', lambda *a, **k: pytest.fail('Monitor must not copy SQLite'))
+    assert native_agent._saved_browser_replay_monitor(item, basis) is False
+
+
+
+def test_saved_browser_actual_passing_replay_records_bound_receipt_without_supervisor_import_bootstrap(tmp_path, monkeypatch):
+    import ast
+    import webapp_check
+    item, folder, _ = saved_browser_feedback_fixture(tmp_path, monkeypatch)
+    (folder / 'index.html').write_text("""<!doctype html><input id=name><button id=add>Add</button>
+<table><tbody id=items></tbody></table><script>
+let rows=JSON.parse(localStorage.getItem('records')||'[]');
+function render(){let body=document.getElementById('items');body.replaceChildren();
+for(let value of rows){body.insertRow().insertCell().textContent=value}}
+document.getElementById('add').onclick=()=>{rows.push(document.getElementById('name').value);
+localStorage.setItem('records',JSON.stringify(rows));render()};render();
+</script>""", encoding='utf-8')
+    queue = task_context.step_status(folder); state = native_agent.read_state(item)
+    import win32job
+    real_verify = long_tasks.verify_project
+    real_query = win32job.QueryInformationJobObject
+    real_popen = long_tasks.subprocess.Popen
+    terminal, memberships, children = [], [], []
+    def verify(*args, **kwargs):
+        result = real_verify(*args, **kwargs); terminal.append(result); return result
+    def query(job, kind):
+        result = real_query(job, kind)
+        if kind == win32job.JobObjectBasicProcessIdList:
+            memberships.append(result)
+        return result
+    def launch(*args, **kwargs):
+        process = real_popen(*args, **kwargs); children.append(process); return process
+    monkeypatch.setattr(long_tasks, 'verify_project', verify)
+    monkeypatch.setattr(win32job, 'QueryInformationJobObject', query)
+    monkeypatch.setattr(long_tasks.subprocess, 'Popen', launch)
+    expected_suite_sha = hashlib.sha256((folder/'.local-ai/webapp-check.json').read_bytes()).hexdigest()
+    expected_page_sha = hashlib.sha256((folder/'index.html').read_bytes()).hexdigest()
+    result = native_agent.automatic_saved_browser_feedback(item, state, queue, task_context.request_identity(folder))
+    assert result is not None and 'Checker returned success.' in result['content']
+    assert len(children) == 1 and children[0].poll() == 0
+    assert memberships and memberships[-1] == ()
+    assert len(terminal) == 1 and terminal[0][0] is True
+    reports = [json.loads(line) for line in terminal[0][1].splitlines() if line.startswith('{')]
+    assert len(reports) == 1, terminal[0][1]
+    assert reports[0]['passed'] is True and reports[0]['case_count'] == 3 and reports[0]['failed_case_count'] == 0
+    assert reports[0]['suite_sha256'] == expected_suite_sha
+    assert reports[0]['checks'][0]['page_sha256'] == expected_page_sha
+    assert reports[0]['persistence_witnesses']
+    assert not state.get('verify_passed') and state.get('status') != 'done'
+    preview = project_memory.readonly_check_receipts(folder, item, checker_file=webapp_check.__file__)
+    assert preview['status'] == 'available'
+    assert any(row['checker'] == 'check_webapp_saved' and row['passed'] is True
+        and row['planning_basis'] == project_memory.verification_basis(folder, item)
+        for row in preview['receipts'])
+    assert task_context.step_status(folder) == queue
+    imports = [alias.name for node in ast.walk(ast.parse(long_tasks._SAVED_BROWSER_BOOTSTRAP))
+        if isinstance(node, (ast.Import, ast.ImportFrom)) for alias in node.names]
+    assert 'long_tasks' not in imports
+
+
+
+def test_saved_browser_read_tuple_contract_and_monitor_stat_identities(tmp_path, monkeypatch):
+    item, folder, _ = saved_browser_feedback_fixture(tmp_path, monkeypatch)
+    verifier = folder/'.local-ai/verify.ps1'
+    verifier.write_text('throw "Never execute the saved script in typed replay"', encoding='utf-8')
+    path = folder/'.local-ai/webapp-check.json'
+    value = native_agent._post_queue_read(folder, path, 64000, time.monotonic()+2)
+    assert value[0] == '.local-ai/webapp-check.json' and isinstance(value[0], str)
+    assert value[1] == hashlib.sha256(path.read_bytes()).hexdigest()
+    assert value[2] == path.read_bytes()
+    basis = native_agent._saved_browser_replay_basis(item, task_context.step_status(folder))
+    assert basis is not None
+    for name, target in [('suite', path), ('verifier', verifier)]:
+        assert type(basis['monitor'][name]) is tuple and len(basis['monitor'][name]) == 5
+        assert basis['monitor'][name] == project_memory._receipt_file_identity(target)
+    assert native_agent._saved_browser_replay_monitor(item, basis) is True
+
+
+
+def test_saved_browser_unknown_cleanup_defers_current_real_slice_without_rpc(tmp_path, monkeypatch):
+    item, folder, _ = saved_browser_feedback_fixture(tmp_path, monkeypatch)
+    at_checker = []
+    queue = task_context.step_status(folder)
+    def unknown(*args, **kwargs):
+        at_checker.append((native_agent.state_file(item).read_bytes(), native_agent.read_state(item)))
+        raise InterruptedError('Owned browser membership unknown')
+    monkeypatch.setattr(long_tasks, 'verify_project', unknown)
+    result = native_agent.run_slice(item, complete=lambda *a, **k: pytest.fail('Unknown cleanup must defer before RPC'))
+    assert len(at_checker) == 1 and result == at_checker[0][1]
+    assert result['status'] in {'running', 'continue'}
+    assert task_context.step_status(folder) == queue
+    assert not result.get('verify_passed')
+    # The ordinary slice initialization may publish running before the hook.
+    # Unknown cleanup must not publish another stale helper checkpoint.
+    assert native_agent.state_file(item).read_bytes() == at_checker[0][0]
+
+
+def test_unreadable_rules_before_recovery_defers_without_provider_or_checkpoint_loss(tmp_path, monkeypatch):
+    folder = tmp_path/'owned-task'
+    (folder/'.local-ai').mkdir(parents=True)
+    item = {'id':'instruction-read-neutral','folder':str(folder),
+            'brief':'Explain the existing local command-line utility.'}
+    rules = folder/'AGENTS.md'
+    rules.write_text('Keep the existing implementation unchanged.',encoding='utf-8')
+    registry = tmp_path/'owned-supervisor';registry.mkdir()
+    monkeypatch.setattr(long_tasks,'STATE',registry)
+    state = native_agent.read_state(item)
+    state.update(status='continue',turns=7,messages=[
+        {'role':'system','content':native_agent.prompt(item)},
+        {'role':'user','content':'Preserve this existing question and checkpoint.'}])
+    native_agent.save_state(item,state)
+    original_messages = state['messages'].copy()
+    original_open = Path.open
+    def open_file(path,*args,**kwargs):
+        if path == rules:raise PermissionError('Owned neutral unreadable-rules fixture')
+        return original_open(path,*args,**kwargs)
+    monkeypatch.setattr(Path,'open',open_file)
+    calls = []
+    def provider(request):
+        calls.append(request)
+        raise AssertionError('Unreadable authoritative rules must not reach inference')
+    result = native_agent.run_slice(item,complete=provider)
+    assert result['status'] == 'continue'
+    assert not calls
+    retained = native_agent.read_state(item)
+    assert retained['turns'] == 7 and retained['messages'] == original_messages
+    assert int(retained.get('failures',0)) == 0
+
+
+def instruction_retry_fixture(tmp_path):
+    folder = tmp_path/'retry-task'
+    (folder/'.local-ai').mkdir(parents=True)
+    (folder/'AGENTS.md').write_text('Preserve local data.',encoding='utf-8')
+    item = {'id':'retry-neutral','folder':str(folder),
+            'brief':'Explain the existing local command-line utility.', 'status':'working','detail':''}
+    state = native_agent.read_state(item)
+    state.update(status='continue',turns=7,messages=[
+        {'role':'system','content':native_agent.prompt(item)},
+        {'role':'user','content':'Keep this prior question.'}])
+    native_agent.save_state(item,state)
+    return item,folder
+
+
+def test_instruction_wait_polling_does_not_initialize_a_database(tmp_path):
+    item,folder = instruction_retry_fixture(tmp_path)
+    database = folder/'.local-ai/memory.sqlite3'
+    assert not database.exists()
+    assert task_context.instruction_wait(item) is False
+    task_context.clear_instruction_wait(item)
+    assert not database.exists()
+    project_memory.initialize(folder)
+    with patch.object(project_memory,'connection',side_effect=AssertionError('No polling initialization')):
+        assert task_context.instruction_wait(item) is False
+        task_context.clear_instruction_wait(item)
+    with project_memory.connection(folder) as conn:
+        assert not conn.execute("SELECT name FROM sqlite_master WHERE name='native_instruction_wait'").fetchone()
+
+
+@pytest.mark.parametrize('change',['brief','rules','followup','clock_forward','clock_backward'])
+def test_instruction_wait_is_bounded_and_invalidated_without_granting_authority(tmp_path,monkeypatch,change):
+    item,folder = instruction_retry_fixture(tmp_path)
+    clock = [1000.0]
+    monkeypatch.setattr(task_context.time,'time',lambda:clock[0])
+    checkpoint = native_agent.state_file(item).read_bytes()
+    assert [task_context.defer_instruction_read(item) for _ in range(8)] == [2,4,8,16,30,30,30,30]
+    assert task_context.instruction_wait(item)
+    if change == 'brief':item['brief'] += ' Preserve every output.'
+    elif change == 'rules':(folder/'AGENTS.md').write_text('Changed task rules with a different size.',encoding='utf-8')
+    elif change == 'followup':(folder/'.local-ai/USER-REQUESTS.md').write_text('New user instruction.',encoding='utf-8')
+    elif change == 'clock_forward':clock[0] += 31
+    else:clock[0] -= 100
+    assert task_context.instruction_wait(item) is False
+    assert native_agent.state_file(item).read_bytes() == checkpoint
+
+
+def test_instruction_wait_clear_is_request_bound_and_resets_backoff(tmp_path,monkeypatch):
+    item,folder = instruction_retry_fixture(tmp_path)
+    monkeypatch.setattr(task_context.time,'time',lambda:1000.0)
+    assert task_context.defer_instruction_read(item) == 2
+    assert task_context.defer_instruction_read(item) == 4
+    other = {**item,'brief':'A different request.'}
+    task_context.clear_instruction_wait(other)
+    assert task_context.instruction_wait(item)
+    task_context.clear_instruction_wait(item)
+    assert task_context.instruction_wait(item) is False
+    assert task_context.defer_instruction_read(item) == 2
+
+
+def test_instruction_retry_actual_worker_keeps_checkpoint_and_supervisor_waits(tmp_path,monkeypatch):
+    item,folder = instruction_retry_fixture(tmp_path)
+    registry = tmp_path/'retry-registry';registry.mkdir()
+    monkeypatch.setattr(long_tasks,'STATE',registry)
+    monkeypatch.setattr(long_tasks,'projects',lambda:[item])
+    original_slice = native_agent.run_slice
+    requests = []
+    def provider(payload):
+        requests.append(payload)
+        raise AssertionError('Unreadable rules must not reach inference')
+    monkeypatch.setattr(native_agent,'run_slice',lambda project:original_slice(project,complete=provider))
+    original_open = Path.open
+    def open_file(path,*args,**kwargs):
+        if path == folder/'AGENTS.md':raise PermissionError('Owned test instruction lock')
+        return original_open(path,*args,**kwargs)
+    monkeypatch.setattr(Path,'open',open_file)
+    clock = [1000.0]
+    monkeypatch.setattr(task_context.time,'time',lambda:clock[0])
+    assert native_agent.worker_main(item['id']) == 0
+    state = native_agent.read_state(item)
+    assert state['turns'] == 7 and not state.get('failures') and state['status'] != 'error'
+    assert state['messages'][-1]['content'] == 'Keep this prior question.'
+    assert not requests and task_context.instruction_wait(item)
+    starts = []
+    monkeypatch.setattr(native_agent,'start_worker',lambda project:starts.append(project))
+    status,detail = native_agent.advance(item)
+    assert status == 'working' and 'retrying automatically' in detail and not starts
+    clock[0] += 3
+    native_agent.advance(item)
+    assert starts == [item]
+    monkeypatch.setattr(Path,'open',original_open)
+    class InferenceReached(BaseException):pass
+    def available(payload):raise InferenceReached()
+    with pytest.raises(InferenceReached):original_slice(item,complete=available)
+    monkeypatch.setattr(native_agent,'run_slice',lambda project:{'status':'continue'})
+    assert native_agent.worker_main(item['id']) == 0
+    assert task_context.instruction_wait(item) is False
+
+
+@pytest.mark.parametrize('control',['paused','stopped','done'])
+def test_instruction_read_defer_preserves_newer_control_checkpoint(tmp_path,monkeypatch,control):
+    item,folder = instruction_retry_fixture(tmp_path)
+    original_open = Path.open
+    latest = []
+    def open_file(path,*args,**kwargs):
+        if path == folder/'AGENTS.md':
+            state = native_agent.read_state(item)
+            state.update(status=control,messages=[{'role':'user','content':'Newer control checkpoint'}])
+            native_agent.save_state(item,state)
+            latest.append(native_agent.state_file(item).read_bytes())
+            raise PermissionError('Owned lock after control')
+        return original_open(path,*args,**kwargs)
+    monkeypatch.setattr(Path,'open',open_file)
+    def provider(payload):raise AssertionError('No provider after instruction failure')
+    result = native_agent.run_slice(item,complete=provider)
+    assert result['status'] == control and not result.get('instruction_read_unavailable')
+    assert native_agent.state_file(item).read_bytes() == latest[-1]
+
+
+@pytest.mark.parametrize('control',['paused','stopped'])
+def test_instruction_retry_never_restarts_a_paused_or_stopped_checkpoint(tmp_path,monkeypatch,control):
+    item,folder = instruction_retry_fixture(tmp_path)
+    task_context.defer_instruction_read(item)
+    state = native_agent.read_state(item);state['status'] = control;native_agent.save_state(item,state)
+    with patch.object(native_agent,'start_worker',side_effect=AssertionError('No control override')):
+        assert native_agent.advance(item) is None
+
+
+def test_instruction_read_handler_does_not_swallow_unrelated_io_errors(tmp_path):
+    item,folder = instruction_retry_fixture(tmp_path)
+    def provider(payload):raise OSError('Owned unrelated provider failure')
+    with pytest.raises(OSError,match='unrelated provider failure'):
+        native_agent.run_slice(item,complete=provider)
+
+
+@pytest.mark.parametrize('code',[sqlite3.SQLITE_BUSY,sqlite3.SQLITE_LOCKED])
+def test_instruction_retry_optional_lock_does_not_break_supervisor_polling(tmp_path,code):
+    item,folder = instruction_retry_fixture(tmp_path)
+    project_memory.initialize(folder)
+    error = sqlite3.OperationalError('Owned transient hint lock')
+    error.sqlite_errorcode = code
+    with patch.object(sqlite3,'connect',side_effect=error):
+        assert task_context.instruction_wait(item) is False
+        task_context.clear_instruction_wait(item)
+
+
+def test_instruction_retry_does_not_hide_database_corruption(tmp_path):
+    item,folder = instruction_retry_fixture(tmp_path)
+    project_memory.initialize(folder)
+    error = sqlite3.OperationalError('Owned corrupted database fixture')
+    error.sqlite_errorcode = sqlite3.SQLITE_CORRUPT
+    with patch.object(sqlite3,'connect',side_effect=error), pytest.raises(sqlite3.OperationalError):
+        task_context.instruction_wait(item)
