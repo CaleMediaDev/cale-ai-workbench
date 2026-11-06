@@ -290,6 +290,40 @@ def test_save_write_failure_rolls_back_partial_files_and_allows_retry(tmp_path):
     ] == transcription["segments"]
 
 
+@pytest.mark.parametrize("language", [float("nan"), float("inf"), float("-inf")])
+@pytest.mark.parametrize("existing_target", [False, True])
+def test_save_rejects_nonfinite_metadata_before_writing(tmp_path, language, existing_target):
+    source = tmp_path / "song.wav"
+    source.write_bytes(b"original")
+    vocal = tmp_path / "vocals.wav"
+    vocal.write_bytes(b"isolated")
+    target = tmp_path / "lyrics"
+    if existing_target:
+        target.mkdir()
+        (target / "keep.txt").write_bytes(b"keep")
+    transcription = {
+        "language": language,
+        "segments": [{"start": 1.0, "end": 2.0, "text": "Hello world"}],
+    }
+
+    with pytest.raises(ValueError, match="Out of range float values"):
+        music_lyrics.save(source, vocal, target, transcription)
+
+    if existing_target:
+        assert sorted(path.name for path in target.iterdir()) == ["keep.txt"]
+        assert (target / "keep.txt").read_bytes() == b"keep"
+    else:
+        assert not target.exists()
+    assert source.read_bytes() == b"original"
+    assert vocal.read_bytes() == b"isolated"
+
+    transcription["language"] = "en"
+    result = music_lyrics.save(source, vocal, target, transcription)
+    assert result["segments"] == 1
+    assert json.loads((target / "lyrics.json").read_text(encoding="utf-8")) == transcription
+    assert (target / "lyrics.txt").read_text(encoding="utf-8") == "Hello world\n"
+
+
 def test_save_rejects_infinite_end_without_leaving_partial_output(tmp_path):
     source = tmp_path / "song.wav"
     source.write_bytes(b"original")
