@@ -77,8 +77,8 @@ def sync(root: str | Path) -> dict:
         try:
             obstructed = (
                 any(
-                    parent.is_symlink() or (parent.exists() and not parent.is_dir())
-                    for parent in (destination / part for part in reversed(relative.parents))
+                    parent.is_symlink()
+                    for parent in (destination / part for part in reversed(relative.parents)) if parent.exists()
                 )
                 or target.is_symlink()
                 or (target.exists() and not target.is_file())
