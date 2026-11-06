@@ -677,3 +677,23 @@ def test_malformed_feature_ownership_rejected_before_output_setup(tmp_path):
         with unittest.TestCase().assertRaisesRegex(ValueError, "invalid feature ownership"):
             predict_table_model(str(model), str(prediction), str(output))
         assert not output.parent.exists()
+
+
+def test_training_validates_canonical_feature_ownership_before_publication(tmp_path):
+    from unittest.mock import patch
+    import table_ml
+    for problem in ("classification", "regression"):
+        source = tmp_path / (problem + ".csv")
+        output = tmp_path / (problem + ".json")
+        with source.open("w", newline="", encoding="utf-8") as stream:
+            writer = csv.writer(stream)
+            writer.writerow(["signal", "shade", "target"])
+            for index in range(40):
+                target = ("hot" if index >= 20 else "cold") if problem == "classification" else index * 2
+                writer.writerow([index, "red" if index % 2 else "blue", target])
+        with patch.object(table_ml, "_checked_model", wraps=table_ml._checked_model) as checked:
+            table_ml.train_table_model(str(source), "target", str(output), problem)
+        checked.assert_called_once()
+        payload = checked.call_args.args[0]
+        assert all(isinstance(owner, list) for owner in payload["feature_owners"].values())
+        assert payload["feature_owners"] == json.loads(output.read_text(encoding="utf-8"))["feature_owners"]
