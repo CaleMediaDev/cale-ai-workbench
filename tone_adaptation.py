@@ -51,7 +51,7 @@ def social_reply(utterance: str) -> str:
             return "I heard you. What do you need?"
         content = message.get("content")
         # Protocol data is not speech: never read Python/JSON representations.
-        if isinstance(content, str):
+        if isinstance(content, str) and content.strip():
             # Preserve a useful short reply when a model inserts line breaks,
             # rather than substituting the same canned fallback every time.
             answer = content.strip()

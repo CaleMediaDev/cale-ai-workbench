@@ -92,7 +92,14 @@ class ToneAdaptationTests(unittest.TestCase):
                                      "I heard you. What do you need?")
 
     def test_non_text_content_is_not_spoken_as_python_or_json(self):
-        for content in ({"text": "Hello"}, ["Hello"], 42, True, None):
+        # Test case where content is None, which should now be explicitly handled by the check
+        with self.subTest(content=None):
+            result = {"choices": [{"message": {"content": None}}]}
+            with patch("cloud_ai.post", return_value=result):
+                self.assertEqual(tone_adaptation.social_reply("Hello"),
+                                 "I heard you. What do you need?")
+        
+        for content in ({"text": "Hello"}, ["Hello"], 42, True):
             with self.subTest(content=content):
                 result = {"choices": [{"message": {"content": content}}]}
                 with patch("cloud_ai.post", return_value=result):
