@@ -43,8 +43,8 @@ def _present(text: str, phrase: str) -> bool:
     if phrase[0].isdigit():
         # Do not match a numeric phrase inside a decimal or thousands group.
         prefix += r"(?<!\d[.,])"
-    if phrase.startswith("$"):
-        # A positive dollar phrase must not match inside a negative amount.
+    if phrase[0].isdigit() or phrase.startswith("$"):
+        # A positive numeric or dollar phrase must not match a negative amount.
         prefix += r"(?<!-)"
     return bool(re.search(prefix + re.escape(phrase) +
                           boundary, normalized))
