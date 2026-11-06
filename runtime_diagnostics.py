@@ -53,6 +53,10 @@ def record(state: Path, kind: str, detail: str, now: float | None = None) -> boo
         # last_seen for detecting backward clock changes, not expiration.
         if row and now >= row[1] and now - row[0] < EPISODE_SECONDS:
             first_seen, count, reported = row[0], row[2] + 1, row[3]
+        elif row and now < row[1] and not row[3]:
+            # A clock correction must not erase a failure before its repeat
+            # can be reported. Rebase the episode to the corrected clock.
+            first_seen, count, reported = now, row[2] + 1, 0
         else:
             first_seen, count, reported = now, 1, 0
         notify = count >= 2 and not reported
