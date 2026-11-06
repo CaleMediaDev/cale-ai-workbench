@@ -578,6 +578,34 @@ def test_failed_resume_keeps_pause_state_retryable(tmp_path, mixing):
         assert player.active.volume == pytest.approx(player.outgoing.volume)
 
 
+def test_service_failed_resume_preserves_pause_state_and_retries(tmp_path):
+    moment = [0]
+    player = radio.Player(lambda: Deck(lambda: moment[0]), lambda: moment[0])
+    service = radio.Service(tmp_path, player)
+    service.enabled = True
+    player.play(tmp_path / "first.wav")
+    moment[0] = 2
+    service._toggle()
+    assert service.paused and player.active.paused
+
+    moment[0] = 52
+    with patch.object(player.active, "resume", side_effect=RuntimeError("Cannot resume")):
+        with pytest.raises(RuntimeError, match="Cannot resume"):
+            service._toggle()
+
+    assert service.paused
+    assert player.paused_at == 2 and player.active.paused
+    service._publish()
+    assert service.snapshot()["paused"]
+
+    moment[0] = 62
+    service._toggle()
+    assert not service.paused
+    assert player.paused_at is None and not player.active.paused
+    assert player.busy()
+    assert player.clock()[0] == 2
+
+
 def test_failed_volume_change_during_paused_fade_still_allows_resume(tmp_path):
     moment = [0]
     player = radio.Player(lambda: Deck(lambda: moment[0]), lambda: moment[0])
