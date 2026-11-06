@@ -1,0 +1,666 @@
+{
+  "release": "0.5.545",
+  "reviewed_source": "b38b183fc050cbf62bd6496d1ae2800d9e3e3ae4",
+  "review": {
+    "base": "d9e39611c2499930a82145316bcb3fe331bf13d0",
+    "state": "merged_verified",
+    "cutoff": 929,
+    "proposals": [
+      {
+        "number": 921,
+        "head": "e850e46df457b644eeec9c796c01449d3883a489",
+        "state": "open",
+        "draft": true,
+        "original_head": "e850e46df457b644eeec9c796c01449d3883a489",
+        "verdict": "accept",
+        "reason": "Re-resolve the requested path before returning cached/image text. Submitted symlink test skips here; actual owned Windows junction retarget baseline fails stale-return assertion and candidate passes, preserving both source files.",
+        "branch": "cale-donation-f501c6104ca64679",
+        "headRefOid": "e850e46df457b644eeec9c796c01449d3883a489",
+        "original_reviewed_head": "e850e46df457b644eeec9c796c01449d3883a489"
+      },
+      {
+        "number": 922,
+        "head": "d6b1cae7c5991574180832a1333dd08f01045acc",
+        "state": "open",
+        "draft": true,
+        "original_head": "d6b1cae7c5991574180832a1333dd08f01045acc",
+        "verdict": "accept",
+        "reason": "Missing model-size field now reaches the existing explicit unknown-weight rejection instead of leaking KeyError; does not budget missing weights as zero.",
+        "branch": "cale-donation-2ac9c98e451d48f8",
+        "headRefOid": "d6b1cae7c5991574180832a1333dd08f01045acc",
+        "original_reviewed_head": "d6b1cae7c5991574180832a1333dd08f01045acc"
+      },
+      {
+        "number": 923,
+        "head": "66e8e7e90c04c822d2fa5d9de5b610a36d0d72c6",
+        "state": "open",
+        "draft": true,
+        "original_head": "a1bbc1580204293679d034a63f8bb0beeac5052a",
+        "verdict": "accept_corrected",
+        "reason": "Corrected real BufferedRandom initialization and close retry;26PASS+realIO proof supersedes submitted MagicMock-only claim.",
+        "branch": "cale-donation-df0016b7e778474d",
+        "headRefOid": "66e8e7e90c04c822d2fa5d9de5b610a36d0d72c6",
+        "original_reviewed_head": "a1bbc1580204293679d034a63f8bb0beeac5052a"
+      },
+      {
+        "number": 924,
+        "head": "5c7e672dd41e0290dcacc79f40935249a4fabbbf",
+        "state": "open",
+        "draft": true,
+        "original_head": "5c7e672dd41e0290dcacc79f40935249a4fabbbf",
+        "verdict": "accept",
+        "reason": "Overflowing recorded worker PID no longer strands recovery before the existing queued retry; no live worker process was started in tests.",
+        "branch": "cale-donation-750401de93b04054",
+        "headRefOid": "5c7e672dd41e0290dcacc79f40935249a4fabbbf",
+        "original_reviewed_head": "5c7e672dd41e0290dcacc79f40935249a4fabbbf"
+      },
+      {
+        "number": 925,
+        "head": "97ed6df1f5c91e3925ad0994d9d70a16e8df9a9f",
+        "state": "open",
+        "draft": true,
+        "original_head": "97ed6df1f5c91e3925ad0994d9d70a16e8df9a9f",
+        "verdict": "accept",
+        "reason": "Converging redirect destinations are saved/indexed once while preserving the attempted-visit budget and sibling traversal.",
+        "branch": "cale-donation-38a01e28693d4091",
+        "headRefOid": "97ed6df1f5c91e3925ad0994d9d70a16e8df9a9f",
+        "original_reviewed_head": "97ed6df1f5c91e3925ad0994d9d70a16e8df9a9f"
+      },
+      {
+        "number": 927,
+        "head": "29f698e02b33c1e7dbd06bfddf00f6c68c3106e8",
+        "state": "open",
+        "draft": true,
+        "original_head": "29f698e02b33c1e7dbd06bfddf00f6c68c3106e8",
+        "verdict": "accept",
+        "reason": "Canonical Unicode normalization before casefold makes equivalent Greek topic queries match without changing displayed text or inspection state.",
+        "branch": "cale-donation-a20f8339c6974c34",
+        "headRefOid": "29f698e02b33c1e7dbd06bfddf00f6c68c3106e8",
+        "original_reviewed_head": "29f698e02b33c1e7dbd06bfddf00f6c68c3106e8"
+      },
+      {
+        "number": 928,
+        "head": "ae8f115447ad4875ecb197977d74424e4b67f5e8",
+        "state": "open",
+        "draft": true,
+        "original_head": "ae8f115447ad4875ecb197977d74424e4b67f5e8",
+        "verdict": "accept",
+        "reason": "Calculator formatting uses an independent decimal context and preserves caller traps/flags; actual repeating-fraction baseline raises and candidate succeeds.",
+        "branch": "cale-donation-66f39842803c480f",
+        "headRefOid": "ae8f115447ad4875ecb197977d74424e4b67f5e8",
+        "original_reviewed_head": "ae8f115447ad4875ecb197977d74424e4b67f5e8"
+      },
+      {
+        "number": 929,
+        "head": "560bd49e111b9fa6b524d6f6bf086240aa104faa",
+        "state": "open",
+        "draft": true,
+        "original_head": "e000b0bb8a2507c8893877fcf1f24742b5f9b312",
+        "verdict": "accept_corrected",
+        "reason": "Reject advertised-length truncated JSON without replacing last good cache. Real HTTPResponse reproduction fails before/passes after. Fourteen old mocked response fixtures now explicitly supply absent headers; runtime validation is unchanged.",
+        "branch": "cale-donation-48aa96a8713d4827",
+        "headRefOid": "560bd49e111b9fa6b524d6f6bf086240aa104faa",
+        "original_reviewed_head": "e000b0bb8a2507c8893877fcf1f24742b5f9b312"
+      }
+    ],
+    "paths": [
+      "Validation/test_context_window.py",
+      "Validation/test_donation_regressions.py",
+      "Validation/test_project_documents.py",
+      "Validation/test_public_api_catalog.py",
+      "Validation/test_quick_image.py",
+      "Validation/test_setup_recovery.py",
+      "Validation/test_site_crawler.py",
+      "Validation/test_skill_hub.py",
+      "context_window.py",
+      "project_documents.py",
+      "public_api_catalog.py",
+      "quick_calculator.py",
+      "quick_image.py",
+      "setup_recovery.py",
+      "site_crawler.py",
+      "skill_hub.py"
+    ],
+    "bound_paths": [
+      "Validation/test_context_window.py",
+      "Validation/test_donation_regressions.py",
+      "Validation/test_project_documents.py",
+      "Validation/test_project_memory.py",
+      "Validation/test_public_api_catalog.py",
+      "Validation/test_quick_calculator.py",
+      "Validation/test_quick_image.py",
+      "Validation/test_setup_recovery.py",
+      "Validation/test_site_crawler.py",
+      "Validation/test_skill_hub.py",
+      "context_window.py",
+      "project_documents.py",
+      "project_memory.py",
+      "public_api_catalog.py",
+      "quick_calculator.py",
+      "quick_image.py",
+      "setup_recovery.py",
+      "site_crawler.py",
+      "skill_hub.py"
+    ],
+    "modules": [
+      "Validation/test_context_window.py",
+      "Validation/test_donation_regressions.py",
+      "Validation/test_project_documents.py",
+      "Validation/test_project_memory.py",
+      "Validation/test_public_api_catalog.py",
+      "Validation/test_quick_calculator.py",
+      "Validation/test_quick_image.py",
+      "Validation/test_setup_recovery.py",
+      "Validation/test_site_crawler.py",
+      "Validation/test_skill_hub.py"
+    ],
+    "supplemental_nodes": [],
+    "excluded": [
+      920,
+      926
+    ],
+    "qualification_receipt": "C:\\Users\\tahoe\\Documents\\Codex\\2026-10-31\\can\\outputs\\review-pr-921-929-on-544-evidence\\receipt.json",
+    "tested_blob_ids": {
+      "Validation/test_context_window.py": "460ae731ab20ca583c11e3601cea9a247148b2dd",
+      "Validation/test_donation_regressions.py": "2e5dcbb203b0d3f2e78dd2269a7cfd1ce94d65dc",
+      "Validation/test_project_documents.py": "32f362a5af932890c8d6b4101e840546a34d04d6",
+      "Validation/test_project_memory.py": "5effc291643f26ca50ad670cbc93ec29bd679b2f",
+      "Validation/test_public_api_catalog.py": "8aadc9623690f83925e820d9dffb1d29936fecb7",
+      "Validation/test_quick_calculator.py": "1a462c9216cf98c2a67b58a5f0cf81f103e6b1ff",
+      "Validation/test_quick_image.py": "39bc1fe320239244a59e893b11d4c3a985ec9e5a",
+      "Validation/test_setup_recovery.py": "d7f1a67870a5d905bdbebd5a668738baee506f2d",
+      "Validation/test_site_crawler.py": "1779279acf9bf4761e7315a697fe252e660d04ef",
+      "Validation/test_skill_hub.py": "f0659f1879d9547b2a286e09bf1a024b5423cc4d",
+      "context_window.py": "bad1bab14d009f4f63d3eca5a8a91ab3c0776f6b",
+      "project_documents.py": "23532add5856af654e97c6dc8bced08591e0b51a",
+      "project_memory.py": "2c89ee96b374064215b9aa73d9798e5681bd9e3c",
+      "public_api_catalog.py": "cec4acf5a6fa883e4e28ce205b82fb9c7cf42d80",
+      "quick_calculator.py": "cab85f17b98518054e58f28e7533cb2002117e73",
+      "quick_image.py": "4edc5b6d86cd901534bef72ab943b294a94439fa",
+      "setup_recovery.py": "8bdf9e5b1d099975c83ed35e2368632c7e21286b",
+      "site_crawler.py": "082622b7e9927e474b9c01f0f7714439cee290e4",
+      "skill_hub.py": "d86793a2fb47a6d9588966f799eac74ae1f26b4b"
+    },
+    "tested_stash": "45f4e0b2a3e3d5798019fde4b3f37b6b7faef706",
+    "merged": [
+      {
+        "headRefOid": "e850e46df457b644eeec9c796c01449d3883a489",
+        "isDraft": false,
+        "labels": [],
+        "mergeCommit": {
+          "oid": "61bc0fb69547517bf0b8e2db6ca97e02935f7296"
+        },
+        "mergedAt": "2026-11-06T06:49:36Z",
+        "number": 921,
+        "state": "MERGED",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/921"
+      },
+      {
+        "headRefOid": "d6b1cae7c5991574180832a1333dd08f01045acc",
+        "isDraft": false,
+        "labels": [],
+        "mergeCommit": {
+          "oid": "5de9ad0dce2e1408f0d4c2817135ceccf93a807e"
+        },
+        "mergedAt": "2026-11-06T06:49:42Z",
+        "number": 922,
+        "state": "MERGED",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/922"
+      },
+      {
+        "headRefOid": "66e8e7e90c04c822d2fa5d9de5b610a36d0d72c6",
+        "isDraft": false,
+        "labels": [],
+        "mergeCommit": {
+          "oid": "f1787a5d2bc8c2471f89a411c81aadd17469e24e"
+        },
+        "mergedAt": "2026-11-06T06:49:47Z",
+        "number": 923,
+        "state": "MERGED",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/923"
+      },
+      {
+        "headRefOid": "5c7e672dd41e0290dcacc79f40935249a4fabbbf",
+        "isDraft": false,
+        "labels": [],
+        "mergeCommit": {
+          "oid": "4c69e030bcc3e4d104e3cb66b9f8844192a8e57f"
+        },
+        "mergedAt": "2026-11-06T06:49:52Z",
+        "number": 924,
+        "state": "MERGED",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/924"
+      },
+      {
+        "headRefOid": "97ed6df1f5c91e3925ad0994d9d70a16e8df9a9f",
+        "isDraft": false,
+        "labels": [],
+        "mergeCommit": {
+          "oid": "e7c02807d5cccf5b7fba81e190874be11508b1d7"
+        },
+        "mergedAt": "2026-11-06T06:49:57Z",
+        "number": 925,
+        "state": "MERGED",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/925"
+      },
+      {
+        "headRefOid": "29f698e02b33c1e7dbd06bfddf00f6c68c3106e8",
+        "isDraft": false,
+        "labels": [],
+        "mergeCommit": {
+          "oid": "fc0413d366189196ed587770688a28d443b8f193"
+        },
+        "mergedAt": "2026-11-06T06:50:02Z",
+        "number": 927,
+        "state": "MERGED",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/927"
+      },
+      {
+        "headRefOid": "ae8f115447ad4875ecb197977d74424e4b67f5e8",
+        "isDraft": false,
+        "labels": [],
+        "mergeCommit": {
+          "oid": "861e7937ba4cbe092f48cf490f3cdac495edd7c0"
+        },
+        "mergedAt": "2026-11-06T06:50:07Z",
+        "number": 928,
+        "state": "MERGED",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/928"
+      },
+      {
+        "headRefOid": "560bd49e111b9fa6b524d6f6bf086240aa104faa",
+        "isDraft": false,
+        "labels": [],
+        "mergeCommit": {
+          "oid": "b38b183fc050cbf62bd6496d1ae2800d9e3e3ae4"
+        },
+        "mergedAt": "2026-11-06T06:50:12Z",
+        "number": 929,
+        "state": "MERGED",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/929"
+      }
+    ],
+    "validation": {
+      "exit_code": 0,
+      "source_bytes_unchanged": true,
+      "modules": [
+        "Validation/test_context_window.py",
+        "Validation/test_donation_regressions.py",
+        "Validation/test_project_documents.py",
+        "Validation/test_project_memory.py",
+        "Validation/test_public_api_catalog.py",
+        "Validation/test_quick_calculator.py",
+        "Validation/test_quick_image.py",
+        "Validation/test_setup_recovery.py",
+        "Validation/test_site_crawler.py",
+        "Validation/test_skill_hub.py"
+      ],
+      "supplemental_nodes": [],
+      "log_tail": ".........................................s................ss [ 19%]\n...................s........................................ [ 39%]\n........................................................................ [ 63%]\n........................................................................ [ 86%]\n........................................                                                             [100%]\n=========================== short test summary info ===========================\nSKIPPED [1] Validation\\test_project_documents.py:226: Symlink creation is unavailable\nSKIPPED [1] Validation\\test_project_memory.py:365: Symlinks unavailable: [WinError 1314] A required privilege is not held by the client: 'C:\\\\Users\\\\tahoe\\\\AppData\\\\Local\\\\Temp\\\\tmpafjtv7lr\\\\project\\\\credentials.json' -> 'C:\\\\Users\\\\tahoe\\\\AppData\\\\Local\\\\Temp\\\\tmpafjtv7lr\\\\project\\\\ordinary.md'\nSKIPPED [1] Validation\\test_project_memory.py:391: Symlinks unavailable: [WinError 1314] A required privilege is not held by the client: 'C:\\\\Users\\\\tahoe\\\\AppData\\\\Local\\\\Temp\\\\tmpxqdg5l00\\\\project\\\\implementation.py' -> 'C:\\\\Users\\\\tahoe\\\\AppData\\\\Local\\\\Temp\\\\tmpxqdg5l00\\\\project\\\\alias.py'\nSKIPPED [2] Validation\\test_project_memory.py:419: Symlinks unavailable: [WinError 1314] A required privilege is not held by the client: 'C:\\\\Users\\\\tahoe\\\\AppData\\\\Local\\\\Temp\\\\tmpt94f2c3w\\\\project\\\\implementation.py' -> 'C:\\\\Users\\\\tahoe\\\\AppData\\\\Local\\\\Temp\\\\tmpt94f2c3w\\\\project\\\\app.py'\nSKIPPED [1] Validation\\test_project_memory.py:536: File symlinks unavailable; real directory junction guard already verified\n300 passed, 6 skipped, 210 subtests passed in 42.79s\n",
+      "sha256": {
+        "Validation/test_context_window.py": "c9f53e1f2c4988d737e275be590075f6b95f3867ebc8f208960c7620d66d8369",
+        "Validation/test_donation_regressions.py": "3838c6c71c6c9bdaba68bd0569e7d1712efa8c7f0885403ea693d3f5add842b4",
+        "Validation/test_project_documents.py": "aa010623356c58147c8c7b0664b626f97a689a7197ba61e767171ff01a51a31e",
+        "Validation/test_public_api_catalog.py": "1cd6fc03f3230563100a3d36e252a26952e3f525924a112cc767dea2c26cea77",
+        "Validation/test_quick_image.py": "46ce7df4add5989051d869e21ef6c8e916c35109393a20d702b19b6a94bc23fb",
+        "Validation/test_setup_recovery.py": "02e85ee7447153b8eda9cd16f6c98fbf03fb7642d5b547f15dc9c89bdc3a7983",
+        "Validation/test_site_crawler.py": "11695680d68e24c05e49b558df039ea53de78e6e495e1093073b31e7d88be552",
+        "Validation/test_skill_hub.py": "99b7d4c1f23d9085de3298ec18faf4e78c7b891f6be9086bb5161979cf38f8f6",
+        "context_window.py": "738d371f0bbf5766326086cb5b33841bef5d639b268b44a28fc6b4ed0a11f556",
+        "project_documents.py": "f40bf28e629a51060ffccfd72eb70cfe5513ac660ed1f628bf7c50c8a4e35910",
+        "public_api_catalog.py": "b293b00bb986b9b96ce453ea64209e449e0ce928417c33d4e92cc9307bbec566",
+        "quick_calculator.py": "03799a1d9d35b320908614ea4daa52b4a0734fefea1cca0ea9f3e870fbdb5a0b",
+        "quick_image.py": "5fad922bda9c7893645dd3fd0fdc265affec075d5e112cf02dd9c3e2fa36f77e",
+        "setup_recovery.py": "2807a75e7a3fbc0d324b97c29f9a324e8ee1a5c5d4721e6fedb33b6e941001db",
+        "site_crawler.py": "6b6d8090bf90888407906359fb530251727a39008c557ea023b39995ae95e56f",
+        "skill_hub.py": "848defc78c1e04c9de9df6e9adf4cb4051400a2beea0b808ba1b4bf78c5be04d",
+        "Validation/test_project_memory.py": "0952525304a444ed8e4fc6afb045084255fa4184573cd9844785424d2a7923aa",
+        "Validation/test_quick_calculator.py": "6b01a7eb2615702ffb6dd9ebbae0c013448cad8a6f423ad67086cb3c723f05ca",
+        "project_memory.py": "48604bb05756ab9fe64be1e2abf3594e9502c9abed1e90f05d5a4207ed6102dd"
+      },
+      "qualification_source": "d026808966d2d8b46f2675596095855f1c340a2a",
+      "qualification_log_sha256": "be4c8d2b6f9e6d5d41ffbc1339524ffa9c634ecec8bea956eb7a7d47649ae9eb"
+    },
+    "merged_source": "b38b183fc050cbf62bd6496d1ae2800d9e3e3ae4",
+    "merged_bytes_match_tested": true,
+    "observed_at": 1793947816.3396695,
+    "all_accepted_labels_verified": true
+  },
+  "validation": {
+    "affected_modules": {
+      "exit_code": 0,
+      "source_bytes_unchanged": true,
+      "modules": [
+        "Validation/test_context_window.py",
+        "Validation/test_donation_regressions.py",
+        "Validation/test_project_documents.py",
+        "Validation/test_project_memory.py",
+        "Validation/test_public_api_catalog.py",
+        "Validation/test_quick_calculator.py",
+        "Validation/test_quick_image.py",
+        "Validation/test_setup_recovery.py",
+        "Validation/test_site_crawler.py",
+        "Validation/test_skill_hub.py"
+      ],
+      "supplemental_nodes": [],
+      "log_tail": ".........................................s................ss [ 19%]\n...................s........................................ [ 39%]\n........................................................................ [ 63%]\n........................................................................ [ 86%]\n........................................                                                             [100%]\n=========================== short test summary info ===========================\nSKIPPED [1] Validation\\test_project_documents.py:226: Symlink creation is unavailable\nSKIPPED [1] Validation\\test_project_memory.py:365: Symlinks unavailable: [WinError 1314] A required privilege is not held by the client: 'C:\\\\Users\\\\tahoe\\\\AppData\\\\Local\\\\Temp\\\\tmpafjtv7lr\\\\project\\\\credentials.json' -> 'C:\\\\Users\\\\tahoe\\\\AppData\\\\Local\\\\Temp\\\\tmpafjtv7lr\\\\project\\\\ordinary.md'\nSKIPPED [1] Validation\\test_project_memory.py:391: Symlinks unavailable: [WinError 1314] A required privilege is not held by the client: 'C:\\\\Users\\\\tahoe\\\\AppData\\\\Local\\\\Temp\\\\tmpxqdg5l00\\\\project\\\\implementation.py' -> 'C:\\\\Users\\\\tahoe\\\\AppData\\\\Local\\\\Temp\\\\tmpxqdg5l00\\\\project\\\\alias.py'\nSKIPPED [2] Validation\\test_project_memory.py:419: Symlinks unavailable: [WinError 1314] A required privilege is not held by the client: 'C:\\\\Users\\\\tahoe\\\\AppData\\\\Local\\\\Temp\\\\tmpt94f2c3w\\\\project\\\\implementation.py' -> 'C:\\\\Users\\\\tahoe\\\\AppData\\\\Local\\\\Temp\\\\tmpt94f2c3w\\\\project\\\\app.py'\nSKIPPED [1] Validation\\test_project_memory.py:536: File symlinks unavailable; real directory junction guard already verified\n300 passed, 6 skipped, 210 subtests passed in 42.79s\n",
+      "sha256": {
+        "Validation/test_context_window.py": "c9f53e1f2c4988d737e275be590075f6b95f3867ebc8f208960c7620d66d8369",
+        "Validation/test_donation_regressions.py": "3838c6c71c6c9bdaba68bd0569e7d1712efa8c7f0885403ea693d3f5add842b4",
+        "Validation/test_project_documents.py": "aa010623356c58147c8c7b0664b626f97a689a7197ba61e767171ff01a51a31e",
+        "Validation/test_public_api_catalog.py": "1cd6fc03f3230563100a3d36e252a26952e3f525924a112cc767dea2c26cea77",
+        "Validation/test_quick_image.py": "46ce7df4add5989051d869e21ef6c8e916c35109393a20d702b19b6a94bc23fb",
+        "Validation/test_setup_recovery.py": "02e85ee7447153b8eda9cd16f6c98fbf03fb7642d5b547f15dc9c89bdc3a7983",
+        "Validation/test_site_crawler.py": "11695680d68e24c05e49b558df039ea53de78e6e495e1093073b31e7d88be552",
+        "Validation/test_skill_hub.py": "99b7d4c1f23d9085de3298ec18faf4e78c7b891f6be9086bb5161979cf38f8f6",
+        "context_window.py": "738d371f0bbf5766326086cb5b33841bef5d639b268b44a28fc6b4ed0a11f556",
+        "project_documents.py": "f40bf28e629a51060ffccfd72eb70cfe5513ac660ed1f628bf7c50c8a4e35910",
+        "public_api_catalog.py": "b293b00bb986b9b96ce453ea64209e449e0ce928417c33d4e92cc9307bbec566",
+        "quick_calculator.py": "03799a1d9d35b320908614ea4daa52b4a0734fefea1cca0ea9f3e870fbdb5a0b",
+        "quick_image.py": "5fad922bda9c7893645dd3fd0fdc265affec075d5e112cf02dd9c3e2fa36f77e",
+        "setup_recovery.py": "2807a75e7a3fbc0d324b97c29f9a324e8ee1a5c5d4721e6fedb33b6e941001db",
+        "site_crawler.py": "6b6d8090bf90888407906359fb530251727a39008c557ea023b39995ae95e56f",
+        "skill_hub.py": "848defc78c1e04c9de9df6e9adf4cb4051400a2beea0b808ba1b4bf78c5be04d",
+        "Validation/test_project_memory.py": "0952525304a444ed8e4fc6afb045084255fa4184573cd9844785424d2a7923aa",
+        "Validation/test_quick_calculator.py": "6b01a7eb2615702ffb6dd9ebbae0c013448cad8a6f423ad67086cb3c723f05ca",
+        "project_memory.py": "48604bb05756ab9fe64be1e2abf3594e9502c9abed1e90f05d5a4207ed6102dd"
+      },
+      "qualification_source": "d026808966d2d8b46f2675596095855f1c340a2a",
+      "qualification_log_sha256": "be4c8d2b6f9e6d5d41ffbc1339524ffa9c634ecec8bea956eb7a7d47649ae9eb"
+    }
+  },
+  "sha256": {
+    "Validation/test_context_window.py": "c9f53e1f2c4988d737e275be590075f6b95f3867ebc8f208960c7620d66d8369",
+    "Validation/test_donation_regressions.py": "3838c6c71c6c9bdaba68bd0569e7d1712efa8c7f0885403ea693d3f5add842b4",
+    "Validation/test_project_documents.py": "aa010623356c58147c8c7b0664b626f97a689a7197ba61e767171ff01a51a31e",
+    "Validation/test_public_api_catalog.py": "1cd6fc03f3230563100a3d36e252a26952e3f525924a112cc767dea2c26cea77",
+    "Validation/test_quick_image.py": "46ce7df4add5989051d869e21ef6c8e916c35109393a20d702b19b6a94bc23fb",
+    "Validation/test_setup_recovery.py": "02e85ee7447153b8eda9cd16f6c98fbf03fb7642d5b547f15dc9c89bdc3a7983",
+    "Validation/test_site_crawler.py": "11695680d68e24c05e49b558df039ea53de78e6e495e1093073b31e7d88be552",
+    "Validation/test_skill_hub.py": "99b7d4c1f23d9085de3298ec18faf4e78c7b891f6be9086bb5161979cf38f8f6",
+    "context_window.py": "738d371f0bbf5766326086cb5b33841bef5d639b268b44a28fc6b4ed0a11f556",
+    "project_documents.py": "f40bf28e629a51060ffccfd72eb70cfe5513ac660ed1f628bf7c50c8a4e35910",
+    "public_api_catalog.py": "b293b00bb986b9b96ce453ea64209e449e0ce928417c33d4e92cc9307bbec566",
+    "quick_calculator.py": "03799a1d9d35b320908614ea4daa52b4a0734fefea1cca0ea9f3e870fbdb5a0b",
+    "quick_image.py": "5fad922bda9c7893645dd3fd0fdc265affec075d5e112cf02dd9c3e2fa36f77e",
+    "setup_recovery.py": "2807a75e7a3fbc0d324b97c29f9a324e8ee1a5c5d4721e6fedb33b6e941001db",
+    "site_crawler.py": "6b6d8090bf90888407906359fb530251727a39008c557ea023b39995ae95e56f",
+    "skill_hub.py": "848defc78c1e04c9de9df6e9adf4cb4051400a2beea0b808ba1b4bf78c5be04d",
+    "Validation/test_project_memory.py": "0952525304a444ed8e4fc6afb045084255fa4184573cd9844785424d2a7923aa",
+    "Validation/test_quick_calculator.py": "6b01a7eb2615702ffb6dd9ebbae0c013448cad8a6f423ad67086cb3c723f05ca",
+    "project_memory.py": "48604bb05756ab9fe64be1e2abf3594e9502c9abed1e90f05d5a4207ed6102dd"
+  },
+  "qualified_candidate": {
+    "status": "QUALIFIED ISOLATED544 EIGHT-PR CANDIDATE; corrected923/929 FFpushed only; no main/merge/release/install",
+    "base": "d9e39611c2499930a82145316bcb3fe331bf13d0",
+    "candidate_commit": "d026808966d2d8b46f2675596095855f1c340a2a",
+    "candidate_directory": "C:\\Users\\tahoe\\Documents\\Codex\\2026-10-31\\can\\outputs\\review-donation-pytest-540",
+    "branch": "review-921-929-combined-544",
+    "patch": "combined-qualified.patch",
+    "patch_sha256": "fef4eaf0c6e8807eff0102d1e9e29e4f9104334d7f93444b204b5360635e078d",
+    "rows": [
+      {
+        "number": 921,
+        "head": "e850e46df457b644eeec9c796c01449d3883a489",
+        "state": "open",
+        "draft": true,
+        "original_head": "e850e46df457b644eeec9c796c01449d3883a489",
+        "verdict": "accept",
+        "reason": "Re-resolve the requested path before returning cached/image text. Submitted symlink test skips here; actual owned Windows junction retarget baseline fails stale-return assertion and candidate passes, preserving both source files.",
+        "branch": "cale-donation-f501c6104ca64679"
+      },
+      {
+        "number": 922,
+        "head": "d6b1cae7c5991574180832a1333dd08f01045acc",
+        "state": "open",
+        "draft": true,
+        "original_head": "d6b1cae7c5991574180832a1333dd08f01045acc",
+        "verdict": "accept",
+        "reason": "Missing model-size field now reaches the existing explicit unknown-weight rejection instead of leaking KeyError; does not budget missing weights as zero.",
+        "branch": "cale-donation-2ac9c98e451d48f8"
+      },
+      {
+        "number": 923,
+        "head": "66e8e7e90c04c822d2fa5d9de5b610a36d0d72c6",
+        "state": "open",
+        "draft": true,
+        "original_head": "a1bbc1580204293679d034a63f8bb0beeac5052a",
+        "verdict": "accept_corrected",
+        "reason": "Corrected real BufferedRandom initialization and close retry;26PASS+realIO proof supersedes submitted MagicMock-only claim.",
+        "branch": "cale-donation-df0016b7e778474d"
+      },
+      {
+        "number": 924,
+        "head": "5c7e672dd41e0290dcacc79f40935249a4fabbbf",
+        "state": "open",
+        "draft": true,
+        "original_head": "5c7e672dd41e0290dcacc79f40935249a4fabbbf",
+        "verdict": "accept",
+        "reason": "Overflowing recorded worker PID no longer strands recovery before the existing queued retry; no live worker process was started in tests.",
+        "branch": "cale-donation-750401de93b04054"
+      },
+      {
+        "number": 925,
+        "head": "97ed6df1f5c91e3925ad0994d9d70a16e8df9a9f",
+        "state": "open",
+        "draft": true,
+        "original_head": "97ed6df1f5c91e3925ad0994d9d70a16e8df9a9f",
+        "verdict": "accept",
+        "reason": "Converging redirect destinations are saved/indexed once while preserving the attempted-visit budget and sibling traversal.",
+        "branch": "cale-donation-38a01e28693d4091"
+      },
+      {
+        "number": 927,
+        "head": "29f698e02b33c1e7dbd06bfddf00f6c68c3106e8",
+        "state": "open",
+        "draft": true,
+        "original_head": "29f698e02b33c1e7dbd06bfddf00f6c68c3106e8",
+        "verdict": "accept",
+        "reason": "Canonical Unicode normalization before casefold makes equivalent Greek topic queries match without changing displayed text or inspection state.",
+        "branch": "cale-donation-a20f8339c6974c34"
+      },
+      {
+        "number": 928,
+        "head": "ae8f115447ad4875ecb197977d74424e4b67f5e8",
+        "state": "open",
+        "draft": true,
+        "original_head": "ae8f115447ad4875ecb197977d74424e4b67f5e8",
+        "verdict": "accept",
+        "reason": "Calculator formatting uses an independent decimal context and preserves caller traps/flags; actual repeating-fraction baseline raises and candidate succeeds.",
+        "branch": "cale-donation-66f39842803c480f"
+      },
+      {
+        "number": 929,
+        "head": "560bd49e111b9fa6b524d6f6bf086240aa104faa",
+        "state": "open",
+        "draft": true,
+        "original_head": "e000b0bb8a2507c8893877fcf1f24742b5f9b312",
+        "verdict": "accept_corrected",
+        "reason": "Reject advertised-length truncated JSON without replacing last good cache. Real HTTPResponse reproduction fails before/passes after. Fourteen old mocked response fixtures now explicitly supply absent headers; runtime validation is unchanged.",
+        "branch": "cale-donation-48aa96a8713d4827"
+      }
+    ],
+    "excluded": [
+      {
+        "number": 920,
+        "reason": "Submitted positive caption assertion stillfails; no salvage/relaxation in batch."
+      },
+      {
+        "number": 926,
+        "reason": "POSIX filename behavior not actually qualified on Windows; compatibility31PASS2SKIP not a genuinePOSIXproof."
+      }
+    ],
+    "full_combined_qualification": {
+      "modules": [
+        "Validation/test_context_window.py",
+        "Validation/test_donation_regressions.py",
+        "Validation/test_project_documents.py",
+        "Validation/test_project_memory.py",
+        "Validation/test_public_api_catalog.py",
+        "Validation/test_quick_calculator.py",
+        "Validation/test_quick_image.py",
+        "Validation/test_setup_recovery.py",
+        "Validation/test_site_crawler.py",
+        "Validation/test_skill_hub.py"
+      ],
+      "passed": 300,
+      "skipped": 6,
+      "subtests_passed": 210,
+      "pytest_elapsed_seconds": 42.79,
+      "process_elapsed_seconds": 43.77723910001805,
+      "exitcode": 0,
+      "log": "combined-544.log",
+      "log_sha256": "be4c8d2b6f9e6d5d41ffbc1339524ffa9c634ecec8bea956eb7a7d47649ae9eb",
+      "skips": "All6 file-symlink creation privilege/environment skips; original921 actual ownedWindowsjunction stale-cache RED/GREEN preserved separately."
+    },
+    "source_bindings": {
+      "Validation/test_context_window.py": {
+        "raw_sha256": "c9f53e1f2c4988d737e275be590075f6b95f3867ebc8f208960c7620d66d8369",
+        "commit_blob_sha256": "9567a5ae10d87a39ce3635cc2140f8ae93189a84bf37b86b0443717f9e97bf27",
+        "normalized_LF_equal": true
+      },
+      "Validation/test_donation_regressions.py": {
+        "raw_sha256": "3838c6c71c6c9bdaba68bd0569e7d1712efa8c7f0885403ea693d3f5add842b4",
+        "commit_blob_sha256": "fb685ee2397939c866c334efcc5511454ed305ebc54b8b1d15d5e0907e0d7d02",
+        "normalized_LF_equal": true
+      },
+      "Validation/test_project_documents.py": {
+        "raw_sha256": "aa010623356c58147c8c7b0664b626f97a689a7197ba61e767171ff01a51a31e",
+        "commit_blob_sha256": "d1c9062f36001a7fef90ce68d866f5fb57e7ea0f4337c14fb4e83ff4cba2bbcb",
+        "normalized_LF_equal": true
+      },
+      "Validation/test_public_api_catalog.py": {
+        "raw_sha256": "1cd6fc03f3230563100a3d36e252a26952e3f525924a112cc767dea2c26cea77",
+        "commit_blob_sha256": "b52895177987aadf9cc855163e206e56ae674df57a0c01570407fe4089957497",
+        "normalized_LF_equal": true
+      },
+      "Validation/test_quick_image.py": {
+        "raw_sha256": "46ce7df4add5989051d869e21ef6c8e916c35109393a20d702b19b6a94bc23fb",
+        "commit_blob_sha256": "91783b7250e280f8aea6aae62c4fd7994ff1369b60bf4b46182ee394a032487d",
+        "normalized_LF_equal": true
+      },
+      "Validation/test_setup_recovery.py": {
+        "raw_sha256": "02e85ee7447153b8eda9cd16f6c98fbf03fb7642d5b547f15dc9c89bdc3a7983",
+        "commit_blob_sha256": "4f1c18fd151f9fcec6d148df82a1a3010fbf0c3a104c641fb604cdedf8f6a0dc",
+        "normalized_LF_equal": true
+      },
+      "Validation/test_site_crawler.py": {
+        "raw_sha256": "11695680d68e24c05e49b558df039ea53de78e6e495e1093073b31e7d88be552",
+        "commit_blob_sha256": "6199a16b631c874582a74e553d30cb62121d8d14af2d28dcf6a1c228bfe92d57",
+        "normalized_LF_equal": true
+      },
+      "Validation/test_skill_hub.py": {
+        "raw_sha256": "99b7d4c1f23d9085de3298ec18faf4e78c7b891f6be9086bb5161979cf38f8f6",
+        "commit_blob_sha256": "c867ce4c97c5f188598b4099d0669caac3050fc982fd0ed4d83c91109fc11910",
+        "normalized_LF_equal": true
+      },
+      "context_window.py": {
+        "raw_sha256": "738d371f0bbf5766326086cb5b33841bef5d639b268b44a28fc6b4ed0a11f556",
+        "commit_blob_sha256": "849efc1d7d3ed7fbdd86c4be542cfae7a9eac54b5aec1b1dbbd617a26a7f394f",
+        "normalized_LF_equal": true
+      },
+      "project_documents.py": {
+        "raw_sha256": "f40bf28e629a51060ffccfd72eb70cfe5513ac660ed1f628bf7c50c8a4e35910",
+        "commit_blob_sha256": "0ca6c31e5e896e65c8f0c35730befc7ef5bb15bbda0a00130c359013c3c59da0",
+        "normalized_LF_equal": true
+      },
+      "public_api_catalog.py": {
+        "raw_sha256": "b293b00bb986b9b96ce453ea64209e449e0ce928417c33d4e92cc9307bbec566",
+        "commit_blob_sha256": "d8d3054efe7f3fad80126c01fcb17f0a276ca896155009695defd970d8911e27",
+        "normalized_LF_equal": true
+      },
+      "quick_calculator.py": {
+        "raw_sha256": "03799a1d9d35b320908614ea4daa52b4a0734fefea1cca0ea9f3e870fbdb5a0b",
+        "commit_blob_sha256": "37555e1f840960e895cc3d489a8dc72c3dacda5086f82778fec38f15626a2ee2",
+        "normalized_LF_equal": true
+      },
+      "quick_image.py": {
+        "raw_sha256": "5fad922bda9c7893645dd3fd0fdc265affec075d5e112cf02dd9c3e2fa36f77e",
+        "commit_blob_sha256": "af5b3045bc4400b947caa0d3fdb11d2385d3531be1d3e9d531bc3643222b5db0",
+        "normalized_LF_equal": true
+      },
+      "setup_recovery.py": {
+        "raw_sha256": "2807a75e7a3fbc0d324b97c29f9a324e8ee1a5c5d4721e6fedb33b6e941001db",
+        "commit_blob_sha256": "86dd09c3c4401021acef8d2a5d2bca8ee1c9869fd6da207271258d6165494634",
+        "normalized_LF_equal": true
+      },
+      "site_crawler.py": {
+        "raw_sha256": "6b6d8090bf90888407906359fb530251727a39008c557ea023b39995ae95e56f",
+        "commit_blob_sha256": "6d255297e0eb46a78df3ddc62dfd8c72564a70c18d9f907e4b3e779c4f7dd404",
+        "normalized_LF_equal": true
+      },
+      "skill_hub.py": {
+        "raw_sha256": "848defc78c1e04c9de9df6e9adf4cb4051400a2beea0b808ba1b4bf78c5be04d",
+        "commit_blob_sha256": "02fe3016d6f8f52b3e320216ad4df8e43dfbcf8a1260f12ca686d98906094f45",
+        "normalized_LF_equal": true
+      },
+      "Validation/test_project_memory.py": {
+        "raw_sha256": "0952525304a444ed8e4fc6afb045084255fa4184573cd9844785424d2a7923aa",
+        "commit_blob_sha256": "c81eef17b46b4de88529273ef2e294ae68d7916d9abef798ef121bb06321ebce",
+        "normalized_LF_equal": true
+      },
+      "Validation/test_quick_calculator.py": {
+        "raw_sha256": "6b01a7eb2615702ffb6dd9ebbae0c013448cad8a6f423ad67086cb3c723f05ca",
+        "commit_blob_sha256": "68c4b945f1564cef48bd62974f729ca8a4cad7d4e45bd8e78db875c5857fba74",
+        "normalized_LF_equal": true
+      },
+      "project_memory.py": {
+        "raw_sha256": "48604bb05756ab9fe64be1e2abf3594e9502c9abed1e90f05d5a4207ed6102dd",
+        "commit_blob_sha256": "c014b78beb9304af6b1c8f6bb016f71fd2ac86edded9a785eb00670c229fc0ed",
+        "normalized_LF_equal": true
+      }
+    },
+    "preserved_544_files": [
+      "project_memory.py",
+      "Validation/test_routing_memory.py",
+      "native_browser.py",
+      "Validation/test_native_browser.py",
+      "music_edit.py",
+      "Validation/test_music_edit.py",
+      "video_edit.py",
+      "Validation/test_video_edit.py",
+      "install-files.json"
+    ],
+    "excluded_source_files_unchanged": [
+      "music_style.py",
+      "Validation/test_music_style.py",
+      "music_stems.py",
+      "Validation/test_music_stems.py"
+    ],
+    "manifest_runtime_count": 250,
+    "new_runtime_files": 0,
+    "correction_provenance": {
+      "923": {
+        "old_real_buffered_close_failure": "../review-923-buffered-lock-critic/baseline-and-head-red.json",
+        "qualified_receipt": "../review-923-buffered-lock-critic/receipt.json",
+        "receipt_sha256": "775543cc14abc23657102e7043c8683ace613040a43a3508a6d8afad3f110f52",
+        "corrected_normalized_bytes_exact": true,
+        "combined_bytes_line_endings": "Combined appliespatchto544CRLFfiles; rawhashesrecorded above; normalized source exactly qualifiedarchive and strongtest reran incombinedsuite."
+      },
+      "929": {
+        "fixture_receipt": "../review-pr-920-929-evidence/929-fixture-qualification.json",
+        "fixture_receipt_sha256": "5a76a4def9f1ff0e9f3d64dbe6cea533a2f5d5dbec11ffe02b1c8cc86c81375a",
+        "correction": "14 explicitheaders={} fixture additions; realHTTPResponse regression and runtimeunchanged.",
+        "initial_failures_retained": [
+          "929-full.log:8fixtures",
+          "929-headers-fixtures-full.log:1interleavingfixture"
+        ]
+      }
+    },
+    "remote_actions": "remote-actions.json",
+    "prior_verdicts_sha256": "654e7be4d8a02fc7d54f65f5e94fc03458e7c4f4d0f8da584c6b0147040d22bc",
+    "source_frozen_through_combined_run": true,
+    "limits": [
+      "Only ownTEMP/fake network/process fixtures/synthetic CPU; no actualinstaller/model/device/live-service controls or userdata.",
+      "No ready/merge/close/main/release/install actions; all8 remain draft/open for parentguarded integration.",
+      "NormalFFpushes originalhead guarded via freshREST+lsremote; no force. Remote read statusnotatransaction/crossprocessgloballease.",
+      "921 realjunction proof doesnotgeneralize all filesystem races; sixskips explicitly retained.",
+      "No broader completion/autonomy/runtime qualification inferred."
+    ]
+  },
+  "limits": [
+    "Ten related full module suites, not general autonomous completion or full installed self-check.",
+    "Six file-symlink privilege skips retained; real owned Windows junction proof separately preserved.",
+    "Final-classification, whole-goal selector, held920 and POSIX926 are excluded."
+  ]
+}
