@@ -269,6 +269,40 @@ class TableMLTests(unittest.TestCase):
         self.assertEqual(_features(rows, schema),
                          [{"signal": -1.0}, {"signal": 1.0}])
 
+    def test_overflowed_holdout_metric_is_not_published_and_allows_retry(self):
+        from sklearn.model_selection import train_test_split
+
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            training = root / "training.csv"
+            model = root / "model.json"
+            _, test_ids = train_test_split(
+                list(range(40)), test_size=.2, random_state=42)
+            holdout = set(test_ids)
+            with training.open("w", newline="", encoding="utf-8") as stream:
+                writer = csv.writer(stream)
+                writer.writerow(["signal", "value"])
+                for index in range(40):
+                    writer.writerow([index, "1e308" if index in holdout else "0"])
+            # The fitted model sees only zero targets. Each holdout error is
+            # finite, but summing eight errors of 1e308 overflows the MAE.
+            with self.assertRaisesRegex(ValueError, "invalid holdout score"):
+                train_table_model(str(training), "value", str(model), "regression")
+            self.assertFalse(model.exists())
+            self.assertFalse(list(root.glob(".table-model-*")))
+
+            with training.open("w", newline="", encoding="utf-8") as stream:
+                writer = csv.writer(stream)
+                writer.writerow(["signal", "value"])
+                for index in range(40):
+                    writer.writerow([index, index * 2])
+            train_table_model(str(training), "value", str(model), "regression")
+            prediction = root / "new.csv"
+            prediction.write_text("signal\n5\n", encoding="utf-8")
+            result = predict_table_model(
+                str(model), str(prediction), str(root / "predicted.csv"))
+            self.assertEqual(result["rows"], 1)
+
     def test_regression_and_prediction(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)

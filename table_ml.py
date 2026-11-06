@@ -218,6 +218,9 @@ def train_table_model(csv_path: str, target_column: str, model_path: str,
                "intercepts": model.intercept_.tolist() if classes else [float(model.intercept_)],
                "metric": metric, "holdout_score": score, "baseline_score": baseline,
                "trained_rows": len(rows), "holdout_rows": len(y_test)}
+    # Finite inputs can still overflow fitted weights or aggregate metrics.
+    # Never publish a payload that the prediction loader would reject.
+    _checked_model(payload)
     # Publish only a complete model, without replacing a destination created
     # while training was running. Failed writes must leave the filename reusable.
     with tempfile.TemporaryDirectory(prefix=".table-model-", dir=output.parent) as temporary:
