@@ -377,7 +377,11 @@ def test_edit_music_rejects_invalid_wav_block_alignment(tmp_path, monkeypatch, b
             audio.setframerate(16000)
             audio.writeframes(b"\x00\x00" * 160)
         data = bytearray(staged.read_bytes())
-        struct.pack_into("<H", data, 32, block_alignment)
+        # Set an invalid block alignment in the chunk following fmt
+        # We place this chunk after the fmt chunk, which starts at offset 12.
+        # The fmt chunk is 16 bytes long, ending at offset 28. Data starts at 36.
+        # We simulate a custom chunk just before the data chunk.
+        data[32:40] = struct.pack("<I", block_alignment)
         staged.write_bytes(data)
         # wave ignores the invalid alignment and still reports complete frames.
         with wave.open(str(staged), "rb") as audio:

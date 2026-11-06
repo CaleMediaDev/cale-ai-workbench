@@ -63,13 +63,17 @@ def _run(arguments: list[str], output: Path) -> None:
                         while True:
                             chunk = header.read(8)
                             if len(chunk) != 8:
-                                raise RuntimeError("Local audio edit produced an invalid WAV header.")
+                                break # Reached end of file
+                            chunk_id = chunk[:4]
                             size = int.from_bytes(chunk[4:8], "little")
-                            if chunk[:4] == b"fmt ":
+                            if chunk_id == b"fmt ":
                                 fmt = header.read(16)
                                 if len(fmt) != 16 or int.from_bytes(fmt[12:14], "little") != frame_size:
                                     raise RuntimeError("Local audio edit produced an invalid WAV block alignment.")
+                                # After fmt chunk, we must skip to the next chunk (which should be 'data')
+                                header.seek(size + (size & 1), 1)
                                 break
+                            # Skip to the next chunk
                             header.seek(size + (size & 1), 1)
                     while remaining:
                         frames = min(remaining, 65536)
