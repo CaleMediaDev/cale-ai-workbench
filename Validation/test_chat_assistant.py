@@ -459,6 +459,21 @@ def test_single_second_abbreviations_preserve_duration_and_validate_range(unit):
         chat_assistant.music_request(f"Make a 5 {unit} song")
 
 
+@pytest.mark.parametrize("request, seconds", [
+    ("Make a 1.5-minute song", 90),
+    ("Make a 0.5 minute song", 30),
+    ("Make a 1.5 minute and 30 second song", 120),
+    ("Make a 45.5-second jingle", 46),
+])
+def test_decimal_song_durations_are_not_parsed_as_the_fractional_digits(request, seconds):
+    assert chat_assistant.music_request(request)["duration_seconds"] == seconds
+
+
+def test_decimal_song_duration_still_enforces_render_limit():
+    with pytest.raises(ValueError, match="10 seconds to 10 minutes"):
+        chat_assistant.music_request("Make a 10.5-minute song")
+
+
 def test_spoken_song_durations_keep_the_requested_length():
     for request, seconds in (
         ("Make a three-minute song", 180),

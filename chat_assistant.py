@@ -133,11 +133,11 @@ def music_request(text: str, *, reference: bool = False) -> dict | None:
     )
     clock = re.search(r"\b(\d{1,2}):([0-5]\d)\b", duration_text)
     combined = re.search(
-        r"\b(\d+)\s*(?:-\s*)?(?:minutes?|mins?|min)\s*(?:and\s*)?"
-        r"(\d+)\s*(?:-\s*)?(?:seconds?|secs?|sec|s)\b", duration_text, re.IGNORECASE,
+        r"\b(\d+(?:\.\d+)?)\s*(?:-\s*)?(?:minutes?|mins?|min)\s*(?:and\s*)?"
+        r"(\d+(?:\.\d+)?)\s*(?:-\s*)?(?:seconds?|secs?|sec|s)\b", duration_text, re.IGNORECASE,
     )
     single_candidates = re.finditer(
-        r"\b(\d+)\s*(?:-|\s)?\s*(seconds?|secs?|sec|minutes?|mins?|min|s)\b",
+        r"\b(\d+(?:\.\d+)?)\s*(?:-|\s)?\s*(seconds?|secs?|sec|minutes?|mins?|min|s)\b",
         duration_text, re.IGNORECASE,
     )
     # In a style brief, "1990s" and "2000s" are decades, not seconds.
@@ -162,9 +162,9 @@ def music_request(text: str, *, reference: bool = False) -> dict | None:
     if clock:
         duration = int(clock.group(1)) * 60 + int(clock.group(2))
     elif combined:
-        duration = int(combined.group(1)) * 60 + int(combined.group(2))
+        duration = round(float(combined.group(1)) * 60 + float(combined.group(2)))
     elif single:
-        duration = int(single.group(1)) * (60 if single.group(2).lower().startswith("min") else 1)
+        duration = round(float(single.group(1)) * (60 if single.group(2).lower().startswith("min") else 1))
     else:
         # A plain song should be full length. A beat or jingle is a short
         # deliverable unless the person names a duration or also asks for a song.
