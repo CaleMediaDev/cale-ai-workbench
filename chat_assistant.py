@@ -131,6 +131,14 @@ def music_request(text: str, *, reference: bool = False) -> dict | None:
         lambda match: str(DURATION_WORDS[match.group(1).casefold()]),
         prompt, flags=re.I,
     )
+    # Do not let the unsigned duration patterns skip a negative sign and
+    # silently turn an invalid requested quantity into a positive duration.
+    if re.search(
+        r"(?<![\w.])-\s*(?:\d+(?:\.\d+)?|\.\d+)\s*(?:-\s*)?"
+        r"(?:minutes?|mins?|min|seconds?|secs?|sec|s)\b",
+        duration_text, re.IGNORECASE,
+    ):
+        raise ValueError("Local music can render 10 seconds to 10 minutes. Please choose a duration in that range.")
     clock = re.search(r"\b(\d{1,2}):([0-5]\d)\b", duration_text)
     combined = re.search(
         r"(?<![\w.])(\d+(?:\.\d+)?|\.\d+)\s*(?:-\s*)?(?:minutes?|mins?|min)\s*(?:and\s*)?"
