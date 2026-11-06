@@ -319,12 +319,14 @@ class Player:
 
     def resume(self):
         if self.paused_at is not None:
-            if self.mixing:
-                self.fade_start += self.now()-self.paused_at
-            self.paused_at = None
+            # Keep the pause state retryable if an audio command fails.
+            # AudioDeck.resume is a no-op for decks already playing.
             for deck in (self.active, self.outgoing):
                 if deck is not None:
                     deck.resume()
+            if self.mixing:
+                self.fade_start += self.now()-self.paused_at
+            self.paused_at = None
 
     def set_volume(self, value):
         self.volume = max(0, min(100, int(value)))
