@@ -98,6 +98,38 @@ def test_search_public_apis_rejects_non_integer_limits_before_catalog_access(max
     catalog.assert_not_called()
 
 
+def test_catalog_preserves_stale_snapshot_on_truncated_http_response(tmp_path):
+    from http.client import HTTPResponse
+    from io import BytesIO
+
+    cache = tmp_path / "apis.json"
+    snapshot = [{"name": "Last good snapshot"}]
+    original = json.dumps(snapshot).encode("utf-8")
+    cache.write_bytes(original)
+    expired = cache.stat().st_mtime + public_api_catalog.MAX_AGE + 1
+    downloaded = b'[{"name":"Incomplete replacement"}]'
+
+    class Socket:
+        def makefile(self, *args, **kwargs):
+            return BytesIO(
+                b"HTTP/1.1 200 OK\r\nContent-Length: "
+                + str(len(downloaded) + 10).encode("ascii")
+                + b"\r\n\r\n" + downloaded
+            )
+
+    response = HTTPResponse(Socket())
+    response.begin()
+    with patch.object(public_api_catalog, "CACHE", cache), \
+         patch.object(public_api_catalog.time, "time", return_value=expired), \
+         patch.object(public_api_catalog, "urlopen", return_value=response) as opened:
+        data, fresh = public_api_catalog._catalog()
+
+    opened.assert_called_once()
+    assert data == snapshot
+    assert fresh is False
+    assert cache.read_bytes() == original
+
+
 def test_catalog_preserves_stale_snapshot_on_incompatible_encoding(tmp_path):
     cache = tmp_path / "apis.json"
     snapshot = [{"name": "Last good snapshot"}]

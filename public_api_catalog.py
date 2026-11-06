@@ -56,8 +56,11 @@ def _catalog() -> tuple[list[dict], bool]:
             request = Request(SOURCE, headers={"User-Agent": "Cale-AI-Workbench/1.0"})
             with urlopen(request, timeout=15) as response:
                 raw = response.read(MAX_BYTES + 1)
+                content_length = response.headers.get("Content-Length")
             if len(raw) > MAX_BYTES:
                 raise ValueError("Public API catalog exceeded its download limit.")
+            if content_length is not None and len(raw) != int(content_length):
+                raise ValueError("Public API catalog download was incomplete.")
             parsed = json.loads(raw.decode("utf-8"), parse_constant=_reject_json_constant,
                                 parse_float=_parse_finite_float)
             if not isinstance(parsed, list) or not all(isinstance(entry, dict) for entry in parsed):
