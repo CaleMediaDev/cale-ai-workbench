@@ -1207,10 +1207,13 @@ def repair_vision_alias() -> bool:
                     return True
             except (OSError, ValueError):
                 pass
-            sources = dict.fromkeys((
-                "cale-fast", CATALOG["main"]["alias"], "cale-local",
-                main_source_record().get("source", ""),
-            ))
+            sources = dict.fromkeys(
+                source for source in (
+                    "cale-fast", CATALOG["main"]["alias"], "cale-local",
+                    main_source_record().get("source", ""),
+                )
+                if isinstance(source, str) and source
+            )
             for source in sources:
                 if not source or source == "cale-vision":
                     continue
