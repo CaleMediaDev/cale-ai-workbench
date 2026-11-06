@@ -236,6 +236,39 @@ def test_failed_repair_launch_returns_false_and_releases_lock(tmp_path, monkeypa
     assert "launch unavailable" in (state / "base-install-repair.log").read_text()
 
 
+def test_unavailable_repair_log_returns_false_and_releases_lock(tmp_path, monkeypatch):
+    state = tmp_path / "LongTasks"
+    state.mkdir()
+    (tmp_path / "Install-Backend.ps1").write_text("# fixture", encoding="utf-8")
+    (state / "install-progress.json").write_text(json.dumps({
+        "status": "error", "current": "Setup needs attention: download failed",
+        "updated": 1,
+    }), encoding="utf-8")
+    # A directory cannot be opened as an append-only log file.
+    (state / "base-install-repair.log").mkdir()
+    monkeypatch.setattr(setup_recovery, "ROOT", tmp_path)
+    monkeypatch.setattr(setup_recovery, "STATE", state)
+    monkeypatch.setattr(setup_recovery.time, "time", lambda: 10000)
+    monkeypatch.setattr(setup_recovery, "_installer_running", lambda progress: False)
+    monkeypatch.setattr(setup_recovery, "_retry_runner_running", lambda: False)
+    locking = MagicMock()
+    locking.LK_NBLCK = 1
+    locking.LK_UNLCK = 2
+    with patch.dict("sys.modules", {"msvcrt": locking}), patch.object(
+        setup_recovery.subprocess, "Popen"
+    ) as launch:
+        assert setup_recovery.recover() is False
+        launch.assert_not_called()
+        assert locking.locking.call_count == 2
+        assert locking.locking.call_args.args[1:] == (locking.LK_UNLCK, 1)
+        # Preserve the existing attempt consumption and retry backoff.
+        assert setup_recovery.recover() is False
+        assert locking.locking.call_count == 2
+    assert json.loads((state / "base-install-repair.json").read_text()) == {
+        "attempts": 1, "started": 10000,
+    }
+
+
 def test_base_setup_repair_ignores_active_or_feature_setup(tmp_path, monkeypatch):
     state = tmp_path / "LongTasks"
     state.mkdir()
