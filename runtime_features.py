@@ -107,7 +107,13 @@ def _installer_running(pid=None) -> bool:
                     break
                 # Interpreter option values do not enable installation; only
                 # arguments following the script are parsed by its CLI.
-                if not install_flags.intersection(arguments):
+                installing = False
+                for argument in arguments:
+                    if argument == "--":
+                        break
+                    if argument in install_flags:
+                        installing = True
+                if not installing:
                     continue
                 if any(part.is_absolute() and part.resolve() == script for part in candidates):
                     return True
