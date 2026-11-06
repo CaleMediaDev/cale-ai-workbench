@@ -2,6 +2,8 @@
 
 **A Windows assistant that builds with tools, saves its progress, and runs local models.**
 
+Release 0.5.537 includes 24 reviewed donation fixes for task progress, routing, browser observations, local model predictions, setup and media recovery. Four proposals were corrected before acceptance; the FTS regression was rejected. A test-only self-check correction removes a fragile startup-time assumption. [Validation and limits](benchmarks/results/reviewed-donations-537-20261106.json).
+
 Release 0.5.536 includes 14 reviewed donation fixes for local memory, file handling, routing, voice setup, image recovery, music tools and gauges. One unsafe proposal was rejected; decoder compatibility coverage is explicit. [Validation and limits](benchmarks/results/reviewed-donations-536-20261106.json).
 
 Release 0.5.535 adds browser-computed accessible role/name checks, preserves them during saved-check repairs, and keeps the tool catalog within the existing small-context regression budgets. [Validation and limits](benchmarks/results/accessibility-checker-535-20261105.json).

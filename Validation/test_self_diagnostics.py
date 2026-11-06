@@ -1206,9 +1206,13 @@ def test_parent_source_replacement_after_child_failure_is_incomplete_not_current
 
 
 def test_real_wall_timeout_stops_owned_child_once_without_accepting_partial_failures(tmp_path, monkeypatch):
+    import time
+    import psutil
     source = """from pathlib import Path
 import os,time
 root=Path.cwd()
+# Deliberately exceed the artificial one-second budget before the first case.
+time.sleep(2.5)
 
 def test_a():
     assert False, 'observed failure before timeout'
@@ -1223,15 +1227,64 @@ def test_c():
     root, state = live_install(tmp_path, source)
     (state / "self-check.json").write_text(json.dumps({
         "version": diagnostics.version(root), "status": "failed", "failures": 2}), encoding="utf-8")
-    with patch.object(diagnostics, "MAX_SECONDS", 1), patch.object(
-            diagnostics, "_stop_check", wraps=diagnostics._stop_check) as stopped:
-        report = run_live(root, state, monkeypatch)
-    stopped.assert_called_once()
+    original_popen = diagnostics.subprocess.Popen
+    original_stop = diagnostics._stop_check
+    children = []
+    readiness = []
+
+    def launch_until_failure_is_finalized(*args, **kwargs):
+        child = original_popen(*args, **kwargs)
+        if list(args[0])[1:] != diagnostics._PYTEST_ARGUMENTS:
+            return child
+        children.append(child)
+        context = json.loads(kwargs["env"][diagnostics._LIVE_ENV])
+        deadline = time.monotonic() + 20
+        while time.monotonic() < deadline:
+            progress = diagnostics._read_live_progress(context)
+            pid_file = root / "child-pid.txt"
+            try:
+                ready_pid = int(pid_file.read_text())
+            except (OSError, ValueError):
+                ready_pid = None  # The child may still be creating/writing it.
+            if (progress.get("completed") == 1 and progress.get("failed") == 1
+                    and progress.get("child_pid") == ready_pid):
+                readiness.append(progress)
+                return child
+            if child.poll() is not None:
+                raise AssertionError("Owned test child exited before the readiness barrier")
+            time.sleep(.02)
+        raise AssertionError("Owned test child did not finalize its first failure within twenty seconds")
+
+    try:
+        # Only this test's Popen return waits for real progress. The production
+        # monotonic clock and one-second TOTAL wall limit stay unchanged: slow
+        # startup has already consumed that limit when the real child returns.
+        with patch.object(diagnostics, "MAX_SECONDS", 1), patch.object(
+                diagnostics.subprocess, "Popen", side_effect=launch_until_failure_is_finalized), patch.object(
+                diagnostics, "_stop_check", wraps=original_stop) as stopped:
+            report = run_live(root, state, monkeypatch)
+        stopped.assert_called_once()
+        assert len(children) == 1 and len(readiness) == 1
+        # Check production reaping before fallback cleanup can hide a failure.
+        assert all(child.poll() is not None for child in children)
+        assert not psutil.pid_exists(int((root / "child-pid.txt").read_text()))
+    finally:
+        for child in children:
+            if child.poll() is None:
+                original_stop(child)  # Cleanup only this test's owned child on assertion/error.
+        for progress in readiness:
+            try:
+                child = psutil.Process(progress["child_pid"])
+                if abs(child.create_time() - progress["child_started"]) < .01:
+                    child.kill()  # Reap an orphan only if its recorded identity still matches.
+                    child.wait(timeout=5)
+            except psutil.NoSuchProcess:
+                pass
+    assert all(child.poll() is not None for child in children)
     assert report["status"] == "interrupted" and report["failures"] == 2
     assert report["progress"]["completed"] == 1 and report["progress"]["failed"] == 1
     assert report["progress"]["complete"] is False
     assert "exceeded its time limit" in (state / "self-check.log").read_text(encoding="utf-8")
     assert not (root / "must-not-start.txt").exists()
-    import psutil
     assert not psutil.pid_exists(int((root / "child-pid.txt").read_text()))
     assert psutil.Process().is_running()
