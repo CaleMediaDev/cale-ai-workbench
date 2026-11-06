@@ -109,6 +109,8 @@ def master_music(source_path: str, reference_path: str, output_path: str) -> dic
                     raise
                 else:
                     destination.close()
+                    if not os.path.samestat(created_stat, output.lstat()):
+                        raise RuntimeError("The output file changed during publication.")
             except BaseException as exc:
                 try:
                     # Another operation may have moved or replaced the partial
