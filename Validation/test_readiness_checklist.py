@@ -178,6 +178,29 @@ def test_local_browser_is_ready_without_optional_chrome_pairing(tmp_path):
     assert "Chrome tabs need your approval" in rows["Browser tools"]["detail"]
 
 
+@pytest.mark.parametrize("folder_name", [
+    "install#one",
+    pytest.param("install?one", marks=pytest.mark.skipif(
+        os.name == "nt", reason="Windows filenames cannot contain a question mark")),
+    "install%23one",
+])
+def test_local_completion_health_handles_uri_special_characters(tmp_path, folder_name):
+    root = tmp_path / folder_name
+    state = root / "LongTasks"
+    state.mkdir(parents=True)
+    database = state / "usage.db"
+    with sqlite3.connect(database) as connection:
+        connection.execute(
+            "CREATE TABLE usage_events (timestamp REAL, source TEXT, model TEXT, completion_tokens INTEGER)")
+        connection.execute("INSERT INTO usage_events VALUES (?,?,?,?)",
+                           (time.time(), "ollama", "cale-fast", 5))
+    original = database.read_bytes()
+
+    assert readiness_checklist._recent_local_completion(
+        root, ["cale-fast:latest"]) == "cale-fast"
+    assert database.read_bytes() == original
+
+
 def test_real_local_completion_verifies_a_currently_installed_model(tmp_path):
     state = tmp_path / "LongTasks"
     state.mkdir()

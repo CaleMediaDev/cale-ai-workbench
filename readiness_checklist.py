@@ -101,7 +101,7 @@ def _recent_local_completion(root: Path, available: list[str]) -> str:
         return ""
     aliases = {name.split(":", 1)[0] for name in available}
     try:
-        with sqlite3.connect(f"file:{database.as_posix()}?mode=ro", uri=True,
+        with sqlite3.connect(database.resolve().as_uri() + "?mode=ro", uri=True,
                              timeout=2) as connection:
             rows = connection.execute(
                 "SELECT model FROM usage_events WHERE source='ollama' "
