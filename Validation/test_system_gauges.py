@@ -89,7 +89,7 @@ def test_drive_gauge_tracks_volume_with_models(monkeypatch):
 
 
 def test_disk_transfer_speed_uses_counter_delta_and_elapsed_time():
-    assert system_gauges.disk_transfer_speed((0, 0), (8_000_000, 2_000_000), 2) == (4, 1)
+    assert system_gauges.disk_transfer_speed((0, 0), (8_000_000, 2_000_000), 2) == (4.0, 1.0)
     assert system_gauges.disk_transfer_speed(None, (10, 20), 2) == (None, None)
 
 

@@ -137,9 +137,13 @@ def disk_transfer_speed(previous, current, elapsed):
         return None, None
     if any(current[index] < previous[index] for index in (0, 1)):
         return None, None
+    
+    delta_read = current[0] - previous[0]
+    delta_write = current[1] - previous[1]
+
     return (
-        max(0, (current[0] - previous[0]) / elapsed / 1_000_000),
-        max(0, (current[1] - previous[1]) / elapsed / 1_000_000),
+        max(0, delta_read / elapsed / 1_000_000),
+        max(0, delta_write / elapsed / 1_000_000),
     )
 
 
