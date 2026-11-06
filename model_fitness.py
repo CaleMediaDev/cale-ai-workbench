@@ -418,7 +418,7 @@ def rank_game_models(ordered, catalog, root, weights=None):
                 and 0 <= time.time() - record["updated"] < 30 * 86400
                 and 0 < record["seconds"] < 300
             )
-        except (KeyError, TypeError, AttributeError):
+        except (KeyError, TypeError, AttributeError, OverflowError):
             valid = False
         if valid:
             scores[alias] = build.get("seconds", 0) + 2 * record["seconds"]
@@ -463,7 +463,7 @@ def game_probe_current(source, root, info=None):
             and 0 <= time.time() - report["updated"] < 30 * 86400
             and isinstance(report.get("build", {}).get("passed"), bool)
         )
-    except (OSError, ValueError, KeyError, TypeError, AttributeError, RecursionError):
+    except (OSError, ValueError, KeyError, TypeError, AttributeError, OverflowError, RecursionError):
         return False
 
 

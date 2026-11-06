@@ -352,6 +352,48 @@ def test_game_probe_current_rejects_nested_cache_and_recovers():
             post.assert_not_called()
 
 
+def test_game_cache_overflowing_timestamp_falls_back_and_recovers(tmp_path):
+    source = "candidate:7b"
+    catalog = {
+        "old": {"alias": "baseline"},
+        "new": {"alias": "candidate", "source": source, "coding_probe": True},
+    }
+    weights = {"candidate": "a" * 64}
+    record = {
+        "version": model_fitness.GAME_PROBE_VERSION,
+        "passed": True,
+        "seconds": 1,
+        "build": {"passed": True, "seconds": 10},
+        "weights": "a" * 64,
+        "vram_gb": 12,
+        "ram_gb": 32,
+        "updated": 10 ** 400,
+    }
+    path = tmp_path / "LongTasks/game-model-probes.json"
+    path.parent.mkdir()
+    path.write_text(json.dumps({source: record}), encoding="utf-8")
+    with (
+        patch.object(model_fitness, "gpu_vram_gb", return_value=12),
+        patch.object(model_library, "total_ram_gb", return_value=32),
+        patch.object(model_library, "weight_blob", return_value="a" * 64),
+    ):
+        assert model_fitness.rank_game_models(
+            ["candidate", "baseline"], catalog, tmp_path, weights
+        ) == ["baseline"]
+        assert model_fitness.game_probe_current(
+            source, tmp_path, info={"model": source}
+        ) is False
+
+        record["updated"] = time.time()
+        path.write_text(json.dumps({source: record}), encoding="utf-8")
+        assert model_fitness.rank_game_models(
+            ["candidate", "baseline"], catalog, tmp_path, weights
+        ) == ["candidate", "baseline"]
+        assert model_fitness.game_probe_current(
+            source, tmp_path, info={"model": source}
+        ) is True
+
+
 def test_game_probe_requires_two_complete_independent_passes():
     with tempfile.TemporaryDirectory() as folder:
         checks = {str(i): True for i in range(13)}
