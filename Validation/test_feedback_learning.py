@@ -929,3 +929,53 @@ def test_indexed_hash_drop_marks_partial_and_uses_fresh_raw_fallback(tmp_path):
     assert "Raw authoritative lesson" in result["text"]
     assert result["status"]["coverage"]=="partial"
     assert result["status"]["fallback_used"] is True
+
+
+def test_legacy_floor_transition_is_durable_before_next_maintenance(tmp_path):
+    import sqlite3
+    from contextlib import closing
+    import pytest
+    # A genuine pre-floor schema; no historical floor/tombstone is guessed.
+    with feedback_learning._connect(tmp_path) as db:
+        db.execute("DROP TABLE feedback_generations")
+        db.execute("INSERT INTO feedback(task_id,generation,kind,rating,title,brief,note,created) VALUES('legacy',0,'music',-1,'Amber melody','Amber melody','Old generation',1)")
+    _finish_recall(tmp_path)
+    with feedback_learning._recall_read(tmp_path) as db:
+        assert db.execute("SELECT floor_mode FROM feedback_recall_meta_v1").fetchone()[0] == 0
+    latest = feedback_learning.record(tmp_path, dict(task("legacy", "Amber melody", title="Amber melody"), generation=1), 1)
+    assert feedback_learning.forget(tmp_path, latest)
+    assert not feedback_learning.guidance(tmp_path, "music", "Amber melody")
+    with closing(sqlite3.connect(tmp_path / "feedback-learning.sqlite3")) as db, db:
+        assert tuple(db.execute("SELECT floor_mode,complete FROM feedback_recall_meta_v1").fetchone()) == (1,0)
+        db.execute("DROP TABLE feedback_generations")
+    with pytest.raises(sqlite3.DatabaseError, match="generation floors disappeared"):
+        feedback_learning.record(tmp_path, task("unrelated", "Piano sonata"), 1)
+    assert not feedback_learning.guidance(tmp_path, "music", "Amber melody")
+
+
+def test_observed_legacy_floors_stamp_rolls_back_and_rebuilds_normally(tmp_path):
+    import sqlite3
+    from contextlib import closing
+    import pytest
+    feedback_learning.record(tmp_path, task("legacy", "Amber melody"), 1)
+    _finish_recall(tmp_path)
+    with closing(sqlite3.connect(tmp_path / "feedback-learning.sqlite3")) as db, db:
+        # Simulate the supported pre-upgrade window: floors already exist,
+        # but derived metadata still records its earlier legacy snapshot.
+        db.execute("UPDATE feedback_recall_meta_v1 SET floor_mode=0,complete=1")
+        for operation in ("insert","update","delete"):
+            db.execute("DROP TRIGGER feedback_recall_floor_"+operation+"_v1")
+    with pytest.raises(RuntimeError, match="rollback"):
+        with feedback_learning._connect(tmp_path) as db:
+            assert tuple(db.execute("SELECT floor_mode,complete FROM feedback_recall_meta_v1").fetchone()) == (1,0)
+            raise RuntimeError("rollback")
+    with feedback_learning._recall_read(tmp_path) as db:
+        assert tuple(db.execute("SELECT floor_mode,complete FROM feedback_recall_meta_v1").fetchone()) == (0,1)
+    feedback_learning.record(tmp_path, task("current", "Piano sonata"), 1)
+    with feedback_learning._recall_read(tmp_path) as db:
+        assert tuple(db.execute("SELECT floor_mode,complete FROM feedback_recall_meta_v1").fetchone()) == (1,0)
+        assert not feedback_learning._trigger_match(db, True)
+    _finish_recall(tmp_path)
+    with feedback_learning._recall_read(tmp_path) as db:
+        assert feedback_learning._trigger_match(db, True)
+        assert db.execute("SELECT complete FROM feedback_recall_meta_v1").fetchone()[0] == 1
