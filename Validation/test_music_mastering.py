@@ -63,6 +63,7 @@ def test_mastering_preserves_inputs_and_writes_new_result(tmp_path):
     assert reference.read_bytes() == b"reference"
 
 
+
 def test_mastering_publishes_result_with_non_utf8_worker_diagnostics(tmp_path):
     source = tmp_path / "song.wav"
     reference = tmp_path / "reference.wav"
