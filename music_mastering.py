@@ -97,10 +97,18 @@ def master_music(source_path: str, reference_path: str, output_path: str) -> dic
                 raise ValueError("Choose a new output filename so existing audio is preserved.") from None
             created_stat = None
             try:
-                with destination:
+                try:
                     created_stat = os.fstat(destination.fileno())
                     with staged.open("rb") as rendered:
                         shutil.copyfileobj(rendered, destination)
+                except BaseException as write_error:
+                    try:
+                        destination.close()
+                    except OSError as close_error:
+                        raise write_error from close_error
+                    raise
+                else:
+                    destination.close()
             except BaseException as exc:
                 try:
                     # Another operation may have moved or replaced the partial
