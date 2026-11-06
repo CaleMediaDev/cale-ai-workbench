@@ -762,6 +762,39 @@ class VoiceTests(unittest.TestCase):
             fallback.assert_not_called()
             self.assertEqual(cached.read_bytes(), fresh_audio)
 
+    def test_unreadable_reference_timestamp_does_not_prevent_clone_synthesis(self):
+        with TemporaryDirectory() as folder:
+            root = Path(folder)
+            reference = root / "reference.wav"
+            reference.write_bytes(b"voice")
+            original_stat = Path.stat
+            result = {"path": "generated.wav", "engine": "clone"}
+
+            def stat(path, *args, **kwargs):
+                if path == reference:
+                    raise PermissionError("reference timestamp is unreadable")
+                return original_stat(path, *args, **kwargs)
+
+            with (
+                patch.object(voice_assistant, "ROOT", root),
+                patch.object(voice_assistant, "speech_ready", return_value=True),
+                patch.object(voice_assistant, "_heavy_gpu_active", return_value=False),
+                patch.object(cale_voice, "REFERENCE", reference),
+                patch.object(cale_voice, "ready", return_value=True),
+                patch.object(cale_voice, "speak", return_value=result) as clone,
+                patch.object(voice_assistant, "media_call") as fallback,
+                patch.object(voice_assistant, "_play_file") as play,
+                patch.object(Path, "stat", stat),
+            ):
+                self.assertEqual(
+                    voice_assistant.say(voice_assistant.WAKE_ACK, require_clone=True),
+                    result,
+                )
+            clone.assert_called_once()
+            self.assertEqual(clone.call_args.args[0], voice_assistant.WAKE_ACK)
+            fallback.assert_not_called()
+            play.assert_not_called()
+
     def test_unreadable_wake_cache_metadata_does_not_prevent_clone_synthesis(self):
         with TemporaryDirectory() as folder:
             root = Path(folder)
