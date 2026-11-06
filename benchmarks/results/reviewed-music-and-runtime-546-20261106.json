@@ -1,0 +1,622 @@
+{
+  "release": "0.5.546",
+  "reviewed_source": "4ef916a7e629814e8d58efb0421b1d87fc143b5e",
+  "review": {
+    "base": "87efdb4ddf64ed5354807ff6aa378887be89af72",
+    "state": "merged_verified",
+    "cutoff": 939,
+    "proposals": [
+      {
+        "number": 920,
+        "title": "[Donation] Exclude negated gendered rappers from vocal intent",
+        "state": "open",
+        "html_url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/920",
+        "head": "3efb8851226e51b6a1ef54496b37ef1d45616edf",
+        "base": "a93b8a41e66ca2a1500f179436131712cb435e49",
+        "diff_sha256": "e49fc07c2849af29e3f7c97b7a2e00a4cb53cd5c7cb1e495ded54a4b7015924b",
+        "original_reviewed_head": "3efb8851226e51b6a1ef54496b37ef1d45616edf",
+        "headRefOid": "c60703b4ec043ebd9e4622db714f8a99a9667877"
+      },
+      {
+        "number": 930,
+        "title": "[Donation] Reject negative explicit music durations instead of silently making them positive",
+        "state": "open",
+        "html_url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/930",
+        "head": "d26ac1cb4238b7a0c7278ed54fc99a0904b9e76a",
+        "base": "288e3f2303b1d4c9fb23b835d2faea8773c47fbb",
+        "diff_sha256": "516ae14c1e60724b61566e05c5ce9518e6cdcf0e28e7f3063e071e204240d890",
+        "original_reviewed_head": "d26ac1cb4238b7a0c7278ed54fc99a0904b9e76a",
+        "headRefOid": "b1d2c398115ca62aabd96fba00f68cd94ba930df"
+      },
+      {
+        "number": 931,
+        "title": "[Donation] Handle disappearing speech-check output without aborting readiness checks",
+        "state": "open",
+        "html_url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/931",
+        "head": "4908af508902bed1e26e825f506b6f48af079029",
+        "base": "288e3f2303b1d4c9fb23b835d2faea8773c47fbb",
+        "diff_sha256": "3bb8efc73635bf64bbd568cc872352089d9fb05e4461d4420292ad8132a45cc5",
+        "original_reviewed_head": "4908af508902bed1e26e825f506b6f48af079029",
+        "headRefOid": "4908af508902bed1e26e825f506b6f48af079029"
+      },
+      {
+        "number": 932,
+        "title": "[Donation] Use an explicit UTF-8 protocol for FFmpeg path discovery",
+        "state": "open",
+        "html_url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/932",
+        "head": "e31afb80d831dc56bb5e1470482ccc44a671ef5d",
+        "base": "288e3f2303b1d4c9fb23b835d2faea8773c47fbb",
+        "diff_sha256": "e17b60b940b82c214d239188ed34743fec4143f11cb2509d9f1ccc1abf95f89c",
+        "original_reviewed_head": "e31afb80d831dc56bb5e1470482ccc44a671ef5d",
+        "headRefOid": "e31afb80d831dc56bb5e1470482ccc44a671ef5d"
+      },
+      {
+        "number": 933,
+        "title": "[Donation] Preserve text boundaries at HTML horizontal rules",
+        "state": "open",
+        "html_url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/933",
+        "head": "ded4173168029eadd0a6f6b7a7a9f0b662758be0",
+        "base": "288e3f2303b1d4c9fb23b835d2faea8773c47fbb",
+        "diff_sha256": "7f8cddec213122bb61631aaefecdf8e8e554d424eb31a02ef61b12832d7b9c18",
+        "original_reviewed_head": "ded4173168029eadd0a6f6b7a7a9f0b662758be0",
+        "headRefOid": "ded4173168029eadd0a6f6b7a7a9f0b662758be0"
+      },
+      {
+        "number": 934,
+        "title": "[Donation] Recognize plural games when applying game-model gates",
+        "state": "open",
+        "html_url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/934",
+        "head": "0e9966ef96d31e7f950a53050867fb6d5920f270",
+        "base": "288e3f2303b1d4c9fb23b835d2faea8773c47fbb",
+        "diff_sha256": "f78b8c460a0d474893a2d8f4a3dbbb4f5837d8bb263d2dd7221239b20b160f85",
+        "original_reviewed_head": "0e9966ef96d31e7f950a53050867fb6d5920f270",
+        "headRefOid": "0e9966ef96d31e7f950a53050867fb6d5920f270"
+      },
+      {
+        "number": 935,
+        "title": "[Donation] Preserve statement boundaries between HTML script blocks",
+        "state": "open",
+        "html_url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/935",
+        "head": "02ae9b46d18f124ca5aba1ccd47cded49e310a31",
+        "base": "288e3f2303b1d4c9fb23b835d2faea8773c47fbb",
+        "diff_sha256": "823af735ea8e0d6e8857f435233d717e5e5904a49f13d8c7b355eb4ffc871423",
+        "original_reviewed_head": "02ae9b46d18f124ca5aba1ccd47cded49e310a31",
+        "headRefOid": "02ae9b46d18f124ca5aba1ccd47cded49e310a31"
+      }
+    ],
+    "paths": [
+      "Validation/test_auto_route.py",
+      "Validation/test_chat_assistant.py",
+      "Validation/test_ffmpeg_runtime.py",
+      "Validation/test_model_fitness.py",
+      "Validation/test_music_style.py",
+      "Validation/test_readiness_checklist.py",
+      "Validation/test_web_tools.py",
+      "auto_route.py",
+      "chat_assistant.py",
+      "ffmpeg_runtime.py",
+      "model_fitness.py",
+      "music_style.py",
+      "readiness_checklist.py",
+      "web_tools.py"
+    ],
+    "bound_paths": [
+      "Validation/test_auto_route.py",
+      "Validation/test_chat_assistant.py",
+      "Validation/test_ffmpeg_runtime.py",
+      "Validation/test_long_tasks.py",
+      "Validation/test_model_fitness.py",
+      "Validation/test_music_backend.py",
+      "Validation/test_music_style.py",
+      "Validation/test_readiness_checklist.py",
+      "Validation/test_web_tools.py",
+      "auto_route.py",
+      "chat_assistant.py",
+      "ffmpeg_runtime.py",
+      "long_tasks.py",
+      "model_fitness.py",
+      "music_backend.py",
+      "music_style.py",
+      "readiness_checklist.py",
+      "web_tools.py"
+    ],
+    "modules": [
+      "Validation/test_chat_assistant.py",
+      "Validation/test_readiness_checklist.py",
+      "Validation/test_ffmpeg_runtime.py",
+      "Validation/test_web_tools.py",
+      "Validation/test_auto_route.py",
+      "Validation/test_model_fitness.py",
+      "Validation/test_music_style.py"
+    ],
+    "supplemental_nodes": [
+      "Validation/test_music_backend.py::test_empty_vocal_request_writes_lyrics_and_checks_the_finished_audio",
+      "Validation/test_music_backend.py::test_sparse_vocal_chops_do_not_trigger_lyric_or_singing_checks",
+      "Validation/test_music_backend.py::test_saved_vocal_chop_song_recovers_without_singing_check",
+      "Validation/test_music_backend.py::test_vocal_song_with_no_sustained_words_is_not_marked_complete",
+      "Validation/test_music_backend.py::test_compose_lyrics_uses_small_local_model_and_rejects_truncation",
+      "Validation/test_music_backend.py::test_sparse_vocal_hooks_get_short_lyrics_with_room_for_drops",
+      "Validation/test_music_backend.py::test_vocal_evidence_requires_words_through_most_of_the_song",
+      "Validation/test_music_backend.py::test_vocal_evidence_rejects_sparsely_sung_full_song",
+      "Validation/test_music_backend.py::test_repetitive_techno_hook_accepts_sparse_but_real_vocals",
+      "Validation/test_music_backend.py::test_sparse_vocal_check_does_not_count_instrumental_drop_directions",
+      "Validation/test_long_tasks.py::LongTaskTests::test_sparse_vocal_repair_preserves_short_hooks_and_instrumental_drops",
+      "Validation/test_long_tasks.py::LongTaskTests::test_completed_misrouted_song_gets_vocal_take_without_deleting_original",
+      "Validation/test_long_tasks.py::LongTaskTests::test_missing_vocals_retry_uses_saved_lyrics_and_stops_after_one",
+      "Validation/test_long_tasks.py::LongTaskTests::test_sparse_vocal_chop_render_finishes_without_full_song_transcription"
+    ],
+    "excluded": [
+      926,
+      936,
+      937,
+      938,
+      939
+    ],
+    "qualification_receipt": "C:\\Users\\tahoe\\Documents\\Codex\\2026-10-31\\can\\outputs\\review-930-939-isolated\\seven-qualified-receipt.json",
+    "tested_blob_ids": {
+      "Validation/test_auto_route.py": "f1baa5a2281ced7467bdd8d2c30f91e298c85b89",
+      "Validation/test_chat_assistant.py": "f33aef55795ae980c727def92b178fc6c67cc5b5",
+      "Validation/test_ffmpeg_runtime.py": "f6d9275574f3e3875df098598e034da44e1bfb5d",
+      "Validation/test_long_tasks.py": "2846940c354e3d11f201482fffb51abe92a548c2",
+      "Validation/test_model_fitness.py": "5d0059c172f731a0a9f9124c6f7770379dd17bac",
+      "Validation/test_music_backend.py": "ddac8d1742047a4c20dbdfd67a57cfcdb05e35ff",
+      "Validation/test_music_style.py": "1c5e28a882bb8952c6cf32dcbf8a3c2275c33c33",
+      "Validation/test_readiness_checklist.py": "97740e0673efd2af86d9d6bb532d1c6f639da616",
+      "Validation/test_web_tools.py": "20782bf64f65509423489fd699afcdd20c00dd20",
+      "auto_route.py": "57903239cb133e34beb0c0eeefbb0d0e7429d43d",
+      "chat_assistant.py": "f23ff0e6020a2f0fc913d1e5f2de9f19996fde3a",
+      "ffmpeg_runtime.py": "1fd871d75ba6f9928a4b953ab7dc092f616017dd",
+      "long_tasks.py": "0710bdab081a4124e95c6935f3101cde25993d3e",
+      "model_fitness.py": "e43d4843fc3cdea8f43016afa66c50f74c30d1c1",
+      "music_backend.py": "790c29f9e6fbd279c450d704f6bbf0a6f7c4600f",
+      "music_style.py": "e9ff247ab411ea213d27ae323edd3c3d9894beeb",
+      "readiness_checklist.py": "da6d2377eec1eac043e68f8d8d0ad731a73160fa",
+      "web_tools.py": "e0169dcbdfe5b7f36ec8478d3a798ac2654e7f1d"
+    },
+    "tested_stash": "358ad7a6bbc8a206e39f6c28a900f5d121ede9c6",
+    "merged": [
+      {
+        "headRefOid": "c60703b4ec043ebd9e4622db714f8a99a9667877",
+        "isDraft": false,
+        "labels": [],
+        "mergeCommit": {
+          "oid": "4c8840d90f234868a621e46de00fb48e43544766"
+        },
+        "mergedAt": "2026-11-06T07:25:34Z",
+        "number": 920,
+        "state": "MERGED",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/920"
+      },
+      {
+        "headRefOid": "b1d2c398115ca62aabd96fba00f68cd94ba930df",
+        "isDraft": false,
+        "labels": [],
+        "mergeCommit": {
+          "oid": "3426616bab4bda16e2b3550c1ee61dc6bff0330a"
+        },
+        "mergedAt": "2026-11-06T07:25:38Z",
+        "number": 930,
+        "state": "MERGED",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/930"
+      },
+      {
+        "headRefOid": "4908af508902bed1e26e825f506b6f48af079029",
+        "isDraft": false,
+        "labels": [],
+        "mergeCommit": {
+          "oid": "4d53b8dc7c7393fb094a2605f8791825b5f9f2d7"
+        },
+        "mergedAt": "2026-11-06T07:25:44Z",
+        "number": 931,
+        "state": "MERGED",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/931"
+      },
+      {
+        "headRefOid": "e31afb80d831dc56bb5e1470482ccc44a671ef5d",
+        "isDraft": false,
+        "labels": [],
+        "mergeCommit": {
+          "oid": "1d0f27604965b10899ad4b5b79d55371f100a6f2"
+        },
+        "mergedAt": "2026-11-06T07:25:50Z",
+        "number": 932,
+        "state": "MERGED",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/932"
+      },
+      {
+        "headRefOid": "ded4173168029eadd0a6f6b7a7a9f0b662758be0",
+        "isDraft": false,
+        "labels": [],
+        "mergeCommit": {
+          "oid": "81628a8b9b2b7ee4ae283ee57521c7aa1a3c8991"
+        },
+        "mergedAt": "2026-11-06T07:25:55Z",
+        "number": 933,
+        "state": "MERGED",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/933"
+      },
+      {
+        "headRefOid": "0e9966ef96d31e7f950a53050867fb6d5920f270",
+        "isDraft": false,
+        "labels": [],
+        "mergeCommit": {
+          "oid": "9e3eabe42f3e03e6f2f0d341457bd7dc9ce31e82"
+        },
+        "mergedAt": "2026-11-06T07:26:00Z",
+        "number": 934,
+        "state": "MERGED",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/934"
+      },
+      {
+        "headRefOid": "02ae9b46d18f124ca5aba1ccd47cded49e310a31",
+        "isDraft": false,
+        "labels": [],
+        "mergeCommit": {
+          "oid": "4ef916a7e629814e8d58efb0421b1d87fc143b5e"
+        },
+        "mergedAt": "2026-11-06T07:26:05Z",
+        "number": 935,
+        "state": "MERGED",
+        "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/935"
+      }
+    ],
+    "validation": {
+      "exit_code": 0,
+      "source_bytes_unchanged": true,
+      "modules": [
+        "Validation/test_chat_assistant.py",
+        "Validation/test_readiness_checklist.py",
+        "Validation/test_ffmpeg_runtime.py",
+        "Validation/test_web_tools.py",
+        "Validation/test_auto_route.py",
+        "Validation/test_model_fitness.py",
+        "Validation/test_music_style.py"
+      ],
+      "supplemental_nodes": [
+        "Validation/test_music_backend.py::test_empty_vocal_request_writes_lyrics_and_checks_the_finished_audio",
+        "Validation/test_music_backend.py::test_sparse_vocal_chops_do_not_trigger_lyric_or_singing_checks",
+        "Validation/test_music_backend.py::test_saved_vocal_chop_song_recovers_without_singing_check",
+        "Validation/test_music_backend.py::test_vocal_song_with_no_sustained_words_is_not_marked_complete",
+        "Validation/test_music_backend.py::test_compose_lyrics_uses_small_local_model_and_rejects_truncation",
+        "Validation/test_music_backend.py::test_sparse_vocal_hooks_get_short_lyrics_with_room_for_drops",
+        "Validation/test_music_backend.py::test_vocal_evidence_requires_words_through_most_of_the_song",
+        "Validation/test_music_backend.py::test_vocal_evidence_rejects_sparsely_sung_full_song",
+        "Validation/test_music_backend.py::test_repetitive_techno_hook_accepts_sparse_but_real_vocals",
+        "Validation/test_music_backend.py::test_sparse_vocal_check_does_not_count_instrumental_drop_directions",
+        "Validation/test_long_tasks.py::LongTaskTests::test_sparse_vocal_repair_preserves_short_hooks_and_instrumental_drops",
+        "Validation/test_long_tasks.py::LongTaskTests::test_completed_misrouted_song_gets_vocal_take_without_deleting_original",
+        "Validation/test_long_tasks.py::LongTaskTests::test_missing_vocals_retry_uses_saved_lyrics_and_stops_after_one",
+        "Validation/test_long_tasks.py::LongTaskTests::test_sparse_vocal_chop_render_finishes_without_full_song_transcription"
+      ],
+      "sha256": {
+        "Validation/test_auto_route.py": "7ac2ee874949058a524e62cb89394a34b394a81fdf0b29ab74f9a3e64b0031e9",
+        "Validation/test_chat_assistant.py": "9ebe5fa370ce897dce1bf6a28ca6a690c6422ffe671bd81204d6aaaf0c18f3e1",
+        "Validation/test_ffmpeg_runtime.py": "5d1505e9208d40681ae11adada97ff79f3190346341471e08003ac07f830066a",
+        "Validation/test_long_tasks.py": "b775904c6d21d1b584be13059b9ebdf6eb5aeeba83d792c4d0ad51fd67e0b069",
+        "Validation/test_model_fitness.py": "c2f1d81672dfaa87886caba9d8229fa9007060118ccaac4bb9448658c7b35e66",
+        "Validation/test_music_backend.py": "0c4027987bcd3548b727f84aea05c51ad71612d469efec7b0b51beb4606a13b6",
+        "Validation/test_music_style.py": "2290e9a5df615b5c5a51d45a5cbaf70beab5af3251b49298f41459eb795fc7fb",
+        "Validation/test_readiness_checklist.py": "dedd27601d9f4ebd2f52d33689ddd14df0a288d02dc38f28ad76bd3bd15514ee",
+        "Validation/test_web_tools.py": "92994520a52bc2dd189005c794b3221900e5f96b0371dfd2d1bb7577abdba65b",
+        "auto_route.py": "7cab344188cbbbebd2275b1561fea09b747a2925d2fc559b1a9acc494cfe5193",
+        "chat_assistant.py": "1c998ab0f15a4dac639f3f1dac15944a0e301c6209c13db92cd5989d79f458bb",
+        "ffmpeg_runtime.py": "5d1e8d381ae62482cfb47748416c112578ba7ed33491aa9759281d7b0cc3158a",
+        "long_tasks.py": "a98fbe701b8ab3484d834dd7fa37cd23bdc2ff4c0172bae3fcdf943c4d2ece2e",
+        "model_fitness.py": "72d00bfde2091c770f82350d87781215d2d0742161bd2f937ca064a1c462cfe3",
+        "music_backend.py": "0161cc131c41ee63729eb7245a388fadecd432f5359a40b0872da5b332f31137",
+        "music_style.py": "71b4e34e88e3b627d3a5a4ed82c87f775ac011e2f646bcbc25a9cfc1504e1f90",
+        "readiness_checklist.py": "9561c1f483d68aa9249cc4e11f9c7280b7306ed49c0644ccd8eef86086ceab35",
+        "web_tools.py": "667854450d4dfe61be58c8217016548318a8d4d7f838a5cee53589d51714966b"
+      },
+      "seconds": 8.89069179998478,
+      "log_tail": "........................................................................ [ 16%]\n........................................................................ [ 32%]\ns....s.................................................................. [ 48%]\n................................................................. [ 63%]\n..................................................................................s. [ 82%]\n........................................................................ [ 98%]\n........                                                                 [100%]\n=========================== short test summary info ===========================\nSKIPPED [1] Validation\\test_readiness_checklist.py:231: Windows filenames cannot contain a question mark\nSKIPPED [1] Validation\\test_readiness_checklist.py:293: Windows filenames cannot contain a question mark\nSKIPPED [1] Validation\\test_model_fitness.py:104: This JSON decoder accepts the bounded nested marker\n442 passed, 3 skipped, 67 subtests passed in 8.01s\n"
+    },
+    "merged_source": "4ef916a7e629814e8d58efb0421b1d87fc143b5e",
+    "merged_bytes_match_tested": true,
+    "observed_at": 1793949968.437229,
+    "all_accepted_labels_verified": true
+  },
+  "validation": {
+    "affected_modules": {
+      "exit_code": 0,
+      "source_bytes_unchanged": true,
+      "modules": [
+        "Validation/test_chat_assistant.py",
+        "Validation/test_readiness_checklist.py",
+        "Validation/test_ffmpeg_runtime.py",
+        "Validation/test_web_tools.py",
+        "Validation/test_auto_route.py",
+        "Validation/test_model_fitness.py",
+        "Validation/test_music_style.py"
+      ],
+      "supplemental_nodes": [
+        "Validation/test_music_backend.py::test_empty_vocal_request_writes_lyrics_and_checks_the_finished_audio",
+        "Validation/test_music_backend.py::test_sparse_vocal_chops_do_not_trigger_lyric_or_singing_checks",
+        "Validation/test_music_backend.py::test_saved_vocal_chop_song_recovers_without_singing_check",
+        "Validation/test_music_backend.py::test_vocal_song_with_no_sustained_words_is_not_marked_complete",
+        "Validation/test_music_backend.py::test_compose_lyrics_uses_small_local_model_and_rejects_truncation",
+        "Validation/test_music_backend.py::test_sparse_vocal_hooks_get_short_lyrics_with_room_for_drops",
+        "Validation/test_music_backend.py::test_vocal_evidence_requires_words_through_most_of_the_song",
+        "Validation/test_music_backend.py::test_vocal_evidence_rejects_sparsely_sung_full_song",
+        "Validation/test_music_backend.py::test_repetitive_techno_hook_accepts_sparse_but_real_vocals",
+        "Validation/test_music_backend.py::test_sparse_vocal_check_does_not_count_instrumental_drop_directions",
+        "Validation/test_long_tasks.py::LongTaskTests::test_sparse_vocal_repair_preserves_short_hooks_and_instrumental_drops",
+        "Validation/test_long_tasks.py::LongTaskTests::test_completed_misrouted_song_gets_vocal_take_without_deleting_original",
+        "Validation/test_long_tasks.py::LongTaskTests::test_missing_vocals_retry_uses_saved_lyrics_and_stops_after_one",
+        "Validation/test_long_tasks.py::LongTaskTests::test_sparse_vocal_chop_render_finishes_without_full_song_transcription"
+      ],
+      "sha256": {
+        "Validation/test_auto_route.py": "7ac2ee874949058a524e62cb89394a34b394a81fdf0b29ab74f9a3e64b0031e9",
+        "Validation/test_chat_assistant.py": "9ebe5fa370ce897dce1bf6a28ca6a690c6422ffe671bd81204d6aaaf0c18f3e1",
+        "Validation/test_ffmpeg_runtime.py": "5d1505e9208d40681ae11adada97ff79f3190346341471e08003ac07f830066a",
+        "Validation/test_long_tasks.py": "b775904c6d21d1b584be13059b9ebdf6eb5aeeba83d792c4d0ad51fd67e0b069",
+        "Validation/test_model_fitness.py": "c2f1d81672dfaa87886caba9d8229fa9007060118ccaac4bb9448658c7b35e66",
+        "Validation/test_music_backend.py": "0c4027987bcd3548b727f84aea05c51ad71612d469efec7b0b51beb4606a13b6",
+        "Validation/test_music_style.py": "2290e9a5df615b5c5a51d45a5cbaf70beab5af3251b49298f41459eb795fc7fb",
+        "Validation/test_readiness_checklist.py": "dedd27601d9f4ebd2f52d33689ddd14df0a288d02dc38f28ad76bd3bd15514ee",
+        "Validation/test_web_tools.py": "92994520a52bc2dd189005c794b3221900e5f96b0371dfd2d1bb7577abdba65b",
+        "auto_route.py": "7cab344188cbbbebd2275b1561fea09b747a2925d2fc559b1a9acc494cfe5193",
+        "chat_assistant.py": "1c998ab0f15a4dac639f3f1dac15944a0e301c6209c13db92cd5989d79f458bb",
+        "ffmpeg_runtime.py": "5d1e8d381ae62482cfb47748416c112578ba7ed33491aa9759281d7b0cc3158a",
+        "long_tasks.py": "a98fbe701b8ab3484d834dd7fa37cd23bdc2ff4c0172bae3fcdf943c4d2ece2e",
+        "model_fitness.py": "72d00bfde2091c770f82350d87781215d2d0742161bd2f937ca064a1c462cfe3",
+        "music_backend.py": "0161cc131c41ee63729eb7245a388fadecd432f5359a40b0872da5b332f31137",
+        "music_style.py": "71b4e34e88e3b627d3a5a4ed82c87f775ac011e2f646bcbc25a9cfc1504e1f90",
+        "readiness_checklist.py": "9561c1f483d68aa9249cc4e11f9c7280b7306ed49c0644ccd8eef86086ceab35",
+        "web_tools.py": "667854450d4dfe61be58c8217016548318a8d4d7f838a5cee53589d51714966b"
+      },
+      "seconds": 8.89069179998478,
+      "log_tail": "........................................................................ [ 16%]\n........................................................................ [ 32%]\ns....s.................................................................. [ 48%]\n................................................................. [ 63%]\n..................................................................................s. [ 82%]\n........................................................................ [ 98%]\n........                                                                 [100%]\n=========================== short test summary info ===========================\nSKIPPED [1] Validation\\test_readiness_checklist.py:231: Windows filenames cannot contain a question mark\nSKIPPED [1] Validation\\test_readiness_checklist.py:293: Windows filenames cannot contain a question mark\nSKIPPED [1] Validation\\test_model_fitness.py:104: This JSON decoder accepts the bounded nested marker\n442 passed, 3 skipped, 67 subtests passed in 8.01s\n"
+    }
+  },
+  "sha256": {
+    "Validation/test_auto_route.py": "7ac2ee874949058a524e62cb89394a34b394a81fdf0b29ab74f9a3e64b0031e9",
+    "Validation/test_chat_assistant.py": "9ebe5fa370ce897dce1bf6a28ca6a690c6422ffe671bd81204d6aaaf0c18f3e1",
+    "Validation/test_ffmpeg_runtime.py": "5d1505e9208d40681ae11adada97ff79f3190346341471e08003ac07f830066a",
+    "Validation/test_long_tasks.py": "b775904c6d21d1b584be13059b9ebdf6eb5aeeba83d792c4d0ad51fd67e0b069",
+    "Validation/test_model_fitness.py": "c2f1d81672dfaa87886caba9d8229fa9007060118ccaac4bb9448658c7b35e66",
+    "Validation/test_music_backend.py": "0c4027987bcd3548b727f84aea05c51ad71612d469efec7b0b51beb4606a13b6",
+    "Validation/test_music_style.py": "2290e9a5df615b5c5a51d45a5cbaf70beab5af3251b49298f41459eb795fc7fb",
+    "Validation/test_readiness_checklist.py": "dedd27601d9f4ebd2f52d33689ddd14df0a288d02dc38f28ad76bd3bd15514ee",
+    "Validation/test_web_tools.py": "92994520a52bc2dd189005c794b3221900e5f96b0371dfd2d1bb7577abdba65b",
+    "auto_route.py": "7cab344188cbbbebd2275b1561fea09b747a2925d2fc559b1a9acc494cfe5193",
+    "chat_assistant.py": "1c998ab0f15a4dac639f3f1dac15944a0e301c6209c13db92cd5989d79f458bb",
+    "ffmpeg_runtime.py": "5d1e8d381ae62482cfb47748416c112578ba7ed33491aa9759281d7b0cc3158a",
+    "long_tasks.py": "a98fbe701b8ab3484d834dd7fa37cd23bdc2ff4c0172bae3fcdf943c4d2ece2e",
+    "model_fitness.py": "72d00bfde2091c770f82350d87781215d2d0742161bd2f937ca064a1c462cfe3",
+    "music_backend.py": "0161cc131c41ee63729eb7245a388fadecd432f5359a40b0872da5b332f31137",
+    "music_style.py": "71b4e34e88e3b627d3a5a4ed82c87f775ac011e2f646bcbc25a9cfc1504e1f90",
+    "readiness_checklist.py": "9561c1f483d68aa9249cc4e11f9c7280b7306ed49c0644ccd8eef86086ceab35",
+    "web_tools.py": "667854450d4dfe61be58c8217016548318a8d4d7f838a5cee53589d51714966b"
+  },
+  "qualified_candidate": {
+    "status": "QUALIFIED isolated545 seven-fix batch; no main merge/release/install",
+    "base": "87efdb4ddf64ed5354807ff6aa378887be89af72",
+    "accepted": [
+      920,
+      930,
+      931,
+      932,
+      933,
+      934,
+      935
+    ],
+    "excluded": [
+      926,
+      936,
+      937,
+      938,
+      939
+    ],
+    "corrected_heads": {
+      "920": "c60703b4ec043ebd9e4622db714f8a99a9667877",
+      "930": "b1d2c398115ca62aabd96fba00f68cd94ba930df"
+    },
+    "correction_commits_direct_parents": {
+      "920": "3efb8851226e51b6a1ef54496b37ef1d45616edf",
+      "930": "d26ac1cb4238b7a0c7278ed54fc99a0904b9e76a"
+    },
+    "production_and_test_bindings": {
+      "music_style.py": {
+        "raw_sha256": "71b4e34e88e3b627d3a5a4ed82c87f775ac011e2f646bcbc25a9cfc1504e1f90",
+        "LF_blob_sha256": "e062456a958ce6c6d9498b751493adb887be624a71c040959660485d3e41d58c"
+      },
+      "Validation/test_music_style.py": {
+        "raw_sha256": "2290e9a5df615b5c5a51d45a5cbaf70beab5af3251b49298f41459eb795fc7fb",
+        "LF_blob_sha256": "27797c0eeaac01eade1834fa7629afd3ddbdc996b7c85bc38eb45913e7105371"
+      },
+      "chat_assistant.py": {
+        "raw_sha256": "1c998ab0f15a4dac639f3f1dac15944a0e301c6209c13db92cd5989d79f458bb",
+        "LF_blob_sha256": "61dec1c109320db8befd21d2aab751f6b15eb1dbb05f7d4cc956975886e6c621"
+      },
+      "Validation/test_chat_assistant.py": {
+        "raw_sha256": "9ebe5fa370ce897dce1bf6a28ca6a690c6422ffe671bd81204d6aaaf0c18f3e1",
+        "LF_blob_sha256": "e3b51ffe3f0aec44b3d30f804e97ba3f863f8a45bef6f50ed4fe43ced61ef7d3"
+      },
+      "readiness_checklist.py": {
+        "raw_sha256": "9561c1f483d68aa9249cc4e11f9c7280b7306ed49c0644ccd8eef86086ceab35",
+        "LF_blob_sha256": "bb70aafe0d92a6606278a47d600530fa416bdd1d98f6515b1f43ccec45f5cbd4"
+      },
+      "Validation/test_readiness_checklist.py": {
+        "raw_sha256": "dedd27601d9f4ebd2f52d33689ddd14df0a288d02dc38f28ad76bd3bd15514ee",
+        "LF_blob_sha256": "e399beb965b17491ce528664902ca341d6053417d39978319b4ccdac72b88f83"
+      },
+      "ffmpeg_runtime.py": {
+        "raw_sha256": "5d1e8d381ae62482cfb47748416c112578ba7ed33491aa9759281d7b0cc3158a",
+        "LF_blob_sha256": "6e7ec7fdf840c3dbb1ad0065adc24b429e4a28ff3d3dad486b34122000bceff0"
+      },
+      "Validation/test_ffmpeg_runtime.py": {
+        "raw_sha256": "5d1505e9208d40681ae11adada97ff79f3190346341471e08003ac07f830066a",
+        "LF_blob_sha256": "6ff94baa4028a0843c494623b37e1b25a9927b5801c96e79eba5ec767383ae91"
+      },
+      "web_tools.py": {
+        "raw_sha256": "667854450d4dfe61be58c8217016548318a8d4d7f838a5cee53589d51714966b",
+        "LF_blob_sha256": "18b40dadc15bf5276248b68d7868ce1d4d60403cd72fe6afdc0a99ba52b1e777"
+      },
+      "Validation/test_web_tools.py": {
+        "raw_sha256": "92994520a52bc2dd189005c794b3221900e5f96b0371dfd2d1bb7577abdba65b",
+        "LF_blob_sha256": "28fee943bd67b70327a3bbef1ab1a0b242f701afd588cc3b5bb8d9224d8798c9"
+      },
+      "auto_route.py": {
+        "raw_sha256": "7cab344188cbbbebd2275b1561fea09b747a2925d2fc559b1a9acc494cfe5193",
+        "LF_blob_sha256": "371412a0c22055af7541e947eccd5d4a23e29f4001c50075499f3e3694de19ab"
+      },
+      "Validation/test_auto_route.py": {
+        "raw_sha256": "7ac2ee874949058a524e62cb89394a34b394a81fdf0b29ab74f9a3e64b0031e9",
+        "LF_blob_sha256": "93296c7b6d3401f65ec644a9ded651b8727cfd3682694731242f518e9bbaaaff"
+      },
+      "model_fitness.py": {
+        "raw_sha256": "72d00bfde2091c770f82350d87781215d2d0742161bd2f937ca064a1c462cfe3",
+        "LF_blob_sha256": "f630b8cbed947792de1ffd7849cdd6c9991934616cd0ac852ffb6c464755039c"
+      },
+      "Validation/test_model_fitness.py": {
+        "raw_sha256": "c2f1d81672dfaa87886caba9d8229fa9007060118ccaac4bb9448658c7b35e66",
+        "LF_blob_sha256": "036b53cad9a6784124b2b9d3c7e1490165b19f9c535388a8f4a835e9ea5f5e92"
+      }
+    },
+    "published_affected_blobs_match_qualified_LF": {
+      "920": {
+        "music_style.py": "e062456a958ce6c6d9498b751493adb887be624a71c040959660485d3e41d58c",
+        "Validation/test_music_style.py": "27797c0eeaac01eade1834fa7629afd3ddbdc996b7c85bc38eb45913e7105371"
+      },
+      "930": {
+        "chat_assistant.py": "61dec1c109320db8befd21d2aab751f6b15eb1dbb05f7d4cc956975886e6c621",
+        "Validation/test_chat_assistant.py": "e3b51ffe3f0aec44b3d30f804e97ba3f863f8a45bef6f50ed4fe43ced61ef7d3"
+      }
+    },
+    "other_tracked_archive_files_unchanged": true,
+    "patch": "seven-accepted-additive-545.patch",
+    "patch_sha256": "b5030fda078be851e904ee290645e80c60f87352e4d3a4b51508c5f8798eb4e6",
+    "tests": "442PASS3SKIP67subtests11.09s; sixfullacceptedmodules+fullstyle+exact10mockedbackend+4longtaskneighbors",
+    "command": "seven-command.json",
+    "log": "seven-full.log",
+    "remote_operations": "remote-operations.json",
+    "disclosed_failures": [
+      "Initial gh PATH missing, then exact bundled gh used.",
+      "Clone local git identity initially absent; configured only own clone from existing publicrepo identity.",
+      "920 raw hash assertion expected LF but owned Windows checkoutCRLF; verified qualified raw equality and exact committed LF blobs.",
+      "930 immediate postpush REST stale; distinct later GET and lsremote verified new head; no repeated push."
+    ],
+    "limits": [
+      "No actual model/audio/networkgeneration/device/service/Original/private/installed/root source actions.",
+      "Authorized remote operations only two normalFF correctionpushes and four exacthead no-op closes, no comments/labels.",
+      "No main merge/publish/release.",
+      "Regex musicstyle/negative duration policy not general language understanding."
+    ]
+  },
+  "music_policy": {
+    "status": "QUALIFIED TWO-FILE PRIVATE MAINTAINER CANDIDATE onto public545; noFFpush/merge/release/install",
+    "source": {
+      "base544": "d9e39611c2499930a82145316bcb3fe331bf13d0",
+      "base545": "87efdb4ddf64ed5354807ff6aa378887be89af72",
+      "qualified_v2_544_commit": "8757dc0115e425418995aa3580db6c06ed435ea3",
+      "candidate_commit": "7176baefd58d883112639d58ac82c262386402ad",
+      "candidate_directory": "C:\\Users\\tahoe\\Documents\\Codex\\2026-10-31\\can\\outputs\\review-donation-pytest-540",
+      "branch": "fix-920-qualified-v2-545",
+      "files": {
+        "music_style.py": {
+          "raw_sha256": "e062456a958ce6c6d9498b751493adb887be624a71c040959660485d3e41d58c",
+          "commit_blob_sha256": "e062456a958ce6c6d9498b751493adb887be624a71c040959660485d3e41d58c",
+          "raw_equals_blob": true
+        },
+        "Validation/test_music_style.py": {
+          "raw_sha256": "27797c0eeaac01eade1834fa7629afd3ddbdc996b7c85bc38eb45913e7105371",
+          "commit_blob_sha256": "27797c0eeaac01eade1834fa7629afd3ddbdc996b7c85bc38eb45913e7105371",
+          "raw_equals_blob": true
+        }
+      },
+      "base_bytes_544_to_545_identical": [
+        "music_style.py",
+        "Validation/test_music_style.py",
+        "music_backend.py",
+        "Validation/test_music_backend.py",
+        "long_tasks.py",
+        "Validation/test_long_tasks.py"
+      ],
+      "qualified_patch_sha256": "0bb03753603cb97e6448cff26df7882ff6ed574a5fbc7841141f056a9be41ee4",
+      "correction_only_sha256": "7a68d03c335ca2c3946f1ebce97027198a2291190af52b2f1f8ce27196ac1dc3"
+    },
+    "original_PR920_head": "3efb8851226e51b6a1ef54496b37ef1d45616edf",
+    "qualified_patch": "qualified-additive-545.patch",
+    "correction_only_vs_PR920": "correction-only-vs-pr920.patch",
+    "policy": "Shared sparse_vocal_style uses cleaned current request. Genericchops/hooks accompanying requested singer/rapper/verses/lead keep fullverse guidance. Explicitminimallyrics/nonsensevocals/verylittle singing/shortrepetitivehooks remain sparse. Plainshortvocalhooks/chants are sparseunless currentaffirmativeverse/chorus request; knownnegatedsectionsnotpositive. Singlehook+twoverses remainsfull. enhance consumes sharedhelper.",
+    "existing_gates_preserved": {
+      "requires_sustained_vocals_function_AST_same": true,
+      "legacy_gate_meaning": "Also drives needs-vocals lyric and audibility checks; intentionally sparse singer canstillTrue, then sharedhelper chooses shortlyrics/sparseASRthreshold. No skipping audibility orcaption-only bypass introduced.",
+      "original_positive_assertion": true,
+      "existing_sparse_female_hook_and_UIretry_assertions": true,
+      "allV1assertions": true
+    },
+    "qualification": {
+      "first_requested_countermodel_and_new_controls": "2PASS5.25s",
+      "full_music_style": "37PASS0.26s",
+      "same_mocked_music_backend_and_long_tasks_neighbors": "14PASS4.28s",
+      "unique_final_tests": 51,
+      "skips": 0,
+      "counts_note": "First2nodes overlap fullstyle/neighbor coverage; notaddednaively to51.",
+      "source_frozen": true,
+      "base_applicability": "Same six files (production/teststyle,backend,UI) byte-identical544\u2192545; qualified2rawbytes copiedexactly onto545, no semantic/sourcechange and no redundant fullrerun.",
+      "commands_and_logs": [
+        "v2-first-and-full.json",
+        "neighbors-v2.json",
+        "v2-first.log",
+        "v2-full.log",
+        "neighbors-v2.log"
+      ]
+    },
+    "preserved_before_evidence": {
+      "base544_original920": "baseline.log:1genuinegendernegationfailure",
+      "submitted920": "submitted.log:5failures includingoriginalpositivecaption and4neutralcontrols",
+      "V1": "focused9PASS/fullstyle36PASS; neighbors-v1.log10PASS1FAIL existingUIshort-hookretry,stopped",
+      "existing_UI_node_before": "short-hook-baseline-submitted.json baseline1PASS/submitted1PASS; bindsV1asactualregression",
+      "parent_original_evidence": "../review-pr-920-929-evidence/920-*.log"
+    },
+    "actual_callsite_policy": {
+      "compose_lyrics": "music_backend.py:710 chooses wordtargets andHookvsVerse/Chorus instructions using sharedhelper; no actual RPC inqualification",
+      "worker_audibility": "music_backend.py:1133 needs_vocals unchanged;1179 chooses existing sparseASRthreshold using sharedhelper; subprocess mocked",
+      "UI_retry": "long_tasks.py:1155/1201/2392 choose short-hookvsfullversedirections using sharedhelper; start_music_job/update mocked",
+      "completion": "long_tasks.py:3016 existing audibilitygate retained",
+      "caption": "music_backend.py:360 enhancedcaption unchanged transportusage"
+    },
+    "limits": [
+      "Regex explicitphrase policy; not general musical-language/coreference/negation understanding.",
+      "Knownnegatedverse/chorus vocabulary tested; no universal negation correctnessclaim.",
+      "No actual lyricgeneration/musicrender/audioASR/model/device/service/installed/private/root actions; only ownedTEMP/fakes.",
+      "No realaudioquality/voicegender/performance guarantee inferred fromcaption/tests.",
+      "Five old/newcontrolledfailures andV1regression preserved, notrelabeledgreen."
+    ],
+    "artifact_sha256": {
+      "baseline.json": "d35b7ec85ba681594ae92c35106d470cb653925444b1e32591e7a3e9fe3958eb",
+      "baseline.log": "7637e923e2607a40cf3797d2ad8dd98299af02423a4de073e43f5b33a59a4722",
+      "correction-only-vs-pr920.patch": "7a68d03c335ca2c3946f1ebce97027198a2291190af52b2f1f8ce27196ac1dc3",
+      "focused.json": "b1c13ec9a3c8729f3edeb8eecefd9f01b3340ef5417f2bab8b8646adda41db1d",
+      "focused.log": "aeb9d96d1c9187e9f0d9feec639e75077da360b0b2b6a474167c8da559627f6f",
+      "frozen-source.json": "da988aeaa91f2715d322d3eae9fdb9e51bb8aecae9d9f4ddfc100ba517bc98ac",
+      "full.json": "f472274f8281f797e09d6aed030064aa67f7c770f3c4791071ae2fb34b4f0175",
+      "full.log": "aa587595dac7e03f7ac334dc1a940b755877c3bb95ef88cb76091a7214f163e3",
+      "neighbors-v1.json": "fd99e94ef18fff4c2189f44125c3e06f40170c60a9c6c947f4dea1e1ed32052d",
+      "neighbors-v1.log": "77996952fd6975fdf9fe948eeb5b935cb2ed9a20f81cd2bff11f4c488bdafd42",
+      "neighbors-v2.json": "f6987c2d8f4bd36438de78ba26999895a4ab0c8fe395875220a3f52aa3370f84",
+      "neighbors-v2.log": "0d6966f626e93513d709e92fee96e04ed0aaea6770dd3cb539c90c9ced7df33f",
+      "probe-short-hook-existing-node.py": "538db3a99dc7721b9b2b0616a49f0ce65382b4e01057a9b0277b54f714e46536",
+      "qualified-additive-545.patch": "0bb03753603cb97e6448cff26df7882ff6ed574a5fbc7841141f056a9be41ee4",
+      "run-neighbors-v1.py": "450cc0d9c0f97bd44fd1deaaa77de81b004ef0e7fce19942c56cb46f4d4c16bf",
+      "run-neighbors-v2.py": "62cf23683267f88429b80f050088b6eccc047eee3150b83088dc285dc713fe83",
+      "run-style.py": "32ed6df97fb8f00ba2f38cdc8b1391d8ad936e63c402fb5187e3c3c848a9e7f6",
+      "run-v2-qualification.py": "9945b6d2bde2947939a526076f40ae327821d4f47e442e16de6e2d2ea151734e",
+      "short-hook-baseline-submitted.json": "aeabf1c4abd71cd6dbde644472d52df14dce1e14d922aaaf92c4a643d35ca095",
+      "short-hook-baseline.log": "0a0f3bd2392b91bbfb9a4eaa50ce512af5f5354313ab3b6e8f791e13d9d9ce9e",
+      "short-hook-submitted.log": "6426911c21b5649dd69e35ec5b296e72d580e9f410cbfee773aff44718776e83",
+      "submitted.json": "abb03f6eb3c485dfc32392f125ab27426beca45f553fec95ab1f9fb5e89d05e4",
+      "submitted.log": "5056e1f693cb4e84d7cc9bd772207681fa7d58fb62280d7c35aee6e5a4000754",
+      "v2-first-and-full.json": "2911389683720b271b4b96b551cf31410a07d7056bf920ac1bcea852ce07a6aa",
+      "v2-first.log": "33877bb080dadbc5306495a2c5b56f2d941d4c84edfdb27809ac5579f38ebd27",
+      "v2-full.log": "9dd6e6649aed7ec5e0992d7dbea1592bf257120068009d8f86f5e2f5529bb3f2"
+    }
+  },
+  "limits": [
+    "Seven related full module suites and fourteen mocked backend/task controls, not real audio quality or universal natural-language understanding.",
+    "Three platform/decoder skips remain explicit. Four demonstrated no-op proposals excluded; POSIX926 remains unqualified.",
+    "Experimental native-agent joint changes are excluded; no autonomous model-trial success claimed."
+  ]
+}

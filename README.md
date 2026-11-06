@@ -10,11 +10,12 @@ Created by [Cale Media](https://calemedia.com).
 2. Click **Install** and watch the progress bar. Accounts are optional; you can connect them while models download.
 3. Click **Open Cale AI** and describe what you want in chat.
 
-Release 0.5.545 adds eight reviewed fixes for document freshness, model memory budgets, setup recovery, image-job recovery, website crawling, skill search, calculator formatting and catalog downloads. [Validation and limits](benchmarks/results/reviewed-document-and-recovery-545-20261106.json).
+Release 0.5.546 aligns vocal guidance with requested singers, rappers and short hooks; rejects negative song durations; and improves FFmpeg discovery, readiness checks, webpage reading and game routing. [Validation and limits](benchmarks/results/reviewed-music-and-runtime-546-20261106.json).
 
 <details>
 <summary>Feature history and validation</summary>
 
+Release 0.5.545 adds eight reviewed fixes for document freshness, model memory budgets, setup recovery, image-job recovery, website crawling, skill search, calculator formatting and catalog downloads. [Validation and limits](benchmarks/results/reviewed-document-and-recovery-545-20261106.json).
 Release 0.5.544 adds nine reviewed fixes for document evidence, audio validation, browser metadata, file-index cleanup, tool discovery, voice controls and small-model training. [Validation and limits](benchmarks/results/reviewed-reliability-and-memory-544-20261106.json).
 Release 0.5.543 adds 17 reviewed fixes for setup, voice installation, local models, document scanning, song timing and feedback memory. Video edits render privately and publish without replacing existing destinations; failed or empty renders cannot delete a concurrent publication. [Validation and limits](benchmarks/results/reviewed-recovery-and-video-publication-543-20261106.json).
 Release 0.5.542 includes 20 reviewed fixes for document recovery, browser input, video trimming, skill synchronization, setup recovery and media controls. Interrupted model-metadata checks retain their interruption instead of becoming misleading context-capacity errors. [Validation and limits](benchmarks/results/reviewed-donations-and-model-discovery-542-20261106.json).
