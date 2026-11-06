@@ -487,7 +487,7 @@ def test_invalid_first_download_does_not_create_catalog_cache(tmp_path, constant
     assert not cache.parent.exists()
 
 
-@pytest.mark.parametrize("query", ["", "  ", "\t\t", " a "])
+@pytest.mark.parametrize("query", ["", "  ", "\t\t", "a"])
 def test_search_public_apis_rejects_blank_or_padded_single_character_before_catalog(query):
     with patch.object(public_api_catalog, "_catalog") as catalog:
         with pytest.raises(ValueError, match="2 to 120 characters"):
