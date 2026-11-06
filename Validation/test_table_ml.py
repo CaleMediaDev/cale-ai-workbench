@@ -36,6 +36,40 @@ class TableMLTests(unittest.TestCase):
                 self.assertEqual([row["prediction"] for row in csv.DictReader(stream)],
                                  ["cold", "hot"])
 
+    def test_failed_model_save_cleans_up_and_allows_retry(self):
+        from unittest.mock import patch
+
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            training = root / "training.csv"
+            with training.open("w", newline="", encoding="utf-8") as stream:
+                writer = csv.writer(stream)
+                writer.writerow(["signal", "label"])
+                for index in range(40):
+                    writer.writerow([index, "hot" if index >= 20 else "cold"])
+            model = root / "model.json"
+
+            def fail_after_partial_write(payload, stream, **kwargs):
+                stream.write('{"format":')
+                raise OSError("simulated model write failure")
+
+            with patch("table_ml.json.dump", side_effect=fail_after_partial_write):
+                with self.assertRaisesRegex(OSError, "simulated model write failure"):
+                    train_table_model(str(training), "label", str(model),
+                                      "classification")
+            self.assertFalse(model.exists())
+            self.assertFalse(list(root.glob(".table-model-*")))
+
+            train_table_model(str(training), "label", str(model), "classification")
+            saved = json.loads(model.read_text(encoding="utf-8"))
+            self.assertEqual(saved["format"], "cale-table-model-v1")
+            self.assertFalse(list(root.glob(".table-model-*")))
+            prediction = root / "new.csv"
+            prediction.write_text("signal\n5\n", encoding="utf-8")
+            result = predict_table_model(str(model), str(prediction),
+                                         str(root / "predicted.csv"))
+            self.assertEqual(result["rows"], 1)
+
     def test_training_rejects_colliding_encoded_feature_names(self):
         cases = (
             (["color", "color=red", "label"],
