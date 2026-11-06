@@ -67,12 +67,14 @@ def _installer_running(pid=None) -> bool:
     import psutil
 
     script = Path(__file__).resolve()
+    # argparse accepts unambiguous long-option abbreviations by default.
+    install_flags = {"--install"[:length] for length in range(3, len("--install") + 1)}
     try:
         processes = [psutil.Process(int(pid))] if pid else psutil.process_iter(["cmdline"])
         for process in processes:
             try:
                 command = process.cmdline()
-                if "--install" not in command:
+                if not install_flags.intersection(command):
                     continue
                 # An absolute script is sufficient even when cwd is protected.
                 # Options such as -u must not force a cwd lookup before it.
@@ -105,7 +107,7 @@ def _installer_running(pid=None) -> bool:
                     break
                 # Interpreter option values do not enable installation; only
                 # arguments following the script are parsed by its CLI.
-                if "--install" not in arguments:
+                if not install_flags.intersection(arguments):
                     continue
                 if any(part.is_absolute() and part.resolve() == script for part in candidates):
                     return True
