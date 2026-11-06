@@ -36,6 +36,21 @@ def test_direct_image_uses_local_worker_and_checks_saved_file():
             assert image.size == (512, 512)
 
 
+def test_direct_image_rejects_non_object_worker_replies(tmp_path):
+    import pytest
+
+    python = tmp_path / "Media/python/Scripts/python.exe"
+    python.parent.mkdir(parents=True)
+    python.write_bytes(b"")
+
+    for reply in (None, [], "unexpected", 42, True):
+        result = subprocess.CompletedProcess([], 0, json.dumps(reply), "")
+        with (patch.object(quick_image.subprocess, "run", return_value=result),
+              patch.object(quick_image, "clarify_prompt", return_value="a dog")):
+            with pytest.raises(RuntimeError, match="did not return a usable result"):
+                quick_image.generate(tmp_path, "a dog", str(tmp_path / "image.png"))
+
+
 def test_direct_image_rejects_valid_checksums_but_invalid_pixels(tmp_path):
     import struct
     import zlib

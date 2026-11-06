@@ -82,6 +82,8 @@ def generate(root: Path, prompt: str, output_path: str = "") -> Path:
         reply = json.loads(result.stdout.splitlines()[-1])
     except (IndexError, ValueError) as exc:
         raise RuntimeError("The image maker did not return a usable result.") from exc
+    if not isinstance(reply, dict):
+        raise RuntimeError("The image maker did not return a usable result.")
     if result.returncode or reply.get("error"):
         raise RuntimeError(str(reply.get("error") or result.stderr[-500:]))
     if Path(reply.get("path", "")).resolve() != destination or not destination.is_file():
