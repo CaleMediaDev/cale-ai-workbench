@@ -23,7 +23,7 @@ def _csv(path: str, target: str = "") -> tuple[list[str], list[dict]]:
     with source.open("r", encoding="utf-8-sig", newline="") as stream:
         reader = csv.DictReader(stream)
         columns = reader.fieldnames or []
-        if not columns or len(columns) != len(set(columns)) or len(columns) > 100:
+        if not columns or not all(columns) or len(columns) != len(set(columns)) or len(columns) > 100:
             raise ValueError("CSV needs 1 to 100 unique named columns.")
         if target and target not in columns:
             raise ValueError("Target column was not found in the CSV.")
