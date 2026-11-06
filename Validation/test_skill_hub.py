@@ -258,6 +258,35 @@ class SkillHubTests(unittest.TestCase):
                         all(call.args == ("inspect", identifier) for call in run.call_args_list)
                     )
 
+    def test_empty_preview_invalidates_inspection_and_allows_recovery(self):
+        identifier = "skills-sh/example/workflows/accessibility"
+        for preview in ("", " \r\n\t "):
+            with self.subTest(preview=repr(preview)):
+                now = skill_hub.time.monotonic()
+                skill_hub.SEEN[identifier] = now
+                skill_hub.INSPECTED[identifier] = now
+                with patch.object(
+                    skill_hub, "_run",
+                    side_effect=[preview, "Fresh preview", "Installed"],
+                ) as run:
+                    with self.assertRaisesRegex(ValueError, "empty preview"):
+                        skill_hub.inspect(identifier)
+                    self.assertNotIn(identifier, skill_hub.INSPECTED)
+                    with self.assertRaisesRegex(ValueError, "Search and inspect"):
+                        skill_hub.install(identifier)
+                    run.assert_called_once_with("inspect", identifier)
+
+                    self.assertEqual(
+                        skill_hub.inspect(identifier)["preview"], "Fresh preview"
+                    )
+                    self.assertEqual(
+                        skill_hub.install(identifier)["result"], "Installed"
+                    )
+                    self.assertEqual(run.call_count, 3)
+                    self.assertEqual(
+                        run.call_args.args, ("install", identifier, "--yes")
+                    )
+
     def test_install_rejects_expired_search_with_recent_inspection(self):
         identifier = "skills-sh/example/workflows/accessibility"
         payload = json.dumps([{

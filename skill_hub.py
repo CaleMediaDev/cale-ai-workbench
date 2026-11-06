@@ -93,6 +93,8 @@ def inspect(identifier: str) -> dict:
         raise ValueError("Search for this exact skill first.")
     INSPECTED.pop(identifier, None)
     content = _run("inspect", identifier)
+    if not content.strip():
+        raise ValueError("The skill registry returned an empty preview.")
     if len(content) > 30000:
         raise ValueError("This skill preview is too long for automatic installation.")
     INSPECTED[identifier] = time.monotonic()
