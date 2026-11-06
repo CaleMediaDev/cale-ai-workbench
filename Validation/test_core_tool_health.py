@@ -231,7 +231,46 @@ def test_toolbox_sdk_probe_catches_broken_music_runtime(tmp_path, monkeypatch):
     monkeypatch.setattr(core_tool_health, "_browser_works", lambda root, node: True)
     monkeypatch.setattr(core_tool_health, "_agent_launcher_works", lambda root: True)
     assert core_tool_health.missing(tmp_path, fresh=True) == ["Toolbox model SDK"]
-    assert (toolbox, ("-c", core_tool_health.TOOLBOX_SDK_PROBE)) in checked
+    assert (toolbox, ("-I", "-c", core_tool_health.TOOLBOX_SDK_PROBE)) in checked
+
+
+def test_sdk_health_ignores_unrelated_python_modules(tmp_path, monkeypatch):
+    import sys
+
+    # This unrelated package would satisfy both SDK imports through either
+    # the desktop working directory or inherited PYTHONPATH.
+    package = tmp_path / "openai"
+    for directory in (package, package / "types", package / "types/shared_params"):
+        directory.mkdir(parents=True, exist_ok=True)
+        (directory / "__init__.py").touch()
+    (package / "types/shared_params/response_format_json_object.py").write_text(
+        "class ResponseFormatJSONObject: pass\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("PYTHONPATH", str(tmp_path))
+    ghidra = tmp_path / "Toolbox/ghidra_12.1.4_PUBLIC/ghidraRun.bat"
+    ghidra.parent.mkdir(parents=True)
+    ghidra.touch()
+    monkeypatch.setattr(core_tool_health, "_health_cache", (None, (), 0.0))
+    monkeypatch.setattr(core_tool_health, "_browser_works", lambda root, node: True)
+    monkeypatch.setattr(core_tool_health, "_agent_launcher_works", lambda root: True)
+    runnable = core_tool_health._runnable
+    sdk_probes = []
+
+    def probe(path, *args):
+        if "-c" in args:
+            sdk_probes.append(path)
+            # Exclude the test runner's installed packages, so this test does
+            # not depend on whether its interpreter has openai installed.
+            return runnable(Path(sys.executable), "-S", *args)
+        return True
+
+    monkeypatch.setattr(core_tool_health, "_runnable", probe)
+    expected = ["Agent model SDK", "Toolbox model SDK"]
+    assert core_tool_health.missing(tmp_path, fresh=True) == expected
+    assert len(sdk_probes) == 2
+    with patch.object(core_tool_health, "_runnable",
+                      side_effect=AssertionError("expected cached health")):
+        assert core_tool_health.missing(tmp_path) == expected
 
 
 def test_agent_launcher_probe_uses_cale_home_and_reports_failure(tmp_path, monkeypatch):
