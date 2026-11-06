@@ -223,6 +223,26 @@ def test_document_check_preserves_sign_of_bare_dollar_evidence(tmp_path, locatio
     assert result["errors"] == ([expected_error] if negative else [])
 
 
+@pytest.mark.parametrize("location", ["source", "report"])
+@pytest.mark.parametrize("amount,passed", [("1,100", False), ("0.100", False),
+                                         ("100", True)])
+def test_document_check_rejects_numeric_evidence_suffixes(tmp_path, location, amount, passed):
+    folder = _project(tmp_path)
+    source_text = "Value: " + (amount if location == "source" else "100")
+    report_text = "Value: " + (amount if location == "report" else "100")
+    (folder / "terms.txt").write_text(source_text, encoding="utf-8")
+    (folder / "summary.md").write_text(report_text, encoding="utf-8")
+    spec = {"source_path": "terms.txt", "report_path": "summary.md",
+            "facts": [{"source_text": "100", "report_text": "100"}]}
+    with patch.object(document_check.project_documents, "inspect",
+                      return_value={"text": source_text}):
+        result = document_check.check(folder, spec)
+    expected_error = ("Fact 1: source evidence was not found" if location == "source"
+                      else "Fact 1: report text was not found")
+    assert result["passed"] is passed
+    assert result["errors"] == ([] if passed else [expected_error])
+
+
 def test_document_check_rejects_source_change_during_extraction(tmp_path):
     folder = _project(tmp_path)
     original_inspect = document_check.project_documents.inspect
