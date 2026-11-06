@@ -60,6 +60,20 @@ class CheckpointFreshnessRegressionTests(unittest.TestCase):
 
 
 class CalculatorPrecisionTests(unittest.TestCase):
+    def test_repeating_fraction_formatting_ignores_caller_decimal_traps(self):
+        from decimal import Inexact, Rounded, localcontext
+
+        for signal in (Inexact, Rounded):
+            with self.subTest(signal=signal.__name__):
+                with localcontext() as context:
+                    context.traps[signal] = True
+                    self.assertEqual(
+                        calculate("1 / 3"),
+                        "1 / 3 = 1/3 (about 0.3333333333333333)",
+                    )
+                    self.assertTrue(context.traps[signal])
+                    self.assertFalse(context.flags[signal])
+
     def test_helper_decimal_literals_preserve_exact_source_values(self):
         from quick_calculator import normalize_helper, run_helper
 
