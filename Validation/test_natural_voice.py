@@ -16,6 +16,15 @@ import natural_voice
 
 
 class NaturalVoiceTests(unittest.TestCase):
+    def test_symlink_loop_in_model_path_is_not_ready(self):
+        for check_name in ("ready", "whisper_ready"):
+            with self.subTest(check=check_name):
+                with patch.object(
+                    Path, "stat",
+                    side_effect=OSError(errno.ELOOP, "Too many symbolic links"),
+                ):
+                    self.assertFalse(getattr(natural_voice, check_name)())
+
     def test_directory_metadata_is_not_ready_after_stale_file_check(self):
         path = SimpleNamespace(
             is_file=lambda: True,
