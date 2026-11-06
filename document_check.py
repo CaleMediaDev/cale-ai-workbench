@@ -38,7 +38,7 @@ def _present(text: str, phrase: str) -> bool:
     phrase = _phrase(phrase)
     boundary = r"(?![^\W_])"
     if phrase[-1].isdigit():
-        boundary = r"(?![^\W_]|[.,][0-9])"
+        boundary = r"(?![^\W_]|[.,]\d)"
     prefix = r"(?<![^\W_])"
     if phrase.startswith("$"):
         # A positive dollar phrase must not match inside a negative amount.

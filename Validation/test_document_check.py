@@ -128,7 +128,7 @@ def test_document_check_rejects_malformed_thousands_groups(tmp_path, malformed, 
         document_check.check(folder, spec)
 
 
-@pytest.mark.parametrize("suffix", [".50", ",000"])
+@pytest.mark.parametrize("suffix", [".50", ",000", ".٥٠", ",٠٠٠"])
 @pytest.mark.parametrize("location", ["source", "report"])
 def test_document_check_rejects_numeric_evidence_prefixes(tmp_path, suffix, location):
     folder = _project(tmp_path)
