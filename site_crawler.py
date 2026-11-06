@@ -55,7 +55,10 @@ async def crawl_site(project: Path, start_url: str, max_pages: int = 5) -> dict:
             visited.add(url)
             try:
                 normalized_url(url, host)
-                result = await crawler.arun(url=url, config=settings)
+                try:
+                    result = await crawler.arun(url=url, config=settings)
+                except Exception as exc:
+                    raise RuntimeError(str(exc)[:300]) from exc
                 if not result.success:
                     raise RuntimeError(str(result.error_message or "Crawl failed")[:300])
                 normalized_url(getattr(result, "redirected_url", None) or url, host)

@@ -236,6 +236,51 @@ def test_off_host_redirect_is_not_saved_or_indexed(tmp_path, monkeypatch):
     assert not site_crawler.page_path(tmp_path, start).exists()
 
 
+def test_crawler_library_exception_preserves_queued_pages(tmp_path, monkeypatch):
+    monkeypatch.setattr(site_crawler, "check_url", lambda url: (urlsplit(url), ["93.184.215.14"]))
+    indexed = []
+    monkeypatch.setattr(project_memory, "index_file", lambda project, path: indexed.append(path))
+    start = "https://example.com"
+    broken = start + "/broken"
+    sibling = start + "/sibling"
+    seen = []
+
+    class BrowserError(Exception):
+        pass
+
+    class FakeCrawler:
+        def __init__(self, config):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_):
+            return None
+
+        async def arun(self, url, config):
+            seen.append(url)
+            if url == broken:
+                raise BrowserError("Browser page failed")
+            return types.SimpleNamespace(
+                success=True, markdown="Readable content", error_message="",
+                links={"internal": [{"href": broken}, {"href": sibling}]} if url == start else {},
+            )
+
+    monkeypatch.setitem(sys.modules, "crawl4ai", types.SimpleNamespace(
+        AsyncWebCrawler=FakeCrawler,
+        BrowserConfig=lambda **kwargs: kwargs,
+        CrawlerRunConfig=lambda **kwargs: types.SimpleNamespace(**kwargs),
+    ))
+    result = asyncio.run(site_crawler.crawl_site(tmp_path, start, max_pages=3))
+    assert seen == [start, broken, sibling]
+    assert result["errors"] == [{"url": broken, "error": "Browser page failed"}]
+    assert [page["url"] for page in result["pages"]] == [start, sibling]
+    assert indexed == [site_crawler.page_path(tmp_path, url) for url in [start, sibling]]
+    assert all(path.exists() for path in indexed)
+    assert not site_crawler.page_path(tmp_path, broken).exists()
+
+
 @pytest.mark.parametrize("failure", ["unsuccessful", "exception", "empty"])
 def test_failed_pages_consume_the_crawl_budget(tmp_path, monkeypatch, failure):
     monkeypatch.setattr(site_crawler, "check_url", lambda url: (urlsplit(url), ["93.184.215.14"]))
