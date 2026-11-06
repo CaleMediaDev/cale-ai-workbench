@@ -211,7 +211,10 @@ def rephrase_status(line, recent=(), required=()):
              "max_tokens": 72, "temperature": 0.85, "reasoning_effort": "none"},
             timeout=3,
         )
-        candidate = str(result["choices"][0]["message"].get("content") or "").strip().strip('"')
+        content = result["choices"][0]["message"].get("content")
+        if not isinstance(content, str):
+            return fallback
+        candidate = content.strip().strip('"')
     except (KeyError, IndexError, OSError, ValueError, TimeoutError,
             TypeError, AttributeError):
         return fallback
