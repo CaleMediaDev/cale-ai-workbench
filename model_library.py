@@ -771,7 +771,12 @@ def cleanup_retired_main_sources():
             except (OSError, ValueError):
                 pass
             else:
-                delete_model(STANDARD_MAIN_ALIAS)  # No separate routine alias is needed.
+                try:
+                    delete_model(STANDARD_MAIN_ALIAS)  # No separate routine alias is needed.
+                except HTTPError as error:
+                    # Another cleanup may remove it after the show request.
+                    if error.code != 404:
+                        raise
     except (OSError, RuntimeError, ValueError):
         return 0
     owned = owned_sources()
