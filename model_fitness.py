@@ -174,6 +174,8 @@ Object.assign(globalThis,{window:globalThis,document:{getElementById:element,que
 })();
 """
 GAME_BUILD_CHECKS = r"""
+if(typeof __cale_probe.handlers.DOMContentLoaded==='function')
+  __cale_probe.handlers.DOMContentLoaded({type:'DOMContentLoaded',target:document});
 if(typeof window.onload==='function')window.onload();
 if(__cale_probe.frame())__cale_probe.frame()(0);
 const checks={},g=window.game;
