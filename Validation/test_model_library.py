@@ -54,6 +54,42 @@ class AutoModelTests(unittest.TestCase):
             self.assertEqual(json.loads((root / "LongTasks/vision-repair.json").read_text())["status"],
                              "complete")
 
+    def test_vision_repair_ignores_malformed_saved_main_source(self):
+        for source in ([], {}, None, 42):
+            with self.subTest(source=source), tempfile.TemporaryDirectory() as folder:
+                root = Path(folder)
+                state = root / "LongTasks"
+                state.mkdir()
+                (state / "main-model-source.json").write_text(
+                    json.dumps({"source": source}), encoding="utf-8",
+                )
+                created = []
+
+                def post(path, body, **_kwargs):
+                    if path == "/api/create":
+                        created.append(body)
+                        return {"status": "success"}
+                    if body["model"] == "cale-fast":
+                        return {"capabilities": ["tools", "vision"]}
+                    if body["model"] == "cale-vision" and created:
+                        return {"capabilities": ["vision"]}
+                    raise OSError("alias missing")
+
+                locking = SimpleNamespace(
+                    LK_NBLCK=1, LK_UNLCK=2, locking=lambda *_args: None,
+                )
+                with (patch.dict(sys.modules, {"msvcrt": locking}),
+                      patch.object(library, "ROOT", root),
+                      patch.object(library, "post", side_effect=post)):
+                    self.assertTrue(library.repair_vision_alias())
+                self.assertEqual(len(created), 1)
+                self.assertEqual(created[0]["from"], "cale-fast")
+                self.assertEqual(created[0]["model"], "cale-vision")
+                self.assertEqual(
+                    json.loads((state / "vision-repair.json").read_text())["status"],
+                    "complete",
+                )
+
     def test_vision_repair_uses_custom_main_alias_without_source_record(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
