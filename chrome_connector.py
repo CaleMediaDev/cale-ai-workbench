@@ -72,12 +72,16 @@ def installed_version() -> str:
         return ""
     # Do not merge separate YAML documents into one apparent root mapping.
     document_started, document_ended = False, False
+    yaml_seen = False
     for line in contents.splitlines():
         if not line.strip() or line.lstrip().startswith("#"):
             continue
         if document_ended:
             return ""
         if re.fullmatch(r"%YAML[ \t]+1\.[12](?:[ \t]+#[^\r\n]*)?[ \t]*", line):
+            if document_started or yaml_seen:
+                return ""
+            yaml_seen = True
             continue
         if re.fullmatch(r"---(?:[ \t]+#[^\r\n]*)?[ \t]*", line):
             if document_started:

@@ -134,6 +134,20 @@ def test_installed_version_accepts_directive_before_indented_mapping(
     assert chrome_connector.installed_version() == "0.2.6"
 
 
+@pytest.mark.parametrize("contents", [
+    "%YAML 1.2\n%YAML 1.2\n---\nversion: 0.2.6\n",
+    "---\n%YAML 1.2\nversion: 0.2.6\n",
+    "name: hermes-connector\n%YAML 1.2\nversion: 0.2.6\n",
+])
+def test_installed_version_rejects_repeated_or_misplaced_yaml_directives(
+    tmp_path, monkeypatch, contents
+):
+    monkeypatch.setattr(chrome_connector, "PLUGIN", tmp_path)
+    (tmp_path / "plugin.yaml").write_text(contents, encoding="utf-8")
+
+    assert chrome_connector.installed_version() == ""
+
+
 def test_installed_version_accepts_utf8_bom(tmp_path, monkeypatch):
     plugin = tmp_path / "plugin"
     plugin.mkdir()
