@@ -335,6 +335,26 @@ def test_retracting_latest_generation_does_not_revive_stale_feedback(tmp_path):
     assert "electronic drums" not in learned
 
 
+def test_video_design_feedback_is_not_grouped_with_app_design(tmp_path):
+    for medium in ("video", "animation", "film"):
+        assert feedback_learning.kind_for({"title": "Design a " + medium}) == "video"
+    assert feedback_learning.kind_for({"title": "Design a dashboard"}) == "app_design"
+    assert feedback_learning.kind_for({"title": "Design a logo"}) == "app_design"
+
+    reviewed = {
+        "id": "video-design",
+        "title": "Design a video",
+        "brief": "Neon geometric transitions",
+    }
+    feedback_learning.record(tmp_path, reviewed, -1, "Use slower transitions")
+    assert "Use slower transitions" in feedback_learning.guidance(
+        tmp_path, "video", "Neon geometric transitions"
+    )
+    assert not feedback_learning.guidance(
+        tmp_path, "app_design", "Neon geometric transitions"
+    )
+
+
 def test_review_requires_comment_for_thumbs_down(tmp_path):
     import pytest
 

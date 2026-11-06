@@ -97,10 +97,10 @@ def kind_for(task: dict) -> str:
         return "image"
     if re.search(r"\b(?:song|music|rap|beat|melody)\b", text):
         return "music"
-    if re.search(r"\bdesign\b", text):
-        return "app_design"
     if re.search(r"\b(?:video|animation|film)\b", text):
         return "video"
+    if re.search(r"\bdesign\b", text):
+        return "app_design"
     return "general"
 
 
