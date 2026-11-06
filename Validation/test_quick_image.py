@@ -51,6 +51,30 @@ def test_direct_image_rejects_non_object_worker_replies(tmp_path):
                 quick_image.generate(tmp_path, "a dog", str(tmp_path / "image.png"))
 
 
+def test_direct_image_rejects_non_string_worker_paths(tmp_path):
+    import pytest
+
+    python = tmp_path / "Media/python/Scripts/python.exe"
+    python.parent.mkdir(parents=True)
+    python.write_bytes(b"")
+    output = tmp_path / "image.png"
+
+    for reported_path in (None, 42, True, [], {}):
+        def worker(*args, **kwargs):
+            request = json.loads(kwargs["input"])
+            Image.new("RGB", (2, 2), "orange").save(request["output_path"])
+            return subprocess.CompletedProcess(
+                args, 0, json.dumps({"path": reported_path}), ""
+            )
+
+        with (patch.object(quick_image.subprocess, "run", side_effect=worker),
+              patch.object(quick_image, "clarify_prompt", return_value="a dog")):
+            with pytest.raises(RuntimeError, match="did not save the requested file"):
+                quick_image.generate(tmp_path, "a dog", str(output))
+        assert quick_image.image_file_ok(output)
+        output.unlink()
+
+
 def test_direct_image_rejects_valid_checksums_but_invalid_pixels(tmp_path):
     import struct
     import zlib
