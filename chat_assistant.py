@@ -161,10 +161,13 @@ def music_request(text: str, *, reference: bool = False) -> dict | None:
     single = next((match for match in single_candidates if not decade_style(match)), None)
     if clock:
         duration = int(clock.group(1)) * 60 + int(clock.group(2))
-    elif combined:
-        duration = round(float(combined.group(1)) * 60 + float(combined.group(2)))
-    elif single:
-        duration = round(float(single.group(1)) * (60 if single.group(2).lower().startswith("min") else 1))
+    elif combined or single:
+        try:
+            seconds = (float(combined.group(1)) * 60 + float(combined.group(2)) if combined else
+                       float(single.group(1)) * (60 if single.group(2).lower().startswith("min") else 1))
+            duration = round(seconds)
+        except (ValueError, OverflowError):
+            raise ValueError("Local music can render 10 seconds to 10 minutes. Please choose a duration in that range.") from None
     else:
         # A plain song should be full length. A beat or jingle is a short
         # deliverable unless the person names a duration or also asks for a song.

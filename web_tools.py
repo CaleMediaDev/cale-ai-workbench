@@ -359,15 +359,17 @@ def visible_phone_numbers(text: str) -> list[str]:
 
 def business_name_matches(name: str, title: str, url: str) -> bool:
     """Require every meaningful name word before attributing contact details."""
-    if name_matching_domain(name, url):
-        return True
     words = [
         word for word in re.findall(r"[a-z0-9]+", name.casefold())
         if len(word) > 1 and word not in {"the", "and", "llc", "inc"}
     ]
-    visible = set(re.findall(
-        r"[a-z0-9]+", (title + " " + (urlsplit(url).hostname or "")).casefold()
-    ))
+    host = (urlsplit(url).hostname or "").casefold()
+    # Joined business names are common domain labels. Equality prevents a
+    # shorter name from borrowing an unrelated brand's contact details.
+    brand = "".join(words)
+    if len(brand) >= 5 and any(brand == label.replace("-", "") for label in host.split(".")[:-1]):
+        return True
+    visible = set(re.findall(r"[a-z0-9]+", (title + " " + host).casefold()))
     return bool(words) and all(word in visible for word in words)
 
 

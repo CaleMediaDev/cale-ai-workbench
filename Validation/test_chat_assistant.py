@@ -459,14 +459,14 @@ def test_single_second_abbreviations_preserve_duration_and_validate_range(unit):
         chat_assistant.music_request(f"Make a 5 {unit} song")
 
 
-@pytest.mark.parametrize("request, seconds", [
+@pytest.mark.parametrize("prompt, seconds", [
     ("Make a 1.5-minute song", 90),
     ("Make a 0.5 minute song", 30),
     ("Make a 1.5 minute and 30 second song", 120),
     ("Make a 45.5-second jingle", 46),
 ])
-def test_decimal_song_durations_are_not_parsed_as_the_fractional_digits(request, seconds):
-    assert chat_assistant.music_request(request)["duration_seconds"] == seconds
+def test_decimal_song_durations_are_not_parsed_as_the_fractional_digits(prompt, seconds):
+    assert chat_assistant.music_request(prompt)["duration_seconds"] == seconds
 
 
 def test_decimal_song_duration_still_enforces_render_limit():
@@ -1159,3 +1159,10 @@ def test_web_answer_discloses_selected_passages():
     ):
         answer = chat_assistant.answer_from_web("What is the value?")
     assert "Selected passages only" in answer
+
+
+@pytest.mark.parametrize("quantity", ["9" * 400, "9" * 400 + ".5"])
+@pytest.mark.parametrize("unit", ["seconds", "minutes"])
+def test_overflowing_decimal_duration_keeps_the_standard_render_limit(quantity, unit):
+    with pytest.raises(ValueError, match="10 seconds to 10 minutes"):
+        chat_assistant.music_request(f"Make a {quantity}-{unit} song")

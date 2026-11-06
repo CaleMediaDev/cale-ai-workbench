@@ -1,6 +1,7 @@
 """Business contact lookup must return live page evidence, not search snippets."""
 
 import os
+import pytest
 import unittest
 from unittest.mock import patch
 
@@ -438,3 +439,18 @@ class BusinessContactTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+@pytest.mark.parametrize("name,title,url,expected", [
+    ("Pure Michigan Lawn Care LLC", "Home", "https://puremichiganlawncare.com", True),
+    ("The Pure Michigan Lawn Care", "Home", "https://puremichiganlawncare.com", True),
+    ("Pure Michigan Lawn Care", "Home", "https://pure-michigan-lawn-care.com", True),
+    ("Art Works", "Home", "https://smartworks.com", False),
+    ("Art Works", "Home", "https://artworks.com", True),
+    ("Art", "Martin Home Repair", "https://directory.example", False),
+    ("Green Lawn Care", "Greenfield Lawn Care", "https://directory.example", False),
+    ("Green Lawn Care LLC", "GREEN Lawn-Care", "https://unrelated.example", True),
+    ("The and LLC Inc", "The and LLC Inc", "https://theandllcinc.com", False),
+])
+def test_business_name_joined_domain_preserves_exact_meaningful_name(name, title, url, expected):
+    assert web_tools.business_name_matches(name, title, url) is expected
