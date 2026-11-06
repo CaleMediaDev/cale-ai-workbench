@@ -537,6 +537,16 @@ def test_finished_task_can_receive_named_revision_in_chat():
     assert chat_assistant.choose_task("Improve Techno song with no guitars", candidates)["id"] == "song"
 
 
+@pytest.mark.parametrize("status", ["working", "accepted"])
+def test_named_unicode_revision_routes_to_the_existing_task(status):
+    task = {"id": "site", "title": "Straße website", "status": status}
+    text = "Improve Straße website with a contact page"
+    candidates = chat_assistant.followup_tasks([task], text)
+    assert candidates == [task]
+    assert chat_assistant.route(text, candidates) == "note"
+    assert chat_assistant.choose_task(text, candidates, allow_single=False) == task
+
+
 def test_vague_revision_offers_recent_finished_tasks_without_guessing():
     tasks = [
         {"id": str(index), "title": f"Finished {index}", "status": "accepted", "updated": index}
