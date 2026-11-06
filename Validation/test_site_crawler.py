@@ -232,6 +232,50 @@ def test_later_backlink_to_redirect_destination_preserves_budget(tmp_path, monke
     assert not site_crawler.page_path(tmp_path, destination).exists()
 
 
+def test_converging_redirects_save_destination_only_once(tmp_path, monkeypatch):
+    monkeypatch.setattr(site_crawler, "check_url", lambda url: (urlsplit(url), ["93.184.215.14"]))
+    indexed = []
+    monkeypatch.setattr(project_memory, "index_file", lambda project, path: indexed.append(path))
+    start = "https://example.com"
+    first = start + "/first-alias"
+    second = start + "/second-alias"
+    sibling = start + "/sibling"
+    destination = start + "/destination"
+    seen = []
+
+    class FakeCrawler:
+        def __init__(self, config):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_):
+            return None
+
+        async def arun(self, url, config):
+            seen.append(url)
+            return types.SimpleNamespace(
+                success=True, markdown="Readable content", error_message="",
+                redirected_url=destination if url in {first, second} else None,
+                links={"internal": [{"href": first}, {"href": second}, {"href": sibling}]}
+                if url == start else {},
+            )
+
+    monkeypatch.setitem(sys.modules, "crawl4ai", types.SimpleNamespace(
+        AsyncWebCrawler=FakeCrawler,
+        BrowserConfig=lambda **kwargs: kwargs,
+        CrawlerRunConfig=lambda **kwargs: types.SimpleNamespace(**kwargs),
+    ))
+    result = asyncio.run(site_crawler.crawl_site(tmp_path, start, max_pages=4))
+    assert seen == [start, first, second, sibling]
+    assert result["errors"] == []
+    assert [page["url"] for page in result["pages"]] == [start, first, sibling]
+    assert indexed == [site_crawler.page_path(tmp_path, url) for url in [start, first, sibling]]
+    assert all(path.exists() for path in indexed)
+    assert not site_crawler.page_path(tmp_path, second).exists()
+
+
 def test_url_scope_and_stable_path(tmp_path, monkeypatch):
     monkeypatch.setattr(site_crawler, "check_url", lambda url: (urlsplit(url), ["93.184.215.14"]))
     url = site_crawler.normalized_url("https://example.com/a#part", "example.com")

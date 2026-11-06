@@ -63,6 +63,8 @@ async def crawl_site(project: Path, start_url: str, max_pages: int = 5) -> dict:
                 if not result.success:
                     raise RuntimeError(str(result.error_message or "Crawl failed")[:300])
                 base_url = normalized_url(getattr(result, "redirected_url", None) or url, host)
+                if base_url in saved_destinations:
+                    continue
                 markdown_result = result.markdown
                 if isinstance(markdown_result, str):
                     markdown = markdown_result
