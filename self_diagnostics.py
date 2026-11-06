@@ -622,7 +622,7 @@ class _LiveSelfCheck:
                 if time.monotonic()-since >= UNKNOWN_GRACE:
                     self.defer(details if busy else {"reason": "activity_unknown"})
                 time.sleep(.1)
-            except (OSError, ValueError, TypeError, sqlite3.Error, psutil.Error):
+            except (OSError, ValueError, TypeError, RecursionError, sqlite3.Error, psutil.Error):
                 self.defer({"reason": "activity_unknown"})
 
 
