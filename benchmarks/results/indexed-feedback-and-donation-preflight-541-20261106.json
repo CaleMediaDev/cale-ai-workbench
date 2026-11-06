@@ -1,0 +1,185 @@
+{
+  "release": "0.5.541",
+  "qualified_runtime_source": "ca0578d399f720e2512f4c76a31048eb6809cd01",
+  "sha256": {
+    "Validation/test_donation.py": "df5694e41baa927ddfe5424ca289072efccb18df9866422a9c2bd4b92755b949",
+    "Validation/test_donation_regressions.py": "9d9d5575dbf4967f30bb94cb94de94c403730acf5573c217132e7d707eae930a",
+    "Validation/test_feedback_learning.py": "7fdd512ef7b374aed1018a47d02e08cf121358ee855865ff69564d3e51e2fd6e",
+    "Validation/test_long_tasks.py": "b775904c6d21d1b584be13059b9ebdf6eb5aeeba83d792c4d0ad51fd67e0b069",
+    "donation.py": "ecd19e2433d2ef133bdb9b300fdf8ab17722188b4a5e7f536b8eb76e8239afe7",
+    "feedback_learning.py": "187e7c3a16124128335304e6b2d06bde90907534e9868f88aa4eab3da46daf9d",
+    "long_tasks.py": "a98fbe701b8ab3484d834dd7fa37cd23bdc2ff4c0172bae3fcdf943c4d2ece2e"
+  },
+  "benchmark_sha256": "6e011ed7646e8487ac03ffc8b5ac5094efc40edeb72c536de8b813c8ef83bb39",
+  "validation": {
+    "affected_modules": {
+      "exit_code": 0,
+      "source_bytes_unchanged": true,
+      "modules": [
+        "Validation/test_feedback_learning.py",
+        "Validation/test_long_tasks.py",
+        "Validation/test_donation.py",
+        "Validation/test_donation_regressions.py"
+      ],
+      "passed": 670,
+      "skipped": 1,
+      "subtests_passed": 115,
+      "seconds": 174.56172739999602
+    },
+    "fresh_tk_control": {
+      "exit_code": 0,
+      "passed": 1,
+      "node": "Validation/test_long_tasks.py::test_create_page_routes_selected_kind_and_keeps_prompt_until_setup_ready",
+      "hashes_unchanged": true
+    },
+    "coverage": "Composite: four complete module runs with one Tk startup skip, plus that case separately in fresh owned widgets. Not a single671-test run.",
+    "scale": {
+      "format": 1,
+      "data": "owned temporary synthetic reviews only",
+      "requested_rows": 100000,
+      "soft_budget_seconds": 900.0,
+      "source_sha256": "187e7c3a16124128335304e6b2d06bde90907534e9868f88aa4eab3da46daf9d",
+      "token_version": "v1:e18d9402cebdc467e331f716be754af715c33c474b8a581587295a5b856f9abb",
+      "python_version": "3.13.6",
+      "sqlite_version": "3.50.4",
+      "provenance": "Same source performs raw seeding, actual maintenance, and read-only queries; no derived index rows are seeded.",
+      "limits": "Cooperative budgets cannot preempt native SQLite/filesystem calls. Lexical capped recall is advisory, not exhaustive semantic matching or whole-app performance.",
+      "seed_seconds": 0.4799570000031963,
+      "terminal": "ready",
+      "maintenance_seconds": 273.914460400003,
+      "batches": 12500,
+      "unavailable_batches": 0,
+      "maximum_batch": {
+        "rows": 8,
+        "text_bytes": 312,
+        "posting_mutations": 8
+      },
+      "database_bytes": 33071104,
+      "counts": {
+        "reviews": 100000,
+        "generation_floors": 100000,
+        "indexed_docs": 100000,
+        "postings": 100000,
+        "pending_changes": 0,
+        "document_frequencies": [
+          [
+            "ambernebula",
+            1
+          ],
+          [
+            "birch",
+            99999
+          ]
+        ]
+      },
+      "metadata": {
+        "id": 1,
+        "version": "v1:e18d9402cebdc467e331f716be754af715c33c474b8a581587295a5b856f9abb",
+        "epoch": 1,
+        "frontier_id": 100000,
+        "target_id": 100000,
+        "change_seq": 0,
+        "complete": 1,
+        "indexed_docs": 100000,
+        "indexed_terms": 100000,
+        "omitted": 0,
+        "eligibility_revision": 0,
+        "batch_no": 12500,
+        "floor_mode": 1,
+        "started": 1
+      },
+      "queries": {
+        "rare": {
+          "seconds": 0.002004199952352792,
+          "status": {
+            "coverage": "indexed_snapshot_ready",
+            "limited": false,
+            "metadata_rows": 2,
+            "text_bytes": 63,
+            "candidate_rows": 1,
+            "text_rows": 1,
+            "fallback_used": false
+          },
+          "lesson_present": true
+        },
+        "common": {
+          "seconds": 0.00958729995181784,
+          "status": {
+            "coverage": "indexed_snapshot_ready",
+            "limited": true,
+            "metadata_rows": 365,
+            "text_bytes": 11700,
+            "candidate_rows": 300,
+            "text_rows": 300,
+            "fallback_used": true
+          },
+          "lesson_present": true
+        },
+        "stopwords": {
+          "seconds": 0.001195400021970272,
+          "status": {
+            "coverage": "indexed_snapshot_ready",
+            "limited": false,
+            "metadata_rows": 0,
+            "text_bytes": 0,
+            "candidate_rows": 0,
+            "text_rows": 0,
+            "fallback_used": false
+          },
+          "lesson_present": false
+        },
+        "no_match": {
+          "seconds": 0.0011067999876104295,
+          "status": {
+            "coverage": "indexed_snapshot_ready",
+            "limited": false,
+            "metadata_rows": 0,
+            "text_bytes": 0,
+            "candidate_rows": 0,
+            "text_rows": 0,
+            "fallback_used": false
+          },
+          "lesson_present": false
+        }
+      },
+      "database_sha256_before_queries": "c03c85dc17d86581ca0497d4b27d417b061ce0d6df34445eb9d0b413d303fab3",
+      "database_sha256_after_queries": "c03c85dc17d86581ca0497d4b27d417b061ce0d6df34445eb9d0b413d303fab3",
+      "queries_left_database_unchanged": true,
+      "source_unchanged": true,
+      "temporary_database_removed": true,
+      "total_seconds": 274.4686478000367
+    }
+  },
+  "memory": {
+    "authority": "Raw feedback and generation floors in one read-only snapshot; index proposes IDs only.",
+    "read_limits": {
+      "query_chars": 8192,
+      "distinct_query_terms": 256,
+      "rarest_terms": 32,
+      "postings_per_term": 64,
+      "metadata_rows": 2048,
+      "candidate_texts": 300,
+      "text_bytes": 8388608
+    },
+    "maintenance_limits": {
+      "rows": 64,
+      "tasks": 16,
+      "text_bytes": 262144,
+      "posting_mutations": 4096,
+      "advisory_vm_ms": 50
+    },
+    "lifecycle": "Optional owned background maintenance; no database creation, migration or maintenance on guidance reads."
+  },
+  "donation_preflight": {
+    "scope": "New or changed recognizable literal pytest.mark.parametrize names using reserved request, in changed Validation/test_*.py default collected definitions.",
+    "execution": "AST-only, donated code and tests are not executed.",
+    "cache": "Loaded validator helper code participates in publication policy; changed validators invalidate cached approval."
+  },
+  "limits": [
+    "Bounded lexical retrieval is advisory, not exhaustive semantic matching or globally exact ranking under caps.",
+    "SQLite VM budgets are cooperative and cannot preempt native I/O; synthetic timings are descriptive, not a whole-app speed guarantee.",
+    "Dynamic pytest names, custom collection, shadowed aliases and existing parser resource limits remain unverified. This preflight is not a security certification or a full test collection.",
+    "No new runtime service or dependency. No user data, accounts, devices or model inference were used by the synthetic benchmark.",
+    "Private early persistence coverage and native-agent experiments are excluded. No claim of end-to-end task, voice or music quality."
+  ]
+}

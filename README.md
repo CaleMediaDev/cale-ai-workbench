@@ -2,6 +2,19 @@
 
 **A Windows assistant that builds with tools, saves its progress, and runs local models.**
 
+Created by [Cale Media](https://calemedia.com).
+
+**[Download Cale AI for Windows](https://github.com/CaleMediaDev/cale-ai-workbench/releases/latest/download/Cale-AI-Workbench-Install.zip)**
+
+1. Download and extract the ZIP, then open **Install Cale AI.exe**.
+2. Click **Install** and watch the progress bar. Accounts are optional; you can connect them while models download.
+3. Click **Open Cale AI** and describe what you want in chat.
+
+Release 0.5.541 gives local feedback memory a bounded background index so older relevant lessons can be retrieved without reading every review. It also catches a known invalid pytest parameter before publishing a donated proposal. [Validation and limits](benchmarks/results/indexed-feedback-and-donation-preflight-541-20261106.json).
+
+<details>
+<summary>Feature history and validation</summary>
+
 Release 0.5.540 includes 18 reviewed fixes for duration parsing, task routing, model downloads, media tools and business contact matching. Two unsafe cleanup proposals were rejected. [Validation and limits](benchmarks/results/reviewed-donations-540-20261106.json).
 
 Release 0.5.539 includes 23 reviewed fixes for setup, model readiness, file handling, media controls and tool recovery. Radio pause/resume failures remain retryable; two unsafe proposals were rejected. [Validation and limits](benchmarks/results/reviewed-donations-539-20261106.json).
@@ -147,6 +160,9 @@ If an instruction arrives while the model is choosing a tool, Cale drops that ol
 For common CSV cleanup, the native worker has a project-contained `transform_csv` tool that uses a real CSV parser for trimming, case changes, phone digit cleanup, row filtering, and deduplication. It preserves the source and creates a read-only verifier when the task has none. That verifier also re-parses both files and checks every output row against the saved transformation rules. A verifier that changes project output cannot pass the worker's legacy command check. When a new request clearly asks to create one CSV from another with supported cleanup operations, Cale asks for the structured tool call before general work begins; unsupported operations, existing output, restrictive project instructions, and queued follow-ups use the general worker. The local model still reviews the output, so individual task time can vary.
 
 Skills and tool descriptions are also indexed in a local SQLite FTS5 database (`LongTasks/capabilities.sqlite3`). Setup builds it before opening the desktop; launch and the supervisor refresh it automatically, including locally edited skills. The native worker can search that catalog and load a relevant skill without scanning every Markdown file on each task. The index is rebuildable from the installed files and tool registrations; it contains no account keys or project documents. The readiness checklist queries the database and offers automatic repair if it fails. Large optional model weights still download according to the PC's available resources, so a capability appears as ready only after its runtime or model has actually passed its check.
+
+
+</details>
 
 ## Cale Radio
 
