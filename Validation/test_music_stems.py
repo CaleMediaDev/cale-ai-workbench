@@ -499,6 +499,38 @@ def test_relative_symlinks_do_not_count_as_stems(tmp_path):
     assert source.read_bytes() == b"music"
 
 
+@pytest.mark.skipif(os.name == "nt", reason="POSIX executable lookup regression")
+def test_worker_exposes_bundled_ffmpeg_on_posix_path(tmp_path):
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+
+    engine = tmp_path / "audio-separator"
+    engine.mkdir()
+    binary = tmp_path / "bundled-ffmpeg"
+    binary.write_bytes(b"bundled executable")
+    binary.chmod(0o755)
+    expected = engine / "bin" / "ffmpeg"
+    separator_class = Mock()
+
+    def check_ffmpeg_lookup():
+        assert music_stems.shutil.which("ffmpeg") == str(expected)
+        assert expected.read_bytes() == binary.read_bytes()
+
+    separator_class.return_value.load_model.side_effect = check_ffmpeg_lookup
+    modules = {
+        "imageio_ffmpeg": SimpleNamespace(get_ffmpeg_exe=lambda: str(binary)),
+        "audio_separator": SimpleNamespace(),
+        "audio_separator.separator": SimpleNamespace(Separator=separator_class),
+    }
+    with patch.dict(music_stems.sys.modules, modules), patch.dict(
+        music_stems.os.environ, {"PATH": ""}
+    ), patch.object(music_stems, "ENGINE", engine):
+        music_stems._worker("song.mp3", "stems")
+
+    separator_class.return_value.load_model.assert_called_once_with()
+    separator_class.return_value.separate.assert_called_once_with("song.mp3")
+
+
 def test_worker_retries_after_partial_ffmpeg_copy(tmp_path):
     from types import SimpleNamespace
     from unittest.mock import Mock
@@ -507,7 +539,7 @@ def test_worker_retries_after_partial_ffmpeg_copy(tmp_path):
     engine.mkdir()
     binary = tmp_path / "bundled-ffmpeg.exe"
     binary.write_bytes(b"complete executable")
-    ffmpeg = engine / "bin" / "ffmpeg.exe"
+    ffmpeg = engine / "bin" / ("ffmpeg.exe" if os.name == "nt" else "ffmpeg")
     original_copy = music_stems.shutil.copy2
     attempts = 0
     separator_class = Mock()

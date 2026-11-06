@@ -211,7 +211,7 @@ def _worker(source: str, target: str) -> None:
     binary = Path(imageio_ffmpeg.get_ffmpeg_exe())
     ffmpeg_dir = ENGINE / "bin"
     ffmpeg_dir.mkdir(exist_ok=True)
-    ffmpeg = ffmpeg_dir / "ffmpeg.exe"
+    ffmpeg = ffmpeg_dir / ("ffmpeg.exe" if os.name == "nt" else "ffmpeg")
     if not ffmpeg.exists():
         # A failed copy must not leave an executable that retries will reuse.
         with TemporaryDirectory(prefix=".ffmpeg-", dir=ffmpeg_dir) as staging_dir:
