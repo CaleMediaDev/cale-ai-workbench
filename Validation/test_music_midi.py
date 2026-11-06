@@ -448,6 +448,22 @@ def test_unquoted_pitch_bend_arrays_are_normalized(tmp_path, bends):
 
 
 
+@pytest.mark.parametrize("bends", ["NaN", "Infinity", "-Infinity", "1e999", "[NaN]", "[1e999]"])
+def test_non_finite_pitch_bends_preserve_original_csv(tmp_path, bends):
+    path = tmp_path / "notes.csv"
+    original = (
+        ",".join(music_midi.NOTE_COLUMNS) + "\n"
+        + "0.0,1.0,69,85," + bends + "\n"
+    ).encode("utf-8")
+    path.write_bytes(original)
+
+    with pytest.raises(ValueError):
+        music_midi.normalize_note_events(path)
+
+    assert path.read_bytes() == original
+    assert set(tmp_path.iterdir()) == {path}
+
+
 def test_unexpected_note_csv_is_preserved_for_diagnosis(tmp_path):
     path = tmp_path / "notes.csv"
     path.write_text("unknown,format\n1,2\n")
