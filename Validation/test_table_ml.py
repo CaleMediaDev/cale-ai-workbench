@@ -70,6 +70,40 @@ class TableMLTests(unittest.TestCase):
                                          str(root / "predicted.csv"))
             self.assertEqual(result["rows"], 1)
 
+    def test_oversized_trained_model_is_not_published_and_allows_retry(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            training = root / "training.csv"
+            model = root / "model.json"
+            with training.open("w", newline="", encoding="utf-8") as stream:
+                writer = csv.writer(stream)
+                writer.writerow(["category", "label"])
+                for index in range(40):
+                    writer.writerow(["x" * 100_000 + str(index),
+                                     "hot" if index % 2 else "cold"])
+            self.assertLess(training.stat().st_size, 25_000_000)
+            # Only 32 training coordinates, but their names and ownership
+            # metadata together exceed the prediction loader's size limit.
+            with self.assertRaisesRegex(ValueError, "Trained model exceeds 10 MB"):
+                train_table_model(str(training), "label", str(model),
+                                  "classification")
+            self.assertFalse(model.exists())
+            self.assertFalse(list(root.glob(".table-model-*")))
+
+            with training.open("w", newline="", encoding="utf-8") as stream:
+                writer = csv.writer(stream)
+                writer.writerow(["category", "label"])
+                for index in range(40):
+                    writer.writerow(["red" if index % 2 else "blue",
+                                     "hot" if index % 2 else "cold"])
+            train_table_model(str(training), "label", str(model), "classification")
+            prediction = root / "new.csv"
+            prediction.write_text("category\nred\n", encoding="utf-8")
+            result = predict_table_model(str(model), str(prediction),
+                                         str(root / "predicted.csv"))
+            self.assertEqual(result["rows"], 1)
+            self.assertFalse(list(root.glob(".table-model-*")))
+
     def test_training_rejects_colliding_encoded_feature_names(self):
         cases = (
             (["color", "color=red", "label"],
