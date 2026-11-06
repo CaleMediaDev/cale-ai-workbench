@@ -332,6 +332,35 @@ def test_local_dom_contract_handles_svg_non_string_type_property(tmp_path):
         native_browser.close()
 
 
+def test_local_dom_contract_does_not_advertise_unfillable_input_types(tmp_path):
+    pytest.importorskip("playwright")
+    (tmp_path / "index.html").write_text(
+        '<!doctype html><title>Input editing</title><body>'
+        '<input id="color" type="color"><input id="range" type="range">'
+        '<input id="text" type="text"><input id="number" type="number">'
+        '</body>', encoding="utf-8")
+    try:
+        opened = native_agent.execute_tool(
+            tmp_path, "browser_open_project", {"path": "index.html"})
+        if opened.startswith("Tool error:") and "Executable doesn't exist" in opened:
+            pytest.skip("Chromium runtime is not installed in this test environment")
+        assert json.loads(opened)["title"] == "Input editing"
+        snapshot = json.loads(native_browser.execute(tmp_path, "snapshot", {}))
+        targets = {row["id"]: row for row in snapshot["dom_contract"]["targets"]}
+        for identifier in ("color", "range"):
+            assert targets[identifier]["visible"]
+            assert not targets[identifier]["disabled"]
+            assert not targets[identifier]["editable"]
+        page = native_browser._page(tmp_path)
+        for identifier, value in (("text", "hello"), ("number", "42")):
+            assert targets[identifier]["editable"]
+            ref = page.locator(f"#{identifier}").get_attribute("data-cale-ref")
+            native_browser.execute(tmp_path, "type", {"ref": ref, "text": value})
+            assert page.locator(f"#{identifier}").input_value() == value
+    finally:
+        native_browser.close()
+
+
 def test_local_dom_contract_bounds_targets_and_unicode_output(tmp_path):
     pytest.importorskip("playwright")
     (tmp_path / "index.html").write_text("".join(
