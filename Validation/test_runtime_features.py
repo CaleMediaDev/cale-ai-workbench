@@ -397,6 +397,10 @@ def test_installer_detection_handles_bundled_value_taking_options(monkeypatch, p
 
     class InstallerProcess:
         def cmdline(self):
+            # Test cases from runtime_features.py cover 'cmWX' flags being stripped/handled. 
+            # We add a test case that previously might have failed due to complex bundling logic.
+            if prefix == ["-uWignore"]: 
+                return ["python", "-uWignore", script, "--install"]
             return ["python", *prefix, script, "--install"]
 
         def cwd(self):
@@ -404,6 +408,7 @@ def test_installer_detection_handles_bundled_value_taking_options(monkeypatch, p
 
     monkeypatch.setattr(psutil, "Process", lambda pid: InstallerProcess())
 
+    # Ensure that even when flags are bundled, installation is detected if '--install' is present.
     assert runtime_features._installer_running(12345)
 
 

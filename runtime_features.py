@@ -87,10 +87,24 @@ def _installer_running(pid=None) -> bool:
                     # -uW ignore). The first value-taking option consumes
                     # the remainder of the bundle, or the next argument.
                     if argument.startswith("-") and not argument.startswith("--"):
+                        # Handle bundled short options like -uWignore or -cmWX
+                        # We iterate through the characters to see if a known short option is present.
+                        # If we find one, we reconstruct the argument to simplify subsequent checks, 
+                        # but we must ensure we don't misinterpret it if it's not a known flag structure.
+                        # This section is complex due to Python CLI parsing rules. We prioritize finding the script argument.
+                        is_known_short_flag = False
                         for index, option in enumerate(argument[1:], 1):
                             if option in "cmWX":
+                                # Found a known short flag; strip it and continue processing the remainder of the bundle.
                                 argument = "-" + argument[index:]
+                                is_known_short_flag = True
                                 break
+                        
+                        if not is_known_short_flag:
+                            # If it's a short option but not one of the known 'cmWX', treat it as a general short option
+                            # and continue to the next argument, unless it's just '-'.
+                            if argument != "-":
+                                continue
                     if argument == "-" or argument.startswith(("-c", "-m")):
                         break
                     if argument in ("-W", "-X", "--check-hash-based-pycs"):
@@ -102,7 +116,10 @@ def _installer_running(pid=None) -> bool:
                             candidates = [Path(script_argument)]
                         break
                     if argument.startswith("-"):
-                        continue
+                        # If it starts with '-' but wasn't handled above (e.g., it's an unknown short flag),
+                        # we only continue if it wasn't successfully truncated above.
+                        if not is_known_short_flag: 
+                            continue
                     candidates = [Path(argument)]
                     break
                 # Interpreter option values do not enable installation; only
