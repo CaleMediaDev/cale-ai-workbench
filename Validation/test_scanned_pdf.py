@@ -653,6 +653,59 @@ def test_failed_transcription_preserves_other_pages_and_reports_omission(tmp_pat
     document.close.assert_called_once_with()
 
 
+def test_invalid_vision_response_preserves_other_pages(tmp_path):
+    import sys
+    from unittest.mock import Mock
+
+    class PdfiumError(Exception):
+        pass
+
+    pdf = tmp_path / "invalid-vision-response.pdf"
+    pdf.write_bytes(b"%PDF mocked")
+    for invalid_response in [None, {}, {"description": None}, {"description": 123}]:
+        pages = [Mock(), Mock(), Mock()]
+        textpages = [Mock(), Mock(), Mock()]
+        for page, textpage, text in zip(pages, textpages, ["Native order", "", ""]):
+            page.get_textpage.return_value = textpage
+            textpage.get_text_bounded.return_value = text
+            page.get_size.return_value = (600, 800)
+        images = [Mock(), Mock()]
+        bitmaps = [Mock(), Mock()]
+        for page, bitmap, image in zip(pages[1:], bitmaps, images):
+            page.render.return_value = bitmap
+            bitmap.to_pil.return_value = image
+        document = Mock()
+        document.__len__ = Mock(return_value=3)
+        document.__getitem__ = Mock(side_effect=lambda index: pages[index])
+        recognize = Mock(side_effect=[invalid_response, {"description": "Readable scan"}])
+
+        with patch.dict(sys.modules, {
+            "pypdfium2": SimpleNamespace(
+                PdfDocument=Mock(return_value=document), PdfiumError=PdfiumError
+            ),
+            "media_worker": SimpleNamespace(recognize_image=recognize),
+        }):
+            result = scanned_pdf.read_scanned_pdf(str(pdf))
+
+        assert "[Page 1; selectable text]\nNative order" in result["text"]
+        assert "[Page 3; vision transcription]\nReadable scan" in result["text"]
+        assert "[Page 2; vision transcription]" not in result["text"]
+        assert "[1 scanned pages were not read: 2.]" in result["text"]
+        assert result["pages_read"] == [1, 3]
+        assert result["scanned_pages"] == [2, 3]
+        assert result["partial"] is True
+        assert recognize.call_count == 2
+        for image, bitmap in zip(images, bitmaps):
+            image.close.assert_called_once_with()
+            bitmap.close.assert_called_once_with()
+        for call in recognize.call_args_list:
+            assert not Path(call.args[0]).parent.exists()
+        for textpage in textpages:
+            textpage.close.assert_called_once_with()
+        assert [page.close.call_count for page in pages] == [1, 2, 2]
+        document.close.assert_called_once_with()
+
+
 def test_page_selection_spans_long_document():
     assert scanned_pdf.sampled_pages(1, 6) == [0]
     assert scanned_pdf.sampled_pages(10, 4) == [0, 3, 6, 9]
