@@ -10,6 +10,22 @@ from table_ml import predict_table_model, train_table_model
 
 
 class TableMLTests(unittest.TestCase):
+    def test_training_rejects_unnamed_feature_column(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            training = root / "training.csv"
+            with training.open("w", newline="", encoding="utf-8") as stream:
+                writer = csv.writer(stream)
+                writer.writerow(["", "label"])
+                for index in range(40):
+                    writer.writerow([index, "hot" if index >= 20 else "cold"])
+            model = root / "model.json"
+            with self.assertRaisesRegex(ValueError, "unique named columns"):
+                train_table_model(str(training), "label", str(model),
+                                  "classification")
+            self.assertFalse(model.exists())
+            self.assertFalse(list(root.glob(".table-model-*")))
+
     def test_classification_and_prediction(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
