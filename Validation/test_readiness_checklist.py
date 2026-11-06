@@ -615,6 +615,45 @@ def test_voice_readiness_requires_a_nonempty_text_transcription(tmp_path, text, 
     assert saved["voice"] == result["voice"]
 
 
+def test_optional_checks_save_results_when_speech_output_disappears(tmp_path):
+    sample = tmp_path / "assets/cale-wake-ack.wav"
+    sample.parent.mkdir()
+    sample.write_bytes(b"bundled speech sample")
+    original_stat = Path.stat
+    output_path = None
+    output_stats = 0
+
+    def media_probe(_root, action, **kwargs):
+        nonlocal output_path
+        if action == "transcribe_audio":
+            return {"ok": True, "data": {"text": "Cale is ready."}}
+        if action == "speak":
+            output_path = Path(kwargs["output_path"])
+            output_path.write_bytes(b"x" * 1001)
+        return {"ok": True}
+
+    def stat_with_disappearing_output(path, *args, **kwargs):
+        nonlocal output_stats
+        if path == output_path:
+            output_stats += 1
+            if output_stats > 1:
+                raise FileNotFoundError(str(path))
+        return original_stat(path, *args, **kwargs)
+
+    with (patch.object(readiness_checklist, "_media_probe", side_effect=media_probe),
+          patch.object(Path, "stat", stat_with_disappearing_output)):
+        result = readiness_checklist.run_optional_checks(tmp_path)
+
+    assert output_stats == 2
+    assert result["voice"]["microphone"] is True
+    assert result["voice"]["recognition"] is True
+    assert result["voice"]["speech"] is False
+    assert result["voice"]["ok"] is False
+    saved = json.loads((tmp_path / "LongTasks/readiness-probes.json").read_text(
+        encoding="utf-8"))
+    assert saved == result
+
+
 def test_safe_repair_is_queued_automatically_once_without_browser_pairing(tmp_path):
     rows = {"rows": [
         {"label": "Fast file search", "state": "attention"},
