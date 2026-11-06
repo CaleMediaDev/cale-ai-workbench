@@ -59,7 +59,12 @@ def _agent_python(root: Path) -> Path | None:
         environment = info["packages"]["venv"]["environment"]
         if not isinstance(environment, str) or not environment.strip():
             return None
-        return Path(environment) / "Scripts/python.exe"
+        environment_path = Path(environment)
+        # Relative install facts must not select an unrelated interpreter from
+        # the desktop process's current working directory.
+        if not environment_path.is_absolute():
+            return None
+        return environment_path / "Scripts/python.exe"
     except (OSError, ValueError, KeyError, TypeError):
         return None
 
