@@ -135,6 +135,20 @@ class BusinessContactTests(unittest.TestCase):
         self.assertEqual(page["text"], "Contact\nDetails\nPhone\n5172581313")
         self.assertEqual(web_tools.visible_phone_numbers(page["text"]), ["5172581313"])
 
+    def test_reader_preserves_lower_level_heading_text_boundaries(self):
+        for tag in ("h4", "h5", "h6"):
+            with self.subTest(tag=tag):
+                body = f'Contact details<{tag}>Phone</{tag}>5172581313'
+                with patch.object(
+                    web_tools, "fetch",
+                    return_value=("https://example.org/contact", body, "text/html", 200),
+                ):
+                    page = web_tools.read_webpage("https://example.org/contact")
+                self.assertEqual(page["text"], "Contact details\nPhone\n5172581313")
+                self.assertEqual(
+                    web_tools.visible_phone_numbers(page["text"]), ["5172581313"]
+                )
+
     def test_reader_preserves_description_list_text_boundaries(self):
         body = '<dl><dt>Phone</dt><dd>5172581313</dd></dl>Contact us'
         with patch.object(
