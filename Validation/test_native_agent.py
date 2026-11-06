@@ -8669,6 +8669,7 @@ def test_public_prompt_active_condition_is_pure_and_preserves_requirements(tmp_p
     with patch.object(task_context, 'step_status', side_effect=AssertionError('prompt must not query SQLite')):
         text = native_agent.prompt(item)
     assert item['brief'] in text
-    assert 'When a SQLite step is active, work on that step only.' in text
-    assert 'If no step is active, continue unfinished original-goal work' in text
+    assert 'Work only on an active SQLite step;' in text
+    assert 'With no active step, finish that request with normal tools' in text
+    assert 'checked components do not prove whole-task completion' in text
     assert not (Path(item['folder']) / '.local-ai' / 'memory.sqlite3').exists()

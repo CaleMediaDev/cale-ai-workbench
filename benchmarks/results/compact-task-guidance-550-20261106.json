@@ -1,0 +1,37 @@
+{
+  "release": "0.5.550",
+  "base": "b3cc29fa136dedf494336a55810eca07d1b62410",
+  "sha256": {
+    "native_agent.py": "32b064f1aa653fe9b44efd7f60ce25878eec60f711dc22c4d083766e5a36a4e3",
+    "task_context.py": "832b2af0bca11cec915600e5146ae028972200628977f205da4e3ae1281f8a4f",
+    "Validation/test_native_agent.py": "9f4d784e82dd29ff2d690989a9c1028027b65e12447b2e53e2ded2e0fb75b10f",
+    "music_stems.py": "25b4bd5d0954f5b4b827d743b99b0e9eaf9e74e26ffecbefc1d1596016b5a1dd",
+    "Validation/test_music_stems.py": "48b98a9a23e7b5f8490ad2ce95a83da04a00fb6f9dd53921b905ea4ebc3b5b51"
+  },
+  "validation": {
+    "affected_modules": {
+      "exit_code": 0,
+      "source_bytes_unchanged": true,
+      "passed": 30,
+      "skipped": 0,
+      "scope": "Existing long-original-request case plus context/history/actual-offer neighbors; not full native-agent suite."
+    }
+  },
+  "reproduction": {
+    "before": "Existing 10000-character bound failed at10102; same failure independently observed by installed549 full self-check.",
+    "red_log_sha256": "2069d6391e66aaba6f450110b00c04c982741b808d387c061d6f5c7f1bc096e9",
+    "after": "30 focused checks pass in19.94s; original10000 bound retained.",
+    "green_log_sha256": "d90a84fe6e5fbd465e1d68a51c77e4ba6df24a10f96547ac02ee16312e264d90",
+    "peer_review_sha256": "b0e4dec3d18c976c0d509fcd27af868515e2ed50bda67ac71dc0de0a828e9c02"
+  },
+  "change": "One guidance string shortened134characters. Active-step checks, broad-step splitting, original-request planning, no-active normal work, PLAN roadmap and no component-only completion credit retained.",
+  "preserved": [
+    "Original request excerpt budget and full-request file reference.",
+    "Tools, context compactor, execution, admission, verification and user controls.",
+    "All549 runtime changes and existing large-request assertions."
+  ],
+  "limits": [
+    "Only prompt wording and matching literal test assertions changed; no autonomous whole-app success claimed.",
+    "Exact installer qualification required before publication."
+  ]
+}

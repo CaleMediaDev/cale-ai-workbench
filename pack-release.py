@@ -22,6 +22,7 @@ missing_tests = sorted(
 if missing_tests:
     raise ValueError("Release manifest omits validation files: " + ", ".join(missing_tests))
 extras = [
+    "benchmarks/results/compact-task-guidance-550-20261106.json",
     "benchmarks/results/exhausted-context-and-ffmpeg-549-20261106.json",
     "benchmarks/results/structural-donation-preflight-548-20261106.json",
     "benchmarks/results/model-publication-547-20261106.json",
