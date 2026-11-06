@@ -1,6 +1,7 @@
 """The voice upgrade runs independently of the desktop window."""
 
 import errno
+import io
 import json
 import stat
 import sys
@@ -187,6 +188,36 @@ class NaturalVoiceTests(unittest.TestCase):
             self.assertEqual(json.loads(status.read_text())["status"], "error")
             self.assertIn("No space for lock byte", status.read_text())
             lock.write.assert_called_once_with(b"1")
+            fake_msvcrt.locking.assert_not_called()
+            run.assert_not_called()
+
+    def test_failed_lock_write_does_not_raise_again_during_close(self):
+        failure = OSError(errno.ENOSPC, "No space for lock byte")
+
+        class FullDisk(io.BytesIO):
+            def write(self, data):
+                raise failure
+
+        raw = FullDisk()
+        fake_msvcrt = SimpleNamespace(LK_NBLCK=1, locking=MagicMock())
+
+        def open_lock(path, mode, **kwargs):
+            self.assertEqual(mode, "a+b")
+            # Buffered files retry a failed flush when their context closes.
+            return raw if kwargs.get("buffering") == 0 else io.BufferedRandom(raw)
+
+        with tempfile.TemporaryDirectory() as folder:
+            status = Path(folder) / "voice-status.json"
+            with (
+                patch.dict(sys.modules, {"msvcrt": fake_msvcrt}),
+                patch.object(natural_voice, "STATUS", status),
+                patch.object(Path, "open", open_lock),
+                patch.object(natural_voice, "save_download_status") as save_status,
+                patch.object(natural_voice.subprocess, "run") as run,
+            ):
+                natural_voice.install()
+            save_status.assert_called_once_with(status, "error", str(failure)[:400], 0)
+            self.assertTrue(raw.closed)
             fake_msvcrt.locking.assert_not_called()
             run.assert_not_called()
 
