@@ -55,6 +55,22 @@ def _run(arguments: list[str], output: Path) -> None:
                         raise RuntimeError("Local audio edit produced no audio frames.")
                     remaining = audio.getnframes()
                     frame_size = audio.getnchannels() * audio.getsampwidth()
+                    # wave derives frame size from channels and sample width,
+                    # ignoring the PCM block alignment declared in the header.
+                    # Walk RIFF chunks rather than assuming a fixed fmt offset.
+                    with staged.open("rb") as header:
+                        header.seek(12)
+                        while True:
+                            chunk = header.read(8)
+                            if len(chunk) != 8:
+                                raise RuntimeError("Local audio edit produced an invalid WAV header.")
+                            size = int.from_bytes(chunk[4:8], "little")
+                            if chunk[:4] == b"fmt ":
+                                fmt = header.read(16)
+                                if len(fmt) != 16 or int.from_bytes(fmt[12:14], "little") != frame_size:
+                                    raise RuntimeError("Local audio edit produced an invalid WAV block alignment.")
+                                break
+                            header.seek(size + (size & 1), 1)
                     while remaining:
                         frames = min(remaining, 65536)
                         if len(audio.readframes(frames)) != frames * frame_size:
