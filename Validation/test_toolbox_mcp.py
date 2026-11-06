@@ -397,6 +397,33 @@ def test_media_worker_response_must_be_a_json_object(tmp_path, response):
                 asyncio.run(toolbox_mcp.media_run("generate_image"))
 
 
+def test_document_to_text_creates_missing_results_parent(tmp_path, monkeypatch):
+    from pathlib import Path
+    import file_chat
+
+    source = tmp_path / "document.txt"
+    source.write_text("source document", encoding="utf-8")
+    box = tmp_path / "Toolbox"
+    monkeypatch.setattr(toolbox_mcp, "BOX", box)
+    extracted = "Extracted document text"
+
+    def extract(path, max_scanned_pages):
+        assert path == source.resolve()
+        assert max_scanned_pages == 20
+        return extracted
+
+    monkeypatch.setattr(file_chat, "document_text", extract)
+    assert not box.exists()
+    result = toolbox_mcp.document_to_text(str(source), max_chars=9)
+
+    output = Path(result["full_text_file"])
+    assert output.parent == box / "Results"
+    assert output.read_text(encoding="utf-8") == extracted
+    assert result["text"] == extracted[:9]
+    assert result["characters"] == len(extracted)
+    assert result["source"] == str(source.resolve())
+
+
 def test_3d_generation_and_cpu_geometry_are_discoverable_and_callable():
     found = toolbox_mcp.toolbox_search("3d model mesh")
     names = {item["name"] for item in found["tools"]}
