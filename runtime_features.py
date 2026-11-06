@@ -219,7 +219,7 @@ def start_background() -> bool:
     if current.get("status") == "working":
         # Installation commands can be quiet for a long time. A live process
         # is progress; a dead one should be repaired promptly.
-        if _installer_running(current.get("pid")):
+        if _installer_running(current.get("pid")) or _installer_running(None):
             return False
         if age < 90:
             return False

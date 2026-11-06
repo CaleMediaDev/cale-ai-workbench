@@ -200,6 +200,43 @@ def test_background_setup_recovers_from_overflowing_pid(tmp_path, monkeypatch, p
     assert current["attempts"] == 2
 
 
+def test_live_installer_with_launcher_pid_in_progress_is_not_restarted(tmp_path, monkeypatch):
+    import psutil
+
+    script = str(runtime_features.Path(runtime_features.__file__).resolve())
+
+    class Launcher:
+        def cmdline(self):
+            return ["python", "desktop.py"]
+
+    class Installer:
+        def cmdline(self):
+            return ["python", script, "--install"]
+
+        def cwd(self):
+            pytest.fail("An absolute script path must not require cwd lookup")
+
+    progress = tmp_path / "install-progress.json"
+    progress.write_text(json.dumps({
+        "status": "working", "updated": 900,
+        "attempts": 1, "owner": "runtime_features", "pid": 12345,
+    }), encoding="utf-8")
+    monkeypatch.setattr(runtime_features, "PROGRESS", progress)
+    monkeypatch.setattr(runtime_features, "ready", lambda: False)
+    monkeypatch.setattr(runtime_features.time, "time", lambda: 1000)
+    monkeypatch.setattr(psutil, "Process", lambda pid: Launcher())
+    monkeypatch.setattr(psutil, "process_iter", lambda attrs: iter([Launcher(), Installer()]))
+    monkeypatch.setattr(
+        runtime_features.subprocess, "Popen",
+        lambda *args, **kwargs: pytest.fail("A live installer must not be restarted"),
+    )
+
+    assert not runtime_features.start_background()
+    current = json.loads(progress.read_text(encoding="utf-8"))
+    assert current["attempts"] == 1
+    assert current["updated"] == 900
+
+
 def test_live_feature_installer_is_not_restarted(tmp_path, monkeypatch):
     progress = tmp_path / "install-progress.json"
     progress.write_text(json.dumps({
