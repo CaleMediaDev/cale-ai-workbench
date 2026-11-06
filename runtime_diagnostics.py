@@ -58,8 +58,13 @@ def record(state: Path, kind: str, detail: str, now: float | None = None) -> boo
         notify = count >= 2 and not reported
         db.execute("""INSERT INTO issues(kind,first_seen,last_seen,count,detail,reported)
             VALUES(?,?,?,?,?,?) ON CONFLICT(kind) DO UPDATE SET
-            first_seen=excluded.first_seen,last_seen=excluded.last_seen,
-            count=excluded.count,detail=excluded.detail,reported=excluded.reported""",
+            first_seen=CASE WHEN excluded.first_seen IS NOT NULL THEN excluded.first_seen ELSE issues.first_seen END,
+            last_seen=excluded.last_seen,
+            count=CASE WHEN excluded.count IS NOT NULL THEN excluded.count ELSE issues.count + 1 END,
+            detail=excluded.detail,
+            reported=CASE WHEN excluded.reported IS NOT NULL THEN excluded.reported ELSE issues.reported END
+            WHERE issues.last_seen < excluded.last_seen -- Only update if this record is newer or different
+            """,
             (kind, first_seen, now, count, detail, int(reported or notify)),
         )
     return bool(notify)

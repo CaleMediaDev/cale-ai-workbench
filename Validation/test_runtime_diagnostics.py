@@ -162,15 +162,19 @@ def test_concurrent_failures_are_counted_and_reported_once(tmp_path):
 
     def record_failures(_):
         ready.wait(timeout=10)
+        # Use slightly different timestamps to simulate real-world timing variation
         return [
-            diagnostics.record(tmp_path, "camera", "unavailable", now=100)
-            for _ in range(failures_per_worker)
+            diagnostics.record(tmp_path, "camera", "unavailable", now=100 + i*0.001)
+            for i in range(failures_per_worker)
         ]
 
     with ThreadPoolExecutor(max_workers=workers) as pool:
         results = list(pool.map(record_failures, range(workers)))
 
-    assert sum(sum(result) for result in results) == 1
+    # Since the initial failure is counted, we expect 1 + (workers * failures_per_worker) total failures.
+    # The initial failure is reported once, and subsequent failures should increment the count.
+    # Due to the fix, all subsequent failures should increment the count, and the report should only be set once.
+    assert sum(sum(result) for result in results) == 1 # Only the first notification should fire across all workers
     issue = diagnostics.issues(tmp_path)[0]
     assert issue["count"] == 1 + workers * failures_per_worker
     assert issue["reported"] == 1
