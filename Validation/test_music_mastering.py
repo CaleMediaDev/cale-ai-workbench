@@ -275,6 +275,72 @@ def test_mastering_closes_fallback_output_when_fstat_fails(tmp_path):
     assert reference.read_bytes() == b"reference"
 
 
+def test_mastering_preserves_copy_error_when_destination_close_fails(tmp_path):
+    source = tmp_path / "song.wav"
+    reference = tmp_path / "reference.wav"
+    output = tmp_path / "master.wav"
+    source.write_bytes(b"source")
+    reference.write_bytes(b"reference")
+    copy_error = OSError(music_mastering.errno.ENOSPC, "Copy failed")
+    close_error = OSError(music_mastering.errno.EIO, "Flush failed")
+    real_open = Path.open
+    opened = []
+
+    class FailingClose:
+        def __init__(self, stream):
+            self.stream = stream
+
+        def fileno(self):
+            return self.stream.fileno()
+
+        def write(self, data):
+            return self.stream.write(data)
+
+        def close(self):
+            self.stream.close()
+            raise close_error
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            self.close()
+
+    def open_destination(path, *args, **kwargs):
+        stream = real_open(path, *args, **kwargs)
+        if path == output and args == ("xb",):
+            opened.append(stream)
+            return FailingClose(stream)
+        return stream
+
+    def render(*args, **kwargs):
+        Path(args[0][-1]).write_bytes(b"mastered")
+        return type("Result", (), {"returncode": 0})()
+
+    def fail_copy(rendered, destination):
+        destination.write(b"partial")
+        raise copy_error
+
+    with patch.object(music_mastering.music_backend, "_setup_lock"), patch.object(
+        music_mastering, "install", return_value=Path("python.exe")
+    ), patch.object(music_mastering.subprocess, "run", side_effect=render), patch.object(
+        music_mastering.os, "link",
+        side_effect=OSError(music_mastering.errno.EOPNOTSUPP, "Hard links unsupported"),
+    ), patch.object(Path, "open", new=open_destination), patch.object(
+        music_mastering.shutil, "copyfileobj", side_effect=fail_copy
+    ):
+        with pytest.raises(OSError) as caught:
+            music_mastering.master_music(str(source), str(reference), str(output))
+
+    assert caught.value is copy_error
+    assert caught.value.__cause__ is close_error
+    assert len(opened) == 1
+    assert opened[0].closed
+    assert not output.exists()
+    assert source.read_bytes() == b"source"
+    assert reference.read_bytes() == b"reference"
+
+
 def test_mastering_preserves_copy_error_when_partial_output_cleanup_fails(tmp_path):
     source = tmp_path / "song.wav"
     reference = tmp_path / "reference.wav"
