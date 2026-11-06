@@ -6,7 +6,7 @@
   },
   "cale_security/security_analysis.py": {
     "path": "cale_security/security_analysis.py",
-    "sha256": "e852fbd8b16fc5bd3c143afb0f9ed0db12b3bc00af310cb189be0b346a629991",
+    "sha256": "54df5658ae15ced84979c12802d6c870b69b8621e680f3639f47a0ec15f0d000",
     "replacements": []
   },
   "cale_security/bridge.py": {
@@ -26,7 +26,7 @@
   },
   "cale_security/tests/test_security_analysis.py": {
     "path": "cale_security/tests/test_security_analysis.py",
-    "sha256": "45ab1dc0b92f371c993702ea0466491a9954b21e17f3b14a6527ca2cdb8a7856",
+    "sha256": "55d46a94ec16e397127311d71bdb6c6c08e86cf01c9e7c4a3248cd05c8619194",
     "replacements": []
   },
   "cale_security/tests/test_bridge.py": {
