@@ -200,6 +200,13 @@ def _scoped_repair_intent(messages):
         "You are Cale's native project worker. This turn only decides whether a saved test ",
         "Repair all failed assertions in one selected owned browser case. ",
     )
+    paired_payload_positions = {
+        index + 1 for index, message in enumerate(messages[:-1])
+        if isinstance(message, dict) and message.get("role") == "system"
+        and message_text(message.get("content")).startswith(prefixes)
+        and isinstance(messages[index + 1], dict)
+        and messages[index + 1].get("role") == "user"
+    }
     for index, message in enumerate(messages[:-1]):
         if not isinstance(message, dict) or message.get("role") != "system":
             continue
@@ -227,7 +234,8 @@ def _scoped_repair_intent(messages):
                 continue  # No trustworthy brief can be recovered from this envelope.
         genuine = [message_text(item.get("content")).strip()
                    for position, item in enumerate(messages)
-                   if position != index + 1 and isinstance(item, dict) and item.get("role") == "user"
+                   if position not in paired_payload_positions
+                   and isinstance(item, dict) and item.get("role") == "user"
                    and not synthetic_worker_note(message_text(item.get("content")))]
         return "\n".join(part for part in (original, followups, *genuine) if part)
     return None

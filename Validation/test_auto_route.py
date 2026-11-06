@@ -749,6 +749,21 @@ class ScopedRepairIntentTests(unittest.TestCase):
         messages.append({"role": "user", "content": "Also add a platformer game."})
         self.assertTrue(is_game_task(messages))
 
+    def test_repeated_repair_envelopes_do_not_become_user_followups(self):
+        from auto_route import _task_intent
+
+        messages = self.repair_messages("What is two plus two?")
+        messages += self.repair_messages(
+            "What is two plus two?", tail="\nDiagnostic: arcade shooter game")
+        self.assertEqual(_task_intent(messages)[0], "What is two plus two?")
+        self.assertFalse(is_game_task(messages))
+        self.assertEqual(task_size(messages), "quick")
+
+        messages.append({"role": "user", "content": "Build an arcade game app."})
+        self.assertIn("Build an arcade game app.", _task_intent(messages)[0])
+        self.assertTrue(is_game_task(messages))
+        self.assertEqual(task_size(messages), "deep")
+
     def test_scoped_assertion_facade_uses_only_requirement_fields(self):
         from auto_route import _task_intent
         messages = self.repair_messages("Calculate a tip.", "Use dollars.")
