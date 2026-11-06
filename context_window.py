@@ -115,13 +115,6 @@ def sync(root, model):
         raise ValueError("A local model is required")
     ram = physical_ram_bytes()
     target = desired_context(info, ram, model_bytes(model))
-    if configured_context(info) != target:
-        result = post("/api/create", {
-            "model": model, "from": model, "stream": False,
-            "parameters": {"num_ctx": target},
-        })
-        if result.get("error"):
-            raise RuntimeError(result["error"])
     path = root / "data/config.yaml"
     original = path.read_text(encoding="utf-8")
     model_section = re.search(
@@ -136,6 +129,13 @@ def sync(root, model):
     start = model_section.start("body") + match.start()
     end = model_section.start("body") + match.end()
     updated = original[:start] + f"  context_length: {target}" + original[end:]
+    if configured_context(info) != target:
+        result = post("/api/create", {
+            "model": model, "from": model, "stream": False,
+            "parameters": {"num_ctx": target},
+        })
+        if result.get("error"):
+            raise RuntimeError(result["error"])
     if updated != original:
         path.write_text(updated, encoding="utf-8")
     return target

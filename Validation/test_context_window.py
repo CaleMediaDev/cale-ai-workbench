@@ -174,6 +174,29 @@ class ContextWindowTests(unittest.TestCase):
                 {"model_info": {"qwen.context_length": 32768}}, 128 * 2**30, 7 * 2**30
             )
 
+    def test_sync_rejects_missing_setting_before_changing_model_window(self):
+        originals = (
+            "other:\n  context_length: 262144\n",
+            "model:\n  temperature: 0.7\n",
+        )
+        for original in originals:
+            with self.subTest(original=original), tempfile.TemporaryDirectory() as folder:
+                root = Path(folder)
+                (root / "data").mkdir()
+                config = root / "data/config.yaml"
+                config.write_text(original, encoding="utf-8")
+                info = {
+                    "parameters": "num_ctx 262144\n",
+                    "model_info": {"qwen.context_length": 262144},
+                }
+                with (patch.object(context_window, "post", return_value=info) as post,
+                      patch.object(context_window, "physical_ram_bytes", return_value=24 * 2**30),
+                      patch.object(context_window, "model_bytes", return_value=7 * 2**30)):
+                    with self.assertRaisesRegex(ValueError, "Main model context setting is missing"):
+                        context_window.sync(root, "main")
+                post.assert_called_once_with("/api/show", {"model": "main"})
+                self.assertEqual(config.read_text(encoding="utf-8"), original)
+
     def test_sync_preserves_inline_context_comment(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
