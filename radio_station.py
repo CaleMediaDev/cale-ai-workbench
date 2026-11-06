@@ -715,6 +715,10 @@ class Service:
                     self.repeating = True
                     self.message = "On air · repeating this track while the next one finishes"
                 else:
+                    if self.current:
+                        self._update(self.current["id"], "error")
+                        self.current = None
+                        self.repeating = False
                     self.message = "Buffering your first three-minute track…"
             if not any(r["status"] == "queued" for r in rows) and len(ready) < 2 and time.monotonic() >= self.retry_at:
                 if foreground_music_busy():
