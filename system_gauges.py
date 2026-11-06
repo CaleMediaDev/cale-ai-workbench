@@ -151,7 +151,7 @@ def network_bandwidth(previous, current, elapsed, link_mbps):
         return None, None, None
     down = max(0, (current[0] - previous[0]) * 8 / elapsed / 1_000_000)
     up = max(0, (current[1] - previous[1]) * 8 / elapsed / 1_000_000)
-    load = round(min(100, 100 * (down + up) / link_mbps)) if link_mbps else None
+    load = round(min(100, 100 * (down + up) / link_mbps)) if link_mbps is not None and link_mbps > 0 else None
     return down, up, load
 
 
