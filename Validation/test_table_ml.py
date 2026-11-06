@@ -89,6 +89,37 @@ class TableMLTests(unittest.TestCase):
             self.assertFalse(output.exists())
             self.assertFalse(list(root.glob(".table-prediction-*")))
 
+    def test_prediction_rejects_collision_with_training_only_category(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            training = root / "training.csv"
+            with training.open("w", newline="", encoding="utf-8") as stream:
+                writer = csv.writer(stream)
+                writer.writerow(["color", "color=red", "label"])
+                for index in range(40):
+                    writer.writerow([
+                        "red=dark" if index % 2 else "blue",
+                        "light",
+                        "hot" if index % 2 else "cold",
+                    ])
+            model = root / "model.json"
+            train_table_model(str(training), "label", str(model), "classification")
+            saved = json.loads(model.read_text(encoding="utf-8"))
+            self.assertEqual(saved["feature_owners"]["color=red=dark"],
+                             ["color", "red=dark"])
+            prediction = root / "new.csv"
+            prediction.write_text("color,color=red\nblue,light\n", encoding="utf-8")
+            predict_table_model(str(model), str(prediction), str(root / "valid.csv"))
+
+            # This row has no internal collision, but color=red='dark' would
+            # reuse the coefficient trained for color='red=dark'.
+            prediction.write_text("color,color=red\nblue,dark\n", encoding="utf-8")
+            output = root / "colliding.csv"
+            with self.assertRaisesRegex(ValueError, "Feature names collide"):
+                predict_table_model(str(model), str(prediction), str(output))
+            self.assertFalse(output.exists())
+            self.assertFalse(list(root.glob(".table-prediction-*")))
+
     def test_prediction_rejects_category_collisions_across_batches(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
