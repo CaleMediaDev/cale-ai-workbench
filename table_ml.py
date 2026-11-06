@@ -224,6 +224,10 @@ def train_table_model(csv_path: str, target_column: str, model_path: str,
         staged = Path(temporary) / output.name
         with staged.open("x", encoding="utf-8") as stream:
             json.dump(payload, stream, ensure_ascii=False, indent=2)
+        # Prediction accepts at most 10 MB, including categorical ownership
+        # metadata. Do not publish a model that cannot subsequently be loaded.
+        if staged.stat().st_size > 10_000_000:
+            raise ValueError("Trained model exceeds 10 MB; remove ID/text columns first.")
         output.hardlink_to(staged)
     better = score > baseline if classes else score < baseline
     return {"model_path": str(output), "problem_type": problem_type,
