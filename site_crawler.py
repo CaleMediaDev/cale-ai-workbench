@@ -89,7 +89,7 @@ async def crawl_site(project: Path, start_url: str, max_pages: int = 5) -> dict:
                     if not isinstance(link, dict):
                         continue
                     candidate = link.get("href", "")
-                    if not isinstance(candidate, str):
+                    if not isinstance(candidate, str) or not candidate.strip():
                         continue
                     try:
                         base_url = getattr(result, "redirected_url", None) or url
