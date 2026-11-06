@@ -274,6 +274,22 @@ def test_installed_version_rejects_duplicate_root_version_keys(
     assert chrome_connector.installed_version() == ""
 
 
+@pytest.mark.parametrize("separator", ["", "\n", "# continuation follows\n"])
+def test_installed_version_rejects_continued_version_scalar(
+    tmp_path, monkeypatch, separator
+):
+    monkeypatch.setattr(chrome_connector, "PLUGIN", tmp_path)
+    (tmp_path / "plugin.yaml").write_text(
+        "name: hermes-connector\nversion: 0.2.6\n"
+        + separator
+        + "  custom\ndescription: local companion\n",
+        encoding="utf-8",
+    )
+
+    # YAML folds the continuation into the value: "0.2.6 custom".
+    assert chrome_connector.installed_version() == ""
+
+
 def test_wrong_companion_version_cannot_pair(tmp_path, monkeypatch):
     plugin = tmp_path / "plugin"
     plugin.mkdir()

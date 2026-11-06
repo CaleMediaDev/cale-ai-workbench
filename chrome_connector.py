@@ -110,7 +110,17 @@ def installed_version() -> str:
     if len(version_keys) != 1:
         return ""
     match = re.search(r"^(?:version|'version'|\"version\")[ \t]*:[ \t]+(['\"]?)([\w.\-]+)\1(?:[ \t]+#[^\r\n]*)?[ \t]*\r?$", mapping_lines, re.M)
-    return match.group(2) if match else ""
+    if not match:
+        return ""
+    # A plain YAML scalar can continue on subsequent indented lines. Its
+    # first line alone must not be advertised as the installed version.
+    for line in mapping_lines[match.end():].splitlines():
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        if line.startswith((" ", "\t")):
+            return ""
+        break
+    return match.group(2)
 
 
 def pairing_code() -> str:
