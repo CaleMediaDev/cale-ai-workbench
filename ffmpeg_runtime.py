@@ -79,8 +79,14 @@ def ensure(root: Path = ROOT) -> Path:
                 return target
             locate = [str(python), "-c",
                       "import imageio_ffmpeg; print(imageio_ffmpeg.get_ffmpeg_exe())"]
-            found = subprocess.run(locate, capture_output=True, text=True,
-                                   timeout=30, creationflags=HIDE)
+            try:
+                found = subprocess.run(locate, capture_output=True, text=True,
+                                       timeout=30, creationflags=HIDE)
+            except subprocess.TimeoutExpired:
+                # Discovery can hang while imageio validates a broken binary.
+                # Let the pinned-package reinstall recover it as for other
+                # discovery failures.
+                found = subprocess.CompletedProcess(locate, 1, "", "")
             source = Path(shutil.which(found.stdout.strip()) or found.stdout.strip())
             if found.returncode or not _working_executable(source):
                 install = subprocess.run(
