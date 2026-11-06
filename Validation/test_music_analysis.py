@@ -12,6 +12,27 @@ def test_chord_detection_uses_pitch_classes():
     assert music_analysis._best_chord(np.zeros(12)) is None
 
 
+def test_chord_detection_declines_equally_supported_triads():
+    for pitch in range(12):
+        chroma = np.zeros(12)
+        chroma[pitch] = 1.0
+        assert music_analysis._best_chord(chroma) is None
+
+    # C and E alone support both C major and A minor equally.
+    chroma = np.zeros(12)
+    chroma[[0, 4]] = 1.0
+    assert music_analysis._best_chord(chroma) is None
+
+    # Complete triads still have a unique best match.
+    for pitches, expected in (
+        ([0, 4, 7], "C major"),
+        ([0, 3, 7], "C minor"),
+    ):
+        chroma = np.zeros(12)
+        chroma[pitches] = 1.0
+        assert music_analysis._best_chord(chroma) == expected
+
+
 def test_key_estimate_declines_empty_input():
     assert music_analysis._best_key(np.zeros(12)) is None
 
