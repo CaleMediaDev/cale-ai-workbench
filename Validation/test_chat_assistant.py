@@ -483,6 +483,18 @@ def test_leading_decimal_song_duration_enforces_minimum():
         chat_assistant.music_request("Make a .5-second jingle")
 
 
+@pytest.mark.parametrize("prompt", [
+    "Make a -30-second song",
+    "Make a -1 minute song",
+    "Make a -.5-minute song",
+    "Make a -1 minute and 30 second song",
+    "Make a 1 minute and -30 second song",
+])
+def test_negative_explicit_song_durations_are_not_made_positive(prompt):
+    with pytest.raises(ValueError, match="10 seconds to 10 minutes"):
+        chat_assistant.music_request(prompt)
+
+
 def test_decimal_song_duration_still_enforces_render_limit():
     with pytest.raises(ValueError, match="10 seconds to 10 minutes"):
         chat_assistant.music_request("Make a 10.5-minute song")
