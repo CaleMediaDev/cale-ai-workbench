@@ -726,6 +726,28 @@ class AutoModelTests(unittest.TestCase):
             self.assertEqual(catalog["feed_model"]["source"], "qwen3.5:35b")
             self.assertEqual(json.loads(cache.read_text()), old_feed)
 
+    def test_incomplete_pull_does_not_probe_weights_or_create_alias(self):
+        model = {
+            "label": "New", "alias": "cale-new-model", "source": "example:latest",
+            "download_gb": 7, "ram_gb": 24, "context": 65536,
+        }
+        for stream in (b"", b'{"status":"pulling manifest"}\n'):
+            with self.subTest(stream=stream):
+                with (
+                    patch.object(library, "CATALOG", {"new": model}),
+                    patch.object(library, "total_ram_gb", return_value=64),
+                    patch("model_fitness.profile_allows", return_value=True),
+                    patch("model_fitness.gpu_vram_gb", return_value=12),
+                    patch.object(library, "source_cached", return_value=True),
+                    patch.object(library, "urlopen", return_value=io.BytesIO(stream)),
+                    patch.object(library, "post") as post,
+                    patch.object(library, "probe_tool_use") as probe,
+                ):
+                    with self.assertRaisesRegex(RuntimeError, "before Ollama reported success"):
+                        library.install("new", lambda _message: None)
+                post.assert_not_called()
+                probe.assert_not_called()
+
     def test_failed_source_probe_preserves_existing_alias(self):
         model = {
             "label": "New", "alias": "cale-existing", "source": "qwen3.6:35b",

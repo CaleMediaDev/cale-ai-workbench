@@ -603,6 +603,7 @@ def install(profile, progress=print):
     progress(
         f"Downloading {item['label']}: approximately {item['download_gb']} GB. Re-running resumes interrupted downloads."
     )
+    pull_complete = False
     with urlopen(
         Request(
             "http://127.0.0.1:11434/api/pull",
@@ -618,6 +619,8 @@ def install(profile, progress=print):
             data = json.loads(line)
             if data.get("error"):
                 raise RuntimeError(data["error"])
+            if data.get("status") == "success":
+                pull_complete = True
             if time.monotonic() - last > 2 or data.get("status") == "success":
                 done, total = data.get("completed", 0), data.get("total", 0)
                 progress(
@@ -626,6 +629,8 @@ def install(profile, progress=print):
                     else data.get("status", "Working")
                 )
                 last = time.monotonic()
+    if not pull_complete:
+        raise RuntimeError("Model download ended before Ollama reported success. Retry to resume.")
     # Probe pulled weights before touching an alias that may already serve
     # work. Failed candidates remain in the store but cannot replace it.
     try:
