@@ -32,6 +32,10 @@ def test_skills_and_tools_are_indexed_searched_and_refreshed():
             assert "semantic HTML" in capability_index.read_skill(root, result[0]["id"])["content"]
             assert capability_index.search(root, "image", kind="tool")[0]["name"] == "make_image"
             assert capability_index.sync(root)["updated"] == 0
+            # Change tool description without changing schema hash
+            tools_updated = [{'name': 'make_image', 'description': 'Generate a local image with improved quality.', 'schema': {'type': 'object', 'properties': {'prompt': {'type': 'string'}}}}] 
+            with patch.object(capability_index, "_registered_tools", return_value=tools_updated):
+                assert capability_index.sync(root)["updated"] == 1
             skill.write_text(skill.read_text() + "\nCheck contrast.")
             assert capability_index.sync(root)["updated"] == 1
             assert "Check contrast" in capability_index.read_skill(root, result[0]["id"])["content"]
