@@ -6,8 +6,12 @@ shell commands, so user-supplied filenames never become executable syntax.
 
 from __future__ import annotations
 
+import errno
 import math
+import os
+import stat
 import subprocess
+import tempfile
 from pathlib import Path
 
 import imageio_ffmpeg
@@ -41,39 +45,61 @@ def _number(value: float, minimum: float, maximum: float, name: str) -> float:
     return number
 
 
-def _run(arguments: list[str], output: Path, timeout: int = 7200) -> dict:
-    command = [imageio_ffmpeg.get_ffmpeg_exe(), "-nostdin", "-hide_banner",
-               "-loglevel", "error", "-n", *arguments, str(output)]
-    output_existed = output.exists()
+def _publish_no_replace(staged: Path, output: Path) -> None:
+    """Publish a complete file without replacing a concurrently created path."""
     try:
+        if os.name == "nt":
+            # Windows rename refuses an existing destination without requiring hard links.
+            os.rename(staged, output)
+        else:
+            # POSIX rename replaces existing files. A same-filesystem hard link
+            # instead provides atomic no-clobber publication on supported stores.
+            os.link(staged, output)
+    except FileExistsError:
+        raise ValueError("Choose a new output filename; existing videos are preserved.") from None
+    except (OSError, NotImplementedError) as error:
+        if os.name != "nt" and (isinstance(error, NotImplementedError) or
+                getattr(error, "errno", None) in {errno.EPERM, errno.EOPNOTSUPP, errno.ENOSYS, errno.EXDEV}):
+            raise RuntimeError("This destination does not support no-overwrite video publication using hard links. Choose another local folder.") from error
+        raise RuntimeError("Video publication failed. Existing destination paths are preserved; choose another output folder.") from error
+
+
+def _run(arguments: list[str], output: Path, timeout: int = 7200) -> dict:
+    # Render only in a new private directory on the destination filesystem.
+    # Engine failure, timeout and cancellation never authorize public cleanup.
+    directory = tempfile.TemporaryDirectory(prefix=".video-edit-", dir=output.parent,
+                                            ignore_cleanup_errors=True)
+    try:
+        staged = Path(directory.name) / output.name
+        command = [imageio_ffmpeg.get_ffmpeg_exe(), "-nostdin", "-hide_banner",
+                   "-loglevel", "error", "-abort_on", "empty_output", "-n",
+                   *arguments, str(staged)]
         result = subprocess.run(command, capture_output=True, text=True,
                                 errors="replace", timeout=timeout, creationflags=HIDE)
-    except (subprocess.TimeoutExpired, KeyboardInterrupt):
+        details = None
+        if not result.returncode:
+            try:
+                details = staged.lstat()
+            except OSError:
+                pass  # Unreadable or missing staged output cannot be published.
+        if result.returncode or details is None or not stat.S_ISREG(details.st_mode) or not details.st_size:
+            diagnostic = (result.stderr or result.stdout) or "Video edit failed."
+            # Keep classification from the full stderr while bounding its text;
+            # add_video_audio permits one retry only for this exact muxer error.
+            marker = "codec not currently supported in container"
+            message = diagnostic[-1200:]
+            if marker in diagnostic.casefold() and marker not in message.casefold():
+                message = marker + "\n" + message[-(1200 - len(marker) - 1):]
+            raise RuntimeError(message)
+        _publish_no_replace(staged, output)
+        return {"path": str(output), "bytes": details.st_size}
+    finally:
         try:
-            if not output_existed and output.is_file():
-                output.unlink(missing_ok=True)
+            directory.cleanup()
         except OSError:
-            # A locked file or changed permissions must not mask the original
-            # timeout or interruption when best-effort cleanup is impossible.
+            # Only app-owned staging may remain locked. Do not replace a real
+            # engine exception or remove any public path to make cleanup work.
             pass
-        raise
-    if result.returncode or not output.is_file() or not output.stat().st_size:
-        overwrite_refused = f"File '{output}' already exists. Exiting." in result.stderr
-        try:
-            if not output_existed and output.is_file() and not overwrite_refused:
-                output.unlink(missing_ok=True)
-        except OSError:
-            # Cleanup is best-effort; preserve the FFmpeg failure diagnostic.
-            pass
-        diagnostic = (result.stderr or result.stdout) or "Video edit failed."
-        # Keep the public error bounded without losing the exact muxer reason
-        # that permits a single safe soundtrack conversion retry.
-        marker = "codec not currently supported in container"
-        message = diagnostic[-1200:]
-        if marker in diagnostic.casefold() and marker not in message.casefold():
-            message = marker + "\n" + message[-(1200 - len(marker) - 1):]
-        raise RuntimeError(message)
-    return {"path": str(output), "bytes": output.stat().st_size}
 
 
 def edit_video(source_path: str, output_path: str, start_seconds: float = 0,

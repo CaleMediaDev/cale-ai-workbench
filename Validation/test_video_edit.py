@@ -2,14 +2,41 @@
 
 import asyncio
 import json
+import errno
+import os
 import subprocess
 import sys
+from pathlib import Path
+from types import SimpleNamespace
 
 import imageio_ffmpeg
 import pytest
 
 import toolbox_mcp
 import video_edit
+
+
+def _staged_output(command, output):
+    staged = Path(command[-1])
+    assert staged != output and staged.name == output.name
+    assert staged.parent.parent == output.parent
+    assert staged.parent.name.startswith(".video-edit-")
+    return staged
+
+
+def _deny_owned_stage_cleanup(monkeypatch):
+    original = video_edit.tempfile.TemporaryDirectory
+    cleanups, attempts = [], []
+    def create(*args, **kwargs):
+        directory = original(*args, **kwargs)
+        cleanups.append(directory.cleanup)
+        def denied():
+            attempts.append(directory.name)
+            raise PermissionError("Owned staging is locked")
+        directory.cleanup = denied
+        return directory
+    monkeypatch.setattr(video_edit.tempfile, "TemporaryDirectory", create)
+    return cleanups, attempts
 
 
 def test_replacing_soundtrack_preserves_compatible_video_packets(tmp_path):
@@ -62,15 +89,15 @@ def test_soundtrack_retries_when_codec_rejection_precedes_long_diagnostics(tmp_p
 
     def encode(command, **kwargs):
         attempts.append(command)
-        assert command[-1] == str(output)
+        staged = _staged_output(command, output)
         if len(attempts) == 1:
             assert command[command.index("-c:v") + 1] == "copy"
-            output.write_bytes(b"partial container")
+            staged.write_bytes(b"partial container")
             return subprocess.CompletedProcess(command, 1, stdout="", stderr=diagnostic)
         assert len(attempts) == 2
         assert not output.exists()
         assert command[command.index("-c:v") + 1] == "libx264"
-        output.write_bytes(b"converted video")
+        staged.write_bytes(b"converted video")
         return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
 
     monkeypatch.setattr(video_edit.imageio_ffmpeg, "get_ffmpeg_exe", lambda: "ffmpeg")
@@ -130,9 +157,8 @@ def test_run_timeout_cleans_partial_output_only(tmp_path, monkeypatch, existing_
     timeout_error = subprocess.TimeoutExpired(cmd="ffmpeg", timeout=1)
 
     def timed_out(command, **kwargs):
-        assert command[-1] == str(output)
-        if not existing_output:
-            output.write_bytes(b"partial video")
+        staged = _staged_output(command, output)
+        staged.write_bytes(b"partial video")
         raise timeout_error
 
     monkeypatch.setattr(video_edit.imageio_ffmpeg, "get_ffmpeg_exe", lambda: "ffmpeg")
@@ -155,9 +181,8 @@ def test_run_interruption_cleans_partial_output_only(tmp_path, monkeypatch, exis
     interruption = KeyboardInterrupt()
 
     def interrupted(command, **kwargs):
-        assert command[-1] == str(output)
-        if not existing_output:
-            output.write_bytes(b"partial video")
+        staged = _staged_output(command, output)
+        staged.write_bytes(b"partial video")
         raise interruption
 
     monkeypatch.setattr(video_edit.imageio_ffmpeg, "get_ffmpeg_exe", lambda: "ffmpeg")
@@ -177,13 +202,13 @@ def test_run_distinguishes_overwrite_refusal_from_output_filename(tmp_path, monk
     output = tmp_path / "already exists.mp4"
 
     def failed_output(command, **kwargs):
-        assert command[-1] == str(output)
+        staged = _staged_output(command, output)
+        staged.write_bytes(b"partial video")
         if overwrite_refused:
             # Another writer created the destination after _run checked it.
             output.write_bytes(b"existing video")
             stderr = f"File '{output}' already exists. Exiting.\n"
         else:
-            output.write_bytes(b"partial video")
             stderr = f"Error opening output file {output}.\nError opening output files: Invalid argument\n"
         return subprocess.CompletedProcess(command, 1, stdout="", stderr=stderr)
 
@@ -204,7 +229,7 @@ def test_run_preserves_original_exception_when_destination_becomes_directory(tmp
     error = KeyboardInterrupt() if interrupted else subprocess.TimeoutExpired(cmd="ffmpeg", timeout=1)
 
     def failed_process(command, **kwargs):
-        assert command[-1] == str(output)
+        _staged_output(command, output).write_bytes(b"partial video")
         # Another process creates a directory after the initial existence check.
         output.mkdir()
         (output / "keep.txt").write_text("preserve me")
@@ -225,27 +250,31 @@ def test_run_preserves_original_exception_when_destination_becomes_directory(tmp
 def test_run_preserves_original_exception_when_cleanup_is_denied(tmp_path, monkeypatch, interrupted):
     output = tmp_path / "edited.mp4"
     error = KeyboardInterrupt() if interrupted else subprocess.TimeoutExpired(cmd="ffmpeg", timeout=1)
-    cleanup_attempts = []
-
+    public_cleanup_attempts = []
+    real_unlink = type(output).unlink
+    cleanups, denied = _deny_owned_stage_cleanup(monkeypatch)
     def failed_process(command, **kwargs):
-        assert command[-1] == str(output)
-        output.write_bytes(b"partial video")
+        _staged_output(command, output).write_bytes(b"partial video")
+        output.write_bytes(b"another operation's video")
         raise error
-
-    def cannot_delete(path, **kwargs):
-        cleanup_attempts.append(path)
-        raise PermissionError("Output is locked")
-
+    def public_unlink(path, **kwargs):
+        if path == output:
+            public_cleanup_attempts.append(path)
+            raise PermissionError("Public output is locked")
+        return real_unlink(path, **kwargs)
     monkeypatch.setattr(video_edit.imageio_ffmpeg, "get_ffmpeg_exe", lambda: "ffmpeg")
     monkeypatch.setattr(video_edit.subprocess, "run", failed_process)
-    monkeypatch.setattr(type(output), "unlink", cannot_delete)
-
-    with pytest.raises(type(error)) as caught:
-        video_edit._run([], output, timeout=1)
-
-    assert caught.value is error
-    assert cleanup_attempts == [output]
-    assert output.read_bytes() == b"partial video"
+    monkeypatch.setattr(type(output), "unlink", public_unlink)
+    try:
+        with pytest.raises(type(error)) as caught:
+            video_edit._run([], output, timeout=1)
+        assert caught.value is error
+        assert len(denied) == 1
+        assert public_cleanup_attempts == []
+        assert output.read_bytes() == b"another operation's video"
+    finally:
+        for cleanup in cleanups:
+            cleanup()
 
 
 def test_run_cleans_partial_output_with_undecodable_diagnostic(tmp_path, monkeypatch):
@@ -253,7 +282,7 @@ def test_run_cleans_partial_output_with_undecodable_diagnostic(tmp_path, monkeyp
     real_run = subprocess.run
 
     def failed_process(command, **kwargs):
-        assert command[-1] == str(output)
+        staged = _staged_output(command, output)
         # Exercise subprocess's real text decoding, without depending on FFmpeg
         # or the host locale to produce a particular diagnostic encoding.
         kwargs["encoding"] = "utf-8"
@@ -263,7 +292,7 @@ def test_run_cleans_partial_output_with_undecodable_diagnostic(tmp_path, monkeyp
             "sys.stderr.buffer.write(b'Invalid filename: \\xff\\n'); "
             "sys.exit(1)"
         )
-        return real_run([sys.executable, "-c", script, str(output)], **kwargs)
+        return real_run([sys.executable, "-c", script, str(staged)], **kwargs)
 
     monkeypatch.setattr(video_edit.imageio_ffmpeg, "get_ffmpeg_exe", lambda: "ffmpeg")
     monkeypatch.setattr(video_edit.subprocess, "run", failed_process)
@@ -277,35 +306,37 @@ def test_run_cleans_partial_output_with_undecodable_diagnostic(tmp_path, monkeyp
 
 def test_run_preserves_ffmpeg_failure_when_cleanup_is_denied(tmp_path, monkeypatch):
     output = tmp_path / "edited.mp4"
-    cleanup_attempts = []
-
+    public_cleanup_attempts = []
+    real_unlink = type(output).unlink
+    cleanups, denied = _deny_owned_stage_cleanup(monkeypatch)
     def failed_process(command, **kwargs):
-        assert command[-1] == str(output)
-        output.write_bytes(b"partial video")
-        return subprocess.CompletedProcess(
-            command, 1, stdout="", stderr="Error initializing output stream")
-
-    def cannot_delete(path, **kwargs):
-        cleanup_attempts.append(path)
-        raise PermissionError("Output is locked")
-
+        _staged_output(command, output).write_bytes(b"partial video")
+        output.write_bytes(b"another operation's video")
+        return subprocess.CompletedProcess(command, 1, stdout="", stderr="Error initializing output stream")
+    def public_unlink(path, **kwargs):
+        if path == output:
+            public_cleanup_attempts.append(path)
+            raise PermissionError("Public output is locked")
+        return real_unlink(path, **kwargs)
     monkeypatch.setattr(video_edit.imageio_ffmpeg, "get_ffmpeg_exe", lambda: "ffmpeg")
     monkeypatch.setattr(video_edit.subprocess, "run", failed_process)
-    monkeypatch.setattr(type(output), "unlink", cannot_delete)
-
-    with pytest.raises(RuntimeError, match="Error initializing output stream"):
-        video_edit._run([], output)
-
-    assert cleanup_attempts == [output]
-    assert output.read_bytes() == b"partial video"
+    monkeypatch.setattr(type(output), "unlink", public_unlink)
+    try:
+        with pytest.raises(RuntimeError, match="Error initializing output stream"):
+            video_edit._run([], output)
+        assert len(denied) == 1
+        assert public_cleanup_attempts == []
+        assert output.read_bytes() == b"another operation's video"
+    finally:
+        for cleanup in cleanups:
+            cleanup()
 
 
 def test_run_removes_empty_output_after_successful_process(tmp_path, monkeypatch):
     output = tmp_path / "edited.mp4"
 
     def empty_output(command, **kwargs):
-        assert command[-1] == str(output)
-        output.write_bytes(b"")
+        _staged_output(command, output).write_bytes(b"")
         return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
 
     monkeypatch.setattr(video_edit.imageio_ffmpeg, "get_ffmpeg_exe", lambda: "ffmpeg")
@@ -501,3 +532,141 @@ def test_noncodec_long_failure_is_bounded_and_never_retried(tmp_path, monkeypatc
     assert len(calls) == 1
     assert not output.exists()
     assert source.read_bytes() == b"video" and audio.read_bytes() == b"audio"
+
+
+@pytest.mark.parametrize("mechanism", ["windows_rename", "posix_link"])
+@pytest.mark.parametrize("collision", ["none", "existing", "at_publication"])
+def test_publication_uses_actual_no_replace_filesystem_primitive(tmp_path, monkeypatch, mechanism, collision):
+    """Exercise real NTFS primitives; POSIX dispatch is not a Linux runtime proof."""
+    if mechanism == "windows_rename" and os.name != "nt":
+        pytest.skip("Windows rename semantics require Windows")
+    staged, output = tmp_path / "staged.mp4", tmp_path / "public.mp4"
+    staged.write_bytes(b"complete rendered video")
+    other = b"another operation's published video"
+    if collision == "existing":
+        output.write_bytes(other)
+    primitive = os.rename if mechanism == "windows_rename" else os.link
+    calls = []
+    def publish(source, destination):
+        calls.append((source, destination))
+        if collision == "at_publication":
+            output.write_bytes(other)
+        return primitive(source, destination)
+    def forbidden(*args, **kwargs):
+        pytest.fail("No replacing rename or copy fallback is permitted")
+    proxy = SimpleNamespace(name="nt" if mechanism == "windows_rename" else "posix",
+                            rename=publish if mechanism == "windows_rename" else forbidden,
+                            link=publish if mechanism == "posix_link" else forbidden)
+    monkeypatch.setattr(video_edit, "os", proxy)
+    if collision == "none":
+        video_edit._publish_no_replace(staged, output)
+        assert output.read_bytes() == b"complete rendered video"
+        assert staged.exists() == (mechanism == "posix_link")
+    else:
+        with pytest.raises(ValueError, match="existing videos are preserved"):
+            video_edit._publish_no_replace(staged, output)
+        assert output.read_bytes() == other
+        assert staged.read_bytes() == b"complete rendered video"
+    assert calls == [(staged, output)]
+
+
+@pytest.mark.parametrize("error", [OSError(errno.EOPNOTSUPP, "unsupported"),
+                                   OSError(errno.EXDEV, "different store"), NotImplementedError()])
+def test_unsupported_hardlinks_fail_without_replacing_or_copying(tmp_path, monkeypatch, error):
+    staged, output = tmp_path / "staged.mp4", tmp_path / "public.mp4"
+    staged.write_bytes(b"complete video")
+    def unsupported(*args):
+        raise error
+    def forbidden(*args):
+        pytest.fail("Unsupported publication must not fall back to overwriting rename")
+    monkeypatch.setattr(video_edit, "os", SimpleNamespace(name="posix", link=unsupported, rename=forbidden))
+    with pytest.raises(RuntimeError, match="does not support no-overwrite"):
+        video_edit._publish_no_replace(staged, output)
+    assert not output.exists()
+    assert staged.read_bytes() == b"complete video"
+
+
+@pytest.mark.parametrize("failure", ["exit", "timeout", "interrupt"])
+@pytest.mark.parametrize("concurrent_change", ["replacement", "in_place"])
+def test_engine_failure_never_deletes_concurrent_public_bytes(tmp_path, monkeypatch, failure, concurrent_change):
+    """The former direct-output cleanup deletes these bytes in all six cases."""
+    output = tmp_path / "result.mp4"
+    other = b"another operation's video: keep exactly"
+    error = KeyboardInterrupt() if failure == "interrupt" else subprocess.TimeoutExpired("ffmpeg", 1)
+    def engine(command, **kwargs):
+        actual = Path(command[-1])
+        actual.write_bytes(b"partial engine output")
+        # On the old implementation this is the public file. With private
+        # rendering, an independent operation creates the public destination.
+        if concurrent_change == "replacement" and output.exists():
+            output.rename(tmp_path / "displaced-engine-output.mp4")
+        output.write_bytes(other)
+        if failure == "exit":
+            return subprocess.CompletedProcess(command, 1, stdout="", stderr="render failed")
+        raise error
+    monkeypatch.setattr(video_edit.imageio_ffmpeg, "get_ffmpeg_exe", lambda: "ffmpeg")
+    monkeypatch.setattr(video_edit.subprocess, "run", engine)
+    with pytest.raises(RuntimeError if failure == "exit" else type(error)) as caught:
+        video_edit._run([], output, timeout=1)
+    if failure != "exit":
+        assert caught.value is error
+    assert output.read_bytes() == other
+    assert not list(tmp_path.glob(".video-edit-*"))
+
+
+def test_success_publishes_validated_bytes_and_removes_private_stage(tmp_path, monkeypatch):
+    output = tmp_path / "result.mp4"
+    calls = []
+    def engine(command, **kwargs):
+        calls.append(command)
+        _staged_output(command, output).write_bytes(b"complete video")
+        assert command[command.index("-abort_on") + 1] == "empty_output"
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+    monkeypatch.setattr(video_edit.imageio_ffmpeg, "get_ffmpeg_exe", lambda: "ffmpeg")
+    monkeypatch.setattr(video_edit.subprocess, "run", engine)
+    assert video_edit._run([], output) == {"path": str(output), "bytes": len(b"complete video")}
+    assert output.read_bytes() == b"complete video"
+    assert len(calls) == 1 and not list(tmp_path.glob(".video-edit-*"))
+
+
+def test_success_cannot_overwrite_a_concurrent_destination_directory(tmp_path, monkeypatch):
+    output = tmp_path / "result.mp4"
+    def engine(command, **kwargs):
+        _staged_output(command, output).write_bytes(b"complete video")
+        output.mkdir()
+        (output / "keep.txt").write_bytes(b"user bytes")
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+    monkeypatch.setattr(video_edit.imageio_ffmpeg, "get_ffmpeg_exe", lambda: "ffmpeg")
+    monkeypatch.setattr(video_edit.subprocess, "run", engine)
+    with pytest.raises((ValueError, RuntimeError)):
+        video_edit._run([], output)
+    assert (output / "keep.txt").read_bytes() == b"user bytes"
+    assert not list(tmp_path.glob(".video-edit-*"))
+
+
+@pytest.mark.parametrize("publish_other", [False, True])
+def test_actual_empty_trim_fails_without_deleting_another_publication(tmp_path, monkeypatch, publish_other):
+    """Real empty-output failure, including the rejected PR911 replacement case."""
+    source, output = tmp_path / "source.mp4", tmp_path / "result.mp4"
+    _clip(source, "red")
+    original = source.read_bytes()
+    real_run = subprocess.run
+    returns = []
+    other = b"another operation's video"
+    def render_then_publish(command, **kwargs):
+        result = real_run(command, **kwargs)
+        returns.append(result.returncode)
+        if publish_other:
+            output.write_bytes(other)
+        return result
+    monkeypatch.setattr(video_edit.subprocess, "run", render_then_publish)
+    with pytest.raises(RuntimeError) as caught:
+        video_edit.edit_video(str(source), str(output), start_seconds=10, duration_seconds=1)
+    assert returns and returns[0] != 0
+    assert len(str(caught.value)) <= 1200
+    if publish_other:
+        assert output.read_bytes() == other
+    else:
+        assert not output.exists()
+    assert source.read_bytes() == original
+    assert not list(tmp_path.glob(".video-edit-*"))
