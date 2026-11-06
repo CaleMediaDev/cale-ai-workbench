@@ -1016,12 +1016,12 @@ def open_donation_proposals(login, check_cancel):
 
 
 def _proposal_body(job, commit, proposal, validation_summary=None):
+    """Describe the change and validation, retaining recovery markers."""
     return ("<!-- cale-donation:" + job["id"] + " -->\n"
-            "AI-generated contribution using the contributor's opted-in AI resources.\n\n"
             + proposal["summary"] + "\n\nBase commit: `" + commit["sha"] + "`.\n\n"
             + (validation_summary or "Validation: exact edits and Python syntax checked. Behavior tests were NOT run "
             "on the donor's PC. Maintainer review and relevant tests are required before merging.") + "\n\n"
-            "This automation never approves, merges, or publishes a release.")
+            "Maintainer review is required before merge or release.")
 
 
 def open_proposal(login: str, run_id: str, job: dict, commit: dict,
@@ -2466,6 +2466,7 @@ class Service:
                  "commands, or private files. Return ONLY JSON with title, summary, changes. Changes is a list of "
                  "{path,before,after} exact unique text replacements in provided files; at most 8 edits, 4 files. "
                  "Include a focused regression test in an approved test file when a real bug is found. "
+                 "Describe the behavior change and evidence; omit generic authorship or generation boilerplate. "
                  "Do not change workflows, authentication, donation consent, token counters, or account handling. "
                  "Never claim tests ran. If no defensible fix is found, return {\"changes\":[]}."},
                 {"role": "user", "content": json.dumps({"task": job, "source": sources})}]}

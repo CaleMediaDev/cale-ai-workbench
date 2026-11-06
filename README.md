@@ -10,10 +10,12 @@ Created by [Cale Media](https://calemedia.com).
 2. Click **Install** and watch the progress bar. Accounts are optional; you can connect them while models download.
 3. Click **Open Cale AI** and describe what you want in chat.
 
-Release 0.5.556 changes the Windows music engine to decommit freed CPU tensor buffers immediately, reducing retained memory and paging-file pressure between songs. The policy applies when the music engine starts; updating files does not change an already running engine. [Validation and limits](benchmarks/results/music-allocator-556-20261106.json).
+Release 0.5.557 keeps donation pull-request descriptions focused on the proposed changes and their validation. Draft status, test limitations and maintainer review remain explicit. [Validation and limits](benchmarks/results/donation-pr-format-557-20261106.json).
 
 <details>
 <summary>Feature history and validation</summary>
+
+Release 0.5.556 changes the Windows music engine to decommit freed CPU tensor buffers immediately. The policy applies at music-engine startup. Repeated full-song checks subsequently found additional native memory growth, which remains under investigation. [Validation and limits](benchmarks/results/music-allocator-556-20261106.json).
 
 Release 0.5.555 checks Windows developer tools during visual setup and requests permission to enable symbolic links when needed. Already working PCs skip the prompt; managed or declined settings do not stop installation. [Validation and limits](benchmarks/results/windows-symbolic-links-555-20261106.json).
 

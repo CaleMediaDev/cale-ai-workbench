@@ -1,0 +1,37 @@
+{
+  "release": "0.5.557",
+  "scope": "Donation PR description template and reviewer prompt",
+  "before_example": "<!-- cale-donation:example-progress -->\nAI-generated contribution using the contributor's opted-in AI resources.\n\nCorrect progress recovery for a saved task.\n\nBase commit: `aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa`.\n\nValidation: exact edits and Python syntax checked. Behavior tests were NOT run on the donor's PC. Maintainer review and relevant tests are required before merging.\n\nThis automation never approves, merges, or publishes a release.",
+  "after_example": "<!-- cale-donation:example-progress -->\nCorrect progress recovery for a saved task.\n\nBase commit: `aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa`.\n\nValidation: exact edits and Python syntax checked. Behavior tests were NOT run on the donor's PC. Maintainer review and relevant tests are required before merging.\n\nMaintainer review is required before merge or release.",
+  "draft_publication_tests": {
+    "passed": 17,
+    "failed": 0,
+    "skipped": 0,
+    "deselected": 422,
+    "summary": "17 passed, 422 deselected in 8.02s"
+  },
+  "publication_policy_functions_AST_unchanged": [
+    "DurablePublication._confirm_result",
+    "DurablePublication.fresh",
+    "DurablePublication.guard",
+    "DurablePublication.publish",
+    "DurablePublication.request",
+    "_publication_policy",
+    "_reserved_pytest_parameters",
+    "allowed_path",
+    "scope_fingerprint",
+    "validate_proposal"
+  ],
+  "unchanged": [
+    "Draft PR status",
+    "Honest test limitations",
+    "Maintainer review requirement",
+    "Donation/publication markers and pending-draft reconciliation",
+    "Consent, account handling, quotas, throttles and contributor credit"
+  ],
+  "limits": [
+    "No account-flag cause was established and no prevention guarantee is made.",
+    "Existing remote PRs were not edited. This changes future generated PR descriptions.",
+    "Meaningful references to the project or changed model features are preserved; summaries are not indiscriminately scrubbed."
+  ]
+}
