@@ -33,6 +33,15 @@ class BusinessContactTests(unittest.TestCase):
             "https://directory.example/listing",
         ))
 
+    def test_business_name_requires_whole_words_in_directory_title(self):
+        url = "https://directory.example/listing"
+        self.assertFalse(web_tools.business_name_matches(
+            "Green Lawn Care", "Greenfield Lawn Care contact", url,
+        ))
+        self.assertTrue(web_tools.business_name_matches(
+            "Green Lawn Care", "GREEN Lawn-Care contact", url,
+        ))
+
     def test_public_emails_ignores_placeholder_and_examples(self):
         page = {
             "contact_links": ["mailto:Office%40RealBusiness.com?subject=Hello", "tel:+15551234567"],
