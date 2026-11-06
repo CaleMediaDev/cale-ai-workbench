@@ -84,8 +84,9 @@ def generate(root: Path, prompt: str, output_path: str = "") -> Path:
         raise RuntimeError("The image maker did not return a usable result.") from exc
     if not isinstance(reply, dict):
         raise RuntimeError("The image maker did not return a usable result.")
-    if result.returncode or reply.get("error"):
-        raise RuntimeError(str(reply.get("error") or result.stderr[-500:]))
+    if result.returncode != 0 or reply.get("error"):
+        error_msg = reply.get("error") or result.stderr[-500:]
+        raise RuntimeError(str(error_msg))
     reported_path = reply.get("path")
     if (not isinstance(reported_path, str)
             or Path(reported_path).resolve() != destination

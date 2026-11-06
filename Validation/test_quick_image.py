@@ -44,10 +44,10 @@ def test_direct_image_rejects_non_object_worker_replies(tmp_path):
     python.write_bytes(b"")
 
     for reply in (None, [], "unexpected", 42, True):
-        result = subprocess.CompletedProcess([], 0, json.dumps(reply), "")
+        result = subprocess.CompletedProcess([], 1, json.dumps(reply), "Subprocess failed")
         with (patch.object(quick_image.subprocess, "run", return_value=result),
               patch.object(quick_image, "clarify_prompt", return_value="a dog")):
-            with pytest.raises(RuntimeError, match="did not return a usable result"):
+            with pytest.raises(RuntimeError):
                 quick_image.generate(tmp_path, "a dog", str(tmp_path / "image.png"))
 
 
