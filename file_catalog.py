@@ -270,21 +270,26 @@ def search(state: str | Path, query: str, limit: int = 10) -> list[dict]:
     terms = re.findall(r"[^\W_]+", cleaned, re.UNICODE)[:10] or words
     count = max(1, min(limit, 30))
     with database(state) as conn:
+
         def matches(expression: str, candidate_limit: int) -> list[dict]:
-            rows = conn.execute(
-                """SELECT entries.path,entries.name,entries.kind
-                FROM entry_fts JOIN entries ON entries.id=entry_fts.rowid
-                WHERE entry_fts MATCH ? ORDER BY bm25(entry_fts,8.0,1.0)
-                LIMIT ?""",
-                (expression, candidate_limit),
-            ).fetchall()
-            found = []
-            for row in rows:
-                if Path(row["path"]).exists():
-                    found.append(dict(row))
-                else:
-                    conn.execute("DELETE FROM entries WHERE path=?", (row["path"],))
-            return found
+            while True:
+                rows = conn.execute(
+                    """SELECT entries.path,entries.name,entries.kind
+                    FROM entry_fts JOIN entries ON entries.id=entry_fts.rowid
+                    WHERE entry_fts MATCH ? ORDER BY bm25(entry_fts,8.0,1.0)
+                    LIMIT ?""",
+                    (expression, candidate_limit),
+                ).fetchall()
+                found = []
+                for row in rows:
+                    if Path(row["path"]).exists():
+                        found.append(dict(row))
+                    else:
+                        conn.execute("DELETE FROM entries WHERE path=?", (row["path"],))
+                if len(found) == len(rows) or len(rows) < candidate_limit:
+                    return found
+                # Deleted files must not consume the live-result budget. Each
+                # retry removes stale rows, while keeping each batch bounded.
 
         def score(row: dict) -> tuple[int, int]:
             name = row["name"].casefold()

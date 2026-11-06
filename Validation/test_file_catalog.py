@@ -11,6 +11,53 @@ import file_catalog
 
 
 class FileCatalogTests(unittest.TestCase):
+    def test_search_refills_candidates_after_pruning_deleted_files(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            state = root / "state"
+            paths = []
+            with file_catalog.database(state) as conn:
+                for number in range(102):
+                    folder = root / f"folder-{number:03d}"
+                    path = folder / "budget.txt"
+                    paths.append(path)
+                    conn.execute(
+                        "INSERT INTO entries(path,name,parent,kind,scan_id) "
+                        "VALUES(?,?,?,?,?)",
+                        (str(path), path.name, str(folder), "file", "old-scan"),
+                    )
+            for path in paths[-2:]:
+                path.parent.mkdir()
+                path.write_text("Current budget", encoding="utf-8")
+
+            results = file_catalog.search(state, "budget", limit=2)
+
+            self.assertEqual(
+                {row["path"] for row in results}, {str(path) for path in paths[-2:]}
+            )
+            with file_catalog.database(state) as conn:
+                self.assertEqual(
+                    conn.execute("SELECT COUNT(*) FROM entries").fetchone()[0], 2
+                )
+            self.assertEqual(len(file_catalog.search(state, "budget", limit=2)), 2)
+
+    def test_search_finishes_when_every_candidate_was_deleted(self):
+        with tempfile.TemporaryDirectory() as temp:
+            state = Path(temp) / "state"
+            with file_catalog.database(state) as conn:
+                for number in range(20):
+                    path = Path(temp) / f"budget-{number}.txt"
+                    conn.execute(
+                        "INSERT INTO entries(path,name,parent,kind,scan_id) "
+                        "VALUES(?,?,?,?,?)",
+                        (str(path), path.name, str(path.parent), "file", "old-scan"),
+                    )
+            self.assertEqual(file_catalog.search(state, "budget", limit=1), [])
+            with file_catalog.database(state) as conn:
+                self.assertEqual(
+                    conn.execute("SELECT COUNT(*) FROM entries").fetchone()[0], 0
+                )
+
     def test_routine_scan_defers_after_a_task_starts_and_resumes_later(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp) / "drive"
