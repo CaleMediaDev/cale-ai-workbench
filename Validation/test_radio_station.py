@@ -253,6 +253,34 @@ def test_missing_buffered_audio_is_retired_from_published_ready_count(tmp_path):
         assert service.snapshot()["ready"] == 1
 
 
+def test_missing_current_audio_at_eof_is_retired_and_replacement_can_play(tmp_path):
+    _, service, player, jobs, calls, generate = fixture(tmp_path)
+    with patch("music_backend.start_music_job", side_effect=generate), patch("music_backend.music_job_status", side_effect=lambda job: jobs[job]):
+        service.tick()
+        finish(jobs, calls, 0)
+        service.tick()
+        current_id = service.current["id"]
+        # First exercise the normal cached-repeat fallback.
+        player.active = False
+        service.tick()
+        assert service.repeating
+        Path(service.current["path"]).unlink()
+        player.active = False
+
+        service.tick()
+
+        assert service.current is None
+        assert not service.repeating
+        assert not player.active
+        assert next(row for row in service._rows() if row["id"] == current_id)["status"] == "error"
+        assert service.snapshot()["message"].startswith("Buffering")
+        assert len(calls) == 2  # Reattach the in-flight replacement, not a duplicate.
+        finish(jobs, calls, 1)
+        service.tick()
+        assert service.current["path"] == calls[1][1]
+        assert player.active and player.played[-1] == calls[1][1]
+
+
 def test_completed_render_without_output_retries_and_recovers(tmp_path):
     _, service, player, jobs, calls, generate = fixture(tmp_path)
     with patch("music_backend.start_music_job", side_effect=generate), patch("music_backend.music_job_status", side_effect=lambda job: jobs[job]), patch.object(radio.time, "monotonic", return_value=100) as clock:
