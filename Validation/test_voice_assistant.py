@@ -656,6 +656,23 @@ class VoiceTests(unittest.TestCase):
             ("hearing", ""),
         )
 
+    def test_task_qualified_resume_commands_are_controls_not_notes(self):
+        for phrase in ("resume task", "resume the task", "resume my task"):
+            with self.subTest(phrase=phrase):
+                self.assertEqual(
+                    voice_assistant.spoken_command(phrase), ("resume", "")
+                )
+                self.assertEqual(
+                    voice_assistant.spoken_command(
+                        f"Hey Cale, {phrase}!", require_wake=True
+                    ),
+                    ("resume", ""),
+                )
+        self.assertEqual(
+            voice_assistant.spoken_command("resume the task after reviewing my notes"),
+            ("note", "resume the task after reviewing my notes"),
+        )
+
     def test_wake_phrase_can_span_two_microphone_clips(self):
         listener = voice_assistant.WakeSequence(timeout=12)
         self.assertIsNone(listener.consume("open my files", now=100))

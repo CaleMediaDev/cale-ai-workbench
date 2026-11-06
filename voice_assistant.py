@@ -245,7 +245,7 @@ def spoken_command(transcript, require_wake=False):
     if re.fullmatch(r"(?:pause|pause (?:the |my )?task)", normalized):
         return ("pause", "")
     if re.fullmatch(
-        r"(?:continue|resume|keep going|continue (?:the |my )?task)", normalized
+        r"(?:continue|resume|keep going|(?:continue|resume) (?:the |my )?task)", normalized
     ):
         return ("resume", "")
     if re.fullmatch(r"(?:stop|stop (?:the |my )?task)", normalized):
