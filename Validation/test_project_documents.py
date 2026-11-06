@@ -38,7 +38,7 @@ def test_snapshot_upgrade_ignores_v2_cache_and_rebuilds_only_derived_chunks(tmp_
     assert project_memory.get(tmp_path, note["id"])["body"] == "Keep the handwritten explanation"
     with project_memory.connection(tmp_path) as conn:
         rows = conn.execute("SELECT tags,source_hash FROM memories WHERE kind='document'").fetchall()
-    assert rows and all(row["tags"] == "extractor:v3-vision0" and row["source_hash"] == digest for row in rows)
+    assert rows and all(row["tags"] == "extractor:v4-vision0" and row["source_hash"] == digest for row in rows)
     assert old_cache.read_text(encoding="utf-8") == "stale poisoned zebra passage"
     assert source.read_bytes() == b"stable original PDF bytes"
 
@@ -382,6 +382,38 @@ def test_inspector_preserves_extracted_line_endings_in_cache(tmp_path):
     assert full["total_characters"] == len(text)
     assert second["next_start_char"] is None
     assert extract.call_count == 1
+
+
+def test_plain_text_preserves_line_endings_and_rebuilds_translated_cache(tmp_path):
+    source = tmp_path / "notes.txt"
+    text = "alpha\r\nbeta\rgamma\nend"
+    original = text.encode("utf-8")
+    source.write_bytes(original)
+    digest = project_documents._digest(source)
+    old_cache = tmp_path / ".local-ai/document-cache" / f"v3-{digest}-txt-0.txt"
+    old_cache.parent.mkdir(parents=True)
+    translated = text.replace("\r\n", "\n").replace("\r", "\n")
+    old_cache.write_bytes(translated.encode("utf-8"))
+
+    with patch.object(project_memory, "index_file"), patch.object(
+        project_documents, "_extract_snapshot", wraps=project_documents._extract_snapshot,
+    ) as extract:
+        first = project_documents.inspect(tmp_path, "notes.txt", max_chars=7)
+        second = project_documents.inspect(
+            tmp_path, "notes.txt", start_char=first["next_start_char"],
+        )
+        full = project_documents.inspect(tmp_path, "notes.txt")
+
+    assert not first["cached"] and second["cached"] and full["cached"]
+    assert first["text"] == "alpha\r\n"
+    assert first["next_start_char"] == 7
+    assert first["text"] + second["text"] == full["text"] == text
+    assert first["total_characters"] == second["total_characters"] == len(text)
+    assert full["total_characters"] == len(text)
+    assert second["next_start_char"] is None
+    assert extract.call_count == 1
+    assert source.read_bytes() == original
+    assert old_cache.read_bytes() == translated.encode("utf-8")
 
 
 def test_old_translated_cache_is_not_reused_after_newline_fix(tmp_path):

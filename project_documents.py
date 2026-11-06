@@ -19,7 +19,7 @@ import project_memory
 MAX_SOURCE_BYTES = 50 * 1024 * 1024
 MAX_EXTRACTED_CHARS = 5_000_000
 MAX_EXCERPT_CHARS = 10_000
-CACHE_VERSION = "v3"  # Re-extract pre-snapshot caches; v1 also translated line endings.
+CACHE_VERSION = "v4"  # Re-extract plain-text caches that translated line endings.
 SUPPORTED = file_chat.IMAGES | file_chat.PLAIN_TEXT | file_chat.DOCUMENTS
 
 
@@ -53,7 +53,8 @@ def _extract_snapshot(source: Path, expected_digest: str, question: str = "") ->
         if source.suffix.casefold() in file_chat.IMAGES:
             return file_chat.image_description(snapshot, question)
         if source.suffix.casefold() in file_chat.PLAIN_TEXT:
-            return snapshot.read_text(encoding="utf-8-sig", errors="replace")
+            with snapshot.open("r", encoding="utf-8-sig", errors="replace", newline="") as text:
+                return text.read()
         return file_chat.document_text(snapshot, max_scanned_pages=20)
 
 
