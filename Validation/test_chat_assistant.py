@@ -485,6 +485,9 @@ def test_leading_decimal_song_duration_enforces_minimum():
 
 @pytest.mark.parametrize("prompt", [
     "Make a -30-second song",
+    "Make a -1:30 song",
+    "Make a -0:30 song",
+    "Make a - 1:30 song",
     "Make a -1 minute song",
     "Make a -.5-minute song",
     "Make a -1 minute and 30 second song",
