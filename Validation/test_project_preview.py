@@ -70,13 +70,16 @@ class ProjectPreviewTests(unittest.TestCase):
         ):
             self.assertEqual(preview.safe_loopback_url(url), "", url)
 
-    def test_malformed_ipv6_authority_falls_back_to_static_html(self):
+    def test_ipv6_loopback_authority_is_allowed(self):
+        # Test valid IPv6 loopback address with port
         self.assertEqual(
             preview.safe_loopback_url("http://[::1]:3000/"),
             "http://[::1]:3000/",
         )
+        # Test malformed authority which should be rejected
         malformed = "http://[::1]invalid:3000/"
         self.assertEqual(preview.safe_loopback_url(malformed), "")
+        # Test case where declaration fails and falls back
         with tempfile.TemporaryDirectory() as temporary:
             folder = Path(temporary).resolve()
             fallback = folder / "index.html"
