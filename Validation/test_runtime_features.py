@@ -290,6 +290,28 @@ def test_installer_flag_must_follow_script(monkeypatch, script_arguments):
     assert runtime_features._installer_running(12345) is bool(script_arguments)
 
 
+@pytest.mark.parametrize("flag", ["--i", "--in", "--ins", "--inst", "--insta", "--instal", "--install"])
+@pytest.mark.parametrize("after_script", [True, False])
+def test_installer_detection_recognizes_cli_abbreviations(monkeypatch, flag, after_script):
+    import psutil
+
+    script = str(runtime_features.Path(runtime_features.__file__).resolve())
+
+    class InstallerProcess:
+        def cmdline(self):
+            if after_script:
+                return ["python", script, flag]
+            # A flag consumed as a Python option value does not enable installation.
+            return ["python", "-W", flag, script]
+
+        def cwd(self):
+            pytest.fail("An absolute script path must not require cwd lookup")
+
+    monkeypatch.setattr(psutil, "Process", lambda pid: InstallerProcess())
+
+    assert runtime_features._installer_running(12345) is after_script
+
+
 @pytest.mark.parametrize("prefix", [
     ["-uW", "ignore"],
     ["-uX", "utf8"],
