@@ -19,6 +19,19 @@ from long_tasks import project_prompt
 
 
 class AutoRouteTests(unittest.TestCase):
+    def test_game_routing_recognizes_plural_games(self):
+        for brief, expected in (
+            ("Build a puzzle game.", True),
+            ("Build a collection of puzzle games.", True),
+            ("Build an expense tracker.", False),
+            ("Explain the origin of the surname Gameson.", False),
+        ):
+            with self.subTest(brief=brief):
+                self.assertEqual(
+                    is_game_task([{"role": "user", "content": brief}]),
+                    expected,
+                )
+
     def test_game_routing_uses_native_brief_instead_of_generic_worker_guidance(self):
         import native_agent
 
