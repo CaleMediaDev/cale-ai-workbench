@@ -71,7 +71,8 @@ def save(source: Path, vocal: Path, target: Path, transcription: dict) -> dict:
     if not rows:
         raise RuntimeError("No clear lyrics were detected in the isolated vocal track.")
     timings_content = json.dumps({"language": transcription.get("language"),
-                                  "segments": rows}, ensure_ascii=False, indent=2) + "\n"
+                                  "segments": rows}, ensure_ascii=False, indent=2,
+                                 allow_nan=False) + "\n"
     text_content = "\n".join(row["text"] for row in rows) + "\n"
     captions_content = "\n\n".join(
         f"{index}\n{_srt_time(row['start'])} --> {_srt_time(row['end'])}\n{row['text']}"
