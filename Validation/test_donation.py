@@ -3490,3 +3490,167 @@ def test_model_transport_uncertainty_blocks_pr_before_dispatch(model_upload_host
     with pytest.raises(donation.PublicationPending):host.publish()
     assert not host.remote.prs
     assert not any(endpoint.endswith('/pulls') and body is not None for endpoint,body in host.remote.calls)
+
+
+def test_independent_public404_restart_preserves_pending_link_during_cooldown(outbox_host):
+    host = outbox_host
+    host.remote.public_visible = False
+    first = host.tick()
+    expected = f"https://github.com/{donation.UPSTREAM}/pull/1"
+    assert expected in first.status_message()
+    before_calls = len(host.remote.calls)
+    with closing(donation.connection(host.root)) as db:
+        before = db.execute("SELECT run,resource,account,phase,state FROM publication_outbox").fetchall()
+        before_runs = db.execute("SELECT id,status,tokens FROM runs").fetchall()
+    restarted = host.tick()
+    with closing(donation.connection(host.root)) as db:
+        after = db.execute("SELECT run,resource,account,phase,state FROM publication_outbox").fetchall()
+        after_runs = db.execute("SELECT id,status,tokens FROM runs").fetchall()
+    assert before == after and before_runs == after_runs
+    assert len(host.remote.calls) == before_calls and len(host.calls) == 1
+    assert expected in restarted.status_message()
+
+
+def _pending_link_fixture(host):
+    host.remote.public_visible = False
+    host.tick()
+    with closing(donation.connection(host.root)) as db:
+        run_id, raw, checked = db.execute("SELECT run,state,checked FROM publication_outbox").fetchone()
+    return run_id, json.loads(raw), checked
+
+
+@pytest.mark.parametrize("corruption", [
+    "malformed", "oversized", "unicode_oversized", "blob", "nonobject", "unsafe_url", "wrong_account",
+    "wrong_job", "wrong_resource", "withdrawn_consent", "changed_account", "disabled_source",
+])
+def test_pending_link_hydration_rejects_unbound_saved_diagnostics(outbox_host, corruption):
+    host = outbox_host
+    run_id, state, checked = _pending_link_fixture(host)
+    consent = donation.settings(host.root)
+    with closing(donation.connection(host.root)) as db, db:
+        if corruption in {"malformed", "oversized", "unicode_oversized", "blob", "nonobject", "unsafe_url"}:
+            raw = {"malformed": "{", "oversized": " " * 8193,
+                   "unicode_oversized": json.dumps(dict(state, padding="\u00e9" * 5000), ensure_ascii=False),
+                   "blob": b"{}", "nonobject": "[]",
+                   "unsafe_url": json.dumps(dict(state, url="https://evil.invalid/SECRET"))}[corruption]
+            db.execute("UPDATE publication_outbox SET state=?", (raw,))
+        elif corruption == "wrong_account":
+            db.execute("UPDATE publication_outbox SET account=?", ("f" * 64,))
+        elif corruption == "wrong_job":
+            db.execute("UPDATE runs SET job='other-valid-job'")
+        elif corruption == "wrong_resource":
+            db.execute("UPDATE runs SET resource='chatgpt'")
+    if corruption == "withdrawn_consent": consent = dict(consent, enabled=False)
+    if corruption == "changed_account": consent = dict(consent, github_account="different-donor")
+    if corruption == "disabled_source": consent = dict(consent, sources=["chatgpt"])
+    with closing(donation.connection(host.root)) as db:
+        before = (db.execute("SELECT * FROM publication_outbox").fetchall(), db.execute("SELECT * FROM runs").fetchall())
+    remote_calls, model_calls = len(host.remote.calls), len(host.calls)
+    assert donation.pending_publication_url(host.root, consent) == ""
+    assert (len(host.remote.calls), len(host.calls)) == (remote_calls, model_calls)
+    with closing(donation.connection(host.root)) as db:
+        assert before == (db.execute("SELECT * FROM publication_outbox").fetchall(), db.execute("SELECT * FROM runs").fetchall())
+
+
+def _insert_pending_link_copy(root, original, run_id, raw, checked):
+    with closing(donation.connection(root)) as db, db:
+        db.execute("INSERT INTO runs(id,started,status,job,resource) VALUES(?,0,'requested',?,'local')", (run_id, JOB["id"]))
+        db.execute("""INSERT INTO publication_outbox
+            SELECT ?,resource,account,phase,payload,payload_sha,?,'',? FROM publication_outbox WHERE run=?""",
+                   (run_id, raw, checked, original))
+
+
+def test_pending_link_hydration_selects_newest_then_run_id_deterministically(outbox_host):
+    host = outbox_host
+    original, state, checked = _pending_link_fixture(host)
+    for prefix, number in (("e", 2), ("f", 3)):
+        _insert_pending_link_copy(host.root, original, prefix * 32,
+                                  json.dumps(dict(state, url=f"https://github.com/{donation.UPSTREAM}/pull/{number}")), checked + 1)
+    assert donation.pending_publication_url(host.root, donation.settings(host.root)) == f"https://github.com/{donation.UPSTREAM}/pull/3"
+
+
+def test_pending_link_hydration_reads_at_most_sixteen_candidate_states(outbox_host):
+    host = outbox_host
+    original, state, checked = _pending_link_fixture(host)
+    for index in range(17):
+        _insert_pending_link_copy(host.root, original, f"{index:032x}", "{}", checked + 1)
+    # The only valid link is older than the 16 candidate limit, not scanned.
+    assert donation.pending_publication_url(host.root, donation.settings(host.root)) == ""
+
+
+def test_restarted_pending_link_status_uses_only_cached_memory(outbox_host):
+    host = outbox_host
+    _pending_link_fixture(host)
+    restarted = host.tick()
+    expected = f"https://github.com/{donation.UPSTREAM}/pull/1"
+    with (patch.object(donation, "connection", side_effect=AssertionError("UI must not open ledger")),
+          patch.object(donation.sqlite3, "connect", side_effect=AssertionError("UI must not open SQLite")),
+          patch.object(donation, "settings", side_effect=AssertionError("UI must not read settings")),
+          patch("github_account.account", side_effect=AssertionError("UI must not call GitHub"))):
+        assert expected in restarted.status_message()
+    assert len(host.calls) == 1 and len(host.remote.prs) == 1
+
+
+def test_pending_link_hydration_rechecks_consent_after_read(outbox_host):
+    host = outbox_host
+    _pending_link_fixture(host)
+    consent = donation.settings(host.root)
+    with patch.object(donation, "settings", return_value=dict(consent, github_account="changed")):
+        assert donation.pending_publication_url(host.root, consent) == ""
+
+
+def test_pending_link_missing_database_does_not_create_state(tmp_path):
+    root = tmp_path / "absent"
+    consent = {"enabled": True, "github_account": "donor", "sources": ["local"]}
+    assert donation.pending_publication_url(root, consent) == ""
+    assert not root.exists()
+
+
+def test_public_cooldown_child_preserves_shared_other_resource_link(outbox_host):
+    host = outbox_host
+    host.remote.public_visible = False
+    parent = host.tick()
+    expected = f"https://github.com/{donation.UPSTREAM}/pull/1"
+    assert expected in parent.status_message()
+    before_calls = len(host.remote.calls)
+    child = donation.Service(host.root, _lane=True, _resource="chatgpt", _events=parent._events)
+    with patch("github_account.account", side_effect=AssertionError("Cooldown must not query account")):
+        child._run(threading.Event())
+    assert len(host.remote.calls) == before_calls and len(host.calls) == 1
+    assert expected in parent.status_message()
+    assert expected in child.status_message()
+
+
+def test_stale_empty_pending_hydration_cannot_erase_fresh_404(outbox_host):
+    host = outbox_host
+    _pending_link_fixture(host)
+    parent = donation.Service(host.root)
+    child = donation.Service(host.root, _lane=True, _events=parent._events)
+    expected = f"https://github.com/{donation.UPSTREAM}/pull/1"
+    def stale_read(root, consent):
+        with patch.object(donation.time, "time", return_value=outbox_expire(host.root)):
+            child._run(threading.Event())
+        assert expected in child.status_message()
+        return ""
+    with patch.object(donation, "pending_publication_url", side_effect=stale_read):
+        parent._run(threading.Event())
+    assert expected in parent.status_message()
+    assert len(host.calls) == 1 and len(host.remote.prs) == 1
+
+
+def test_stale_url_hydration_cannot_resurrect_after_empty_cache_submission(outbox_host):
+    host = outbox_host
+    run_id, state, checked = _pending_link_fixture(host)
+    parent = donation.Service(host.root)
+    expected = state["url"]
+    assert "pending_proposal_url" not in parent._events
+    def stale_read(root, consent):
+        # A completed host publication invalidates a prior read even when the
+        # cache was empty: empty -> submitted/empty is still a newer outcome.
+        parent._emit_event("submitted", run_id, "local", pr_url=expected)
+        return expected
+    with patch.object(donation, "pending_publication_url", side_effect=stale_read):
+        parent._run(threading.Event())
+    assert expected not in parent.status_message()
+    assert "pending_proposal_url" not in parent._events
+    assert len(host.calls) == 1 and len(host.remote.prs) == 1

@@ -1288,3 +1288,81 @@ def test_c():
     assert not (root / "must-not-start.txt").exists()
     assert not psutil.pid_exists(int((root / "child-pid.txt").read_text()))
     assert psutil.Process().is_running()
+
+
+@pytest.mark.parametrize("change_source", [False, True])
+def test_final_source_change_overrides_prior_child_deferral(tmp_path, monkeypatch, change_source):
+    # The child really yields at its next boundary after one completed test.
+    # Replace source only after it exits, before the parent's final basis check.
+    source = """from pathlib import Path
+import sqlite3
+root = Path.cwd()
+def test_a():
+    with sqlite3.connect(root/'LongTasks/projects.db') as database:
+        database.execute("INSERT INTO projects VALUES ('working')")
+    (root/'ran-a.txt').write_text('once')
+def test_b():
+    (root/'must-not-run.txt').write_text('bad')
+"""
+    root, state = live_install(tmp_path, source)
+    runtime = root / "runtime.py"
+    runtime.write_text("original = True\n", encoding="utf-8")
+    prior = {"version": diagnostics.version(root), "status": "failed", "failures": 2}
+    (state / "self-check.json").write_text(json.dumps(prior), encoding="utf-8")
+    actual_basis = diagnostics._live_basis
+    basis_calls = []
+    def basis(folder, python):
+        basis_calls.append(True)
+        if len(basis_calls) == 2 and change_source:
+            runtime.write_text("replacement = True\n", encoding="utf-8")
+        return actual_basis(folder, python)
+    monkeypatch.setattr(diagnostics, "_live_basis", basis)
+    report = run_live(root, state, monkeypatch)
+    assert len(basis_calls) == 2
+    assert report["status"] == ("interrupted" if change_source else "deferred")
+    assert report["failures"] == 2
+    assert report["progress"]["complete"] is False
+    assert report["progress"]["deferred_reason"] == "active_projects"
+    assert (root / "ran-a.txt").read_text() == "once"
+    assert not (root / "must-not-run.txt").exists()
+    if change_source:
+        assert report["progress"]["binding_unchanged"] is False
+        assert report["progress"]["invalidated"] == "source_runtime_changed"
+    else:
+        assert report["deferred_reason"] == "active_projects"
+
+
+@pytest.mark.parametrize("defer_child", [False, True])
+def test_known_child_source_invalidation_survives_restored_parent_basis(tmp_path, monkeypatch, defer_child):
+    # Exercise report precedence, not the child's source-detection implementation:
+    # seal an explicit invalidation after proving a real temporary basis change.
+    source = """from pathlib import Path
+import sqlite3,sys
+import self_diagnostics
+root = Path.cwd()
+def test_a():
+    runtime = root/'runtime.py'
+    original = runtime.read_text()
+    runtime.write_text('replacement = True\\n')
+    plugin = self_diagnostics._LIVE_PLUGIN
+    assert self_diagnostics._live_basis(root, Path(sys.executable)) != plugin.context['basis']
+    plugin.data['invalidated'] = 'source_runtime_changed'
+    runtime.write_text(original)
+    assert self_diagnostics._live_basis(root, Path(sys.executable)) == plugin.context['basis']
+    with sqlite3.connect(root/'LongTasks/projects.db') as database:
+        database.execute("INSERT INTO projects VALUES ('working')")
+def test_b():
+    (root/'must-not-run.txt').write_text('bad')
+"""
+    if not defer_child:
+        source = source.replace("database.execute(\"INSERT INTO projects VALUES ('working')\")", "pass")
+        source = source.replace("(root/'must-not-run.txt').write_text('bad')", "pass")
+    root, state = live_install(tmp_path, source)
+    (root / "runtime.py").write_text("original = True\n", encoding="utf-8")
+    report = run_live(root, state, monkeypatch)
+    assert report["status"] == "interrupted" and report["failures"] == 0
+    assert report["progress"]["complete"] is False
+    assert report["progress"]["invalidated"] == "source_runtime_changed"
+    if defer_child:
+        assert report["progress"]["deferred_reason"] == "active_projects"
+    assert not (root / "must-not-run.txt").exists()

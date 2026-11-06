@@ -8,6 +8,8 @@
     "Validation/test_chat_assistant.py": "c83e9163f14810867c38b9f92be37042b93c7240f833ac1e618abff50b5e1e9a",
     "Validation/test_chrome_connector.py": "3caf2c13554b5ce76f823c4e71ac5d083f9876698b96dcf7b848f20ece283b48",
     "Validation/test_document_check.py": "2da76e3aeb666660600672f2b421141364ab786a0a13ab88e86dd916ccada263",
+    "Validation/test_donation.py": "ff984f6598b06c536a478721d366f59a43327f3e69a2b9a7c2e8cdaa615b09bd",
+    "Validation/test_donation_regressions.py": "30e90602fa0d8c0b498f2f85f019ea8fd7aece94232aae2027e7a6238ce23e0e",
     "Validation/test_feedback_learning.py": "c83b5ef21f7dcd2739b9754a3dd91bde5347541d6a6537f41a04125494da8da0",
     "Validation/test_ffmpeg_runtime.py": "58353f56c602eff6955e2f247e1803b5295941f087026bb55d9f9046dc9ea46c",
     "Validation/test_model_library.py": "fb0c8129fb3a99507b4094cc7c784a07f2e25db3a535d1efca6611ed5fc55c90",
@@ -18,7 +20,7 @@
     "Validation/test_radio_station.py": "159b94d6cc04af0fa4a7d7b377671b0d5d93ec2f9cec479b2e145ad142799a94",
     "Validation/test_readiness_checklist.py": "efcdc33d49bbd03e6382e71ecdffeae8f92642452084439d07f65f2e44e497b6",
     "Validation/test_routing_memory.py": "4b6749eeb86bd36d5b4396767cc11ce2073f14f94218905a70a5c6cd4b89340b",
-    "Validation/test_self_diagnostics.py": "7106fd410137d63c34ded45237f77824d255e2bb7762673853d1afcfa9252561",
+    "Validation/test_self_diagnostics.py": "60a592d22c471fbdc171f269e3802e8a5852f1bf4c61117bcb88cac948f63bc1",
     "Validation/test_skill_catalog.py": "b989eb05a34f6ab2a21a219abb381e9feea783f970628d7114a2982f1bd692f0",
     "Validation/test_table_ml.py": "d5b97ee8bf837c84cf0ef8759d140424138f81749a63403aba9545cc1b93a45f",
     "Validation/test_task_eta.py": "937d5240f63d30eac6332d357d14107b4fb8a0730488d0301b4440419949d4ef",
@@ -32,6 +34,7 @@
     "chat_assistant.py": "a5948773ce2ab2333eeb3fae2abea8ccb1f59e5f9fcb3baba1a3f9a1fc0bfa1a",
     "chrome_connector.py": "db445143fea9c40fc08918d987574e52f8b94a327e843608801d3b4ce283f4a1",
     "document_check.py": "8b50ede5eea92cb11c0bb2553b99d58d559c39f9af79068e9ab4df91c0bb05b9",
+    "donation.py": "a9869c5739ca69e9ef17714d7e27b9ac27597bd7344325f95d56cfa184f8ea45",
     "feedback_learning.py": "c32636c60b57d4fd7e9dffa9fbe76a18cb451200eb0cb242e8619be1a33af954",
     "ffmpeg_runtime.py": "61de13c3337918268f0098664f4826bc41b1ade742b6dca555774a934a0f2201",
     "model_library.py": "bf535e710234e642ef1e568116a30a2563a7da0421f7f4bc7498d69e7284ae1f",
@@ -42,7 +45,7 @@
     "project_memory.py": "7a89c9d1cc6cfb22aa8ed015ddceca1e45001177d37a1b2eeb871f78a055b6fa",
     "radio_station.py": "fde6a54b8e02ab907bed104fb9ed9bfbf7b5902a17dac5f3ec20ccaaffd68054",
     "readiness_checklist.py": "bda305258a1683f35d8ec57722d316f1b54d24288dcc64e562aabf542be56f5d",
-    "self_diagnostics.py": "0b8065ae264ce518b4c0a233b3d5eaab737a415a9f93d0fdd4a2d57be22990fa",
+    "self_diagnostics.py": "06541cd5cb2b596969418a50978b55da0509a4ade6062c23bf98bcf8c3c72a9a",
     "skill_catalog.py": "9cd35369e2dfd039ad9d825a6899ffff2767b5204c41d94c7278fd6bca4633c5",
     "table_ml.py": "f9f74ca95d85a320ff7da05aa4eee6b46b7218b362c05cb460c124f8c3240925",
     "task_eta.py": "b493602b9cbd3242442c9273fc10428f95b467b83e113f2ca6ad0df4264cc1f6",
@@ -54,14 +57,17 @@
   },
   "validation": {
     "affected_modules": {
+      "source_before_final_commit": "b929c47f71c3ac6f17a1e82538383fdcbe9b0c94",
       "exit_code": 0,
-      "seconds": 176.80207370000426,
+      "seconds": 259.84911839995766,
       "sha256": {
         "Validation/test_auto_route.py": "251a7d4ad31ad27ec90a0a91882078fd8b99fadb9e95435b68e350e4f9c6426f",
         "Validation/test_camera_presence.py": "0f9beb06fd7bcdc33907d6688fe51429c00b84a6991edfe38a457872e3413efc",
         "Validation/test_chat_assistant.py": "c83e9163f14810867c38b9f92be37042b93c7240f833ac1e618abff50b5e1e9a",
         "Validation/test_chrome_connector.py": "3caf2c13554b5ce76f823c4e71ac5d083f9876698b96dcf7b848f20ece283b48",
         "Validation/test_document_check.py": "2da76e3aeb666660600672f2b421141364ab786a0a13ab88e86dd916ccada263",
+        "Validation/test_donation.py": "ff984f6598b06c536a478721d366f59a43327f3e69a2b9a7c2e8cdaa615b09bd",
+        "Validation/test_donation_regressions.py": "30e90602fa0d8c0b498f2f85f019ea8fd7aece94232aae2027e7a6238ce23e0e",
         "Validation/test_feedback_learning.py": "c83b5ef21f7dcd2739b9754a3dd91bde5347541d6a6537f41a04125494da8da0",
         "Validation/test_ffmpeg_runtime.py": "58353f56c602eff6955e2f247e1803b5295941f087026bb55d9f9046dc9ea46c",
         "Validation/test_model_library.py": "fb0c8129fb3a99507b4094cc7c784a07f2e25db3a535d1efca6611ed5fc55c90",
@@ -72,7 +78,7 @@
         "Validation/test_radio_station.py": "159b94d6cc04af0fa4a7d7b377671b0d5d93ec2f9cec479b2e145ad142799a94",
         "Validation/test_readiness_checklist.py": "efcdc33d49bbd03e6382e71ecdffeae8f92642452084439d07f65f2e44e497b6",
         "Validation/test_routing_memory.py": "4b6749eeb86bd36d5b4396767cc11ce2073f14f94218905a70a5c6cd4b89340b",
-        "Validation/test_self_diagnostics.py": "7106fd410137d63c34ded45237f77824d255e2bb7762673853d1afcfa9252561",
+        "Validation/test_self_diagnostics.py": "60a592d22c471fbdc171f269e3802e8a5852f1bf4c61117bcb88cac948f63bc1",
         "Validation/test_skill_catalog.py": "b989eb05a34f6ab2a21a219abb381e9feea783f970628d7114a2982f1bd692f0",
         "Validation/test_table_ml.py": "d5b97ee8bf837c84cf0ef8759d140424138f81749a63403aba9545cc1b93a45f",
         "Validation/test_task_eta.py": "937d5240f63d30eac6332d357d14107b4fb8a0730488d0301b4440419949d4ef",
@@ -86,6 +92,7 @@
         "chat_assistant.py": "a5948773ce2ab2333eeb3fae2abea8ccb1f59e5f9fcb3baba1a3f9a1fc0bfa1a",
         "chrome_connector.py": "db445143fea9c40fc08918d987574e52f8b94a327e843608801d3b4ce283f4a1",
         "document_check.py": "8b50ede5eea92cb11c0bb2553b99d58d559c39f9af79068e9ab4df91c0bb05b9",
+        "donation.py": "a9869c5739ca69e9ef17714d7e27b9ac27597bd7344325f95d56cfa184f8ea45",
         "feedback_learning.py": "c32636c60b57d4fd7e9dffa9fbe76a18cb451200eb0cb242e8619be1a33af954",
         "ffmpeg_runtime.py": "61de13c3337918268f0098664f4826bc41b1ade742b6dca555774a934a0f2201",
         "model_library.py": "bf535e710234e642ef1e568116a30a2563a7da0421f7f4bc7498d69e7284ae1f",
@@ -96,7 +103,7 @@
         "project_memory.py": "7a89c9d1cc6cfb22aa8ed015ddceca1e45001177d37a1b2eeb871f78a055b6fa",
         "radio_station.py": "fde6a54b8e02ab907bed104fb9ed9bfbf7b5902a17dac5f3ec20ccaaffd68054",
         "readiness_checklist.py": "bda305258a1683f35d8ec57722d316f1b54d24288dcc64e562aabf542be56f5d",
-        "self_diagnostics.py": "0b8065ae264ce518b4c0a233b3d5eaab737a415a9f93d0fdd4a2d57be22990fa",
+        "self_diagnostics.py": "06541cd5cb2b596969418a50978b55da0509a4ade6062c23bf98bcf8c3c72a9a",
         "skill_catalog.py": "9cd35369e2dfd039ad9d825a6899ffff2767b5204c41d94c7278fd6bca4633c5",
         "table_ml.py": "f9f74ca95d85a320ff7da05aa4eee6b46b7218b362c05cb460c124f8c3240925",
         "task_eta.py": "b493602b9cbd3242442c9273fc10428f95b467b83e113f2ca6ad0df4264cc1f6",
@@ -113,6 +120,8 @@
         "Validation/test_chat_assistant.py",
         "Validation/test_chrome_connector.py",
         "Validation/test_document_check.py",
+        "Validation/test_donation.py",
+        "Validation/test_donation_regressions.py",
         "Validation/test_feedback_learning.py",
         "Validation/test_ffmpeg_runtime.py",
         "Validation/test_model_library.py",
@@ -133,10 +142,10 @@
         "Validation/test_voice_assistant.py",
         "Validation/test_web_tools.py"
       ],
-      "log_tail": "ror 1314] A required privilege is not held by the client: 'C:\\\\Users\\\\tahoe\\\\AppData\\\\Local\\\\Temp\\\\tmpgwwq9i_l\\\\private' -> 'C:\\\\Users\\\\tahoe\\\\AppData\\\\Local\\\\Temp\\\\tmpgwwq9i_l\\\\data\\\\skills\\\\creative\\\\frontend-ui-engineering'\nSKIPPED [1] Validation\\test_skill_catalog.py:56: Symlinks unavailable: [WinError 1314] A required privilege is not held by the client: 'C:\\\\Users\\\\tahoe\\\\AppData\\\\Local\\\\Temp\\\\tmpxh6c9jug\\\\external-skills' -> 'C:\\\\Users\\\\tahoe\\\\AppData\\\\Local\\\\Temp\\\\tmpxh6c9jug\\\\data\\\\skills'\nSKIPPED [1] Validation\\test_skill_catalog.py:319: Symlinks unavailable: [WinError 1314] A required privilege is not held by the client: 'C:\\\\Users\\\\tahoe\\\\AppData\\\\Local\\\\Temp\\\\tmpkr3owu8t\\\\external.md' -> 'C:\\\\Users\\\\tahoe\\\\AppData\\\\Local\\\\Temp\\\\tmpkr3owu8t\\\\vendor\\\\agent-skills\\\\frontend-ui-engineering\\\\SKILL.md'\nSKIPPED [1] Validation\\test_skill_catalog.py:207: Symlinks unavailable: [WinError 1314] A required privilege is not held by the client: 'C:\\\\Users\\\\tahoe\\\\AppData\\\\Local\\\\Temp\\\\tmpdzmmz3eb\\\\external-bundle' -> 'C:\\\\Users\\\\tahoe\\\\AppData\\\\Local\\\\Temp\\\\tmpdzmmz3eb\\\\vendor\\\\agent-skills'\nSKIPPED [1] Validation\\test_skill_catalog.py:292: Symlinks unavailable: [WinError 1314] A required privilege is not held by the client: 'C:\\\\Users\\\\tahoe\\\\AppData\\\\Local\\\\Temp\\\\tmpi7effttt\\\\external-reference.md' -> 'C:\\\\Users\\\\tahoe\\\\AppData\\\\Local\\\\Temp\\\\tmpi7effttt\\\\vendor\\\\agent-skills\\\\references\\\\accessibility-checklist.md'\nSKIPPED [1] Validation\\test_skill_catalog.py:263: Symlinks unavailable: [WinError 1314] A required privilege is not held by the client: 'C:\\\\Users\\\\tahoe\\\\AppData\\\\Local\\\\Temp\\\\tmpavub61li\\\\external-references' -> 'C:\\\\Users\\\\tahoe\\\\AppData\\\\Local\\\\Temp\\\\tmpavub61li\\\\vendor\\\\agent-skills\\\\references'\nSKIPPED [1] Validation\\test_skill_catalog.py:231: Symlinks unavailable: [WinError 1314] A required privilege is not held by the client: 'C:\\\\Users\\\\tahoe\\\\AppData\\\\Local\\\\Temp\\\\tmp2rbv96zn\\\\external-skill' -> 'C:\\\\Users\\\\tahoe\\\\AppData\\\\Local\\\\Temp\\\\tmp2rbv96zn\\\\vendor\\\\agent-skills\\\\frontend-ui-engineering'\nSKIPPED [1] Validation\\test_toolbox_mcp.py:1558: Symlinks unavailable: [WinError 1314] A required privilege is not held by the client: 'C:\\\\Users\\\\tahoe\\\\AppData\\\\Local\\\\Temp\\\\pytest-of-tahoe\\\\pytest-3145\\\\test_game_libraries_reject_red0\\\\outside' -> 'C:\\\\Users\\\\tahoe\\\\AppData\\\\Local\\\\Temp\\\\pytest-of-tahoe\\\\pytest-3145\\\\test_game_libraries_reject_red0\\\\registered-project\\\\vendor'\n1101 passed, 15 skipped, 141 subtests passed in 175.44s (0:02:55)\n",
+      "log_tail": "[ 16%]\n........................................................................ [ 20%]\n........................................................................ [ 25%]\n........................................................................ [ 30%]\n........................................................................ [ 35%]\n........................................................................ [ 40%]\n........................................................................ [ 44%]\n................................................................................................... [ 51%]\n............................... [ 53%]\n..........................................s..s...................... [ 58%]\n..................................................s..s.................. [ 62%]\n.............................................................s.......... [ 67%]\n........................................................................ [ 72%]\n...............................s.................................... [ 77%]\n.....................s......sssssss......................... [ 81%]\n........................................................................ [ 85%]\n...........................................s............................ [ 90%]\n........................................................................ [ 95%]\n................................................ [ 98%]\n....................                                                [100%]\n=========================== short test summary info ===========================\nSKIPPED [1] Validation\\test_music_mastering.py:456: Creating symlinks is unavailable on this system\nSKIPPED [1] Validation\\test_music_midi.py:42: Symlink creation is unavailable\nSKIPPED [1] Validation\\test_native_browser.py:619: Symlinks are unavailable in this test environment\nSKIPPED [1] Validation\\test_native_browser.py:659: Symlinks are unavailable in this test environment\nSKIPPED [1] Validation\\test_readiness_checklist.py:220: Windows filenames cannot contain a question mark\nSKIPPED [1] Validation\\test_self_diagnostics.py:311: POSIX file locking\nSKIPPED [1] Validation\\test_skill_catalog.py:85: Symlinks unavailable: [WinError 1314] A required privilege is not held by the client: 'C:\\\\Users\\\\tahoe\\\\AppData\\\\Local\\\\Temp\\\\tmpyshnd2wb\\\\local-skill.md' -> 'C:\\\\Users\\\\tahoe\\\\AppData\\\\Local\\\\Temp\\\\tmpyshnd2wb\\\\data\\\\skills\\\\creative\\\\frontend-ui-engineering\\\\SKILL.md'\nSKIPPED [1] Validation\\test_skill_catalog.py:137: Symlinks unavailable: [WinError 1314] A required privilege is not held by the client: 'C:\\\\Users\\\\tahoe\\\\AppData\\\\Local\\\\Temp\\\\tmp0mdhe3aw\\\\private' -> 'C:\\\\Users\\\\tahoe\\\\AppData\\\\Local\\\\Temp\\\\tmp0mdhe3aw\\\\data\\\\skills\\\\creative\\\\frontend-ui-engineering'\nSKIPPED [1] Validation\\test_skill_catalog.py:56: Symlinks unavailable: [WinError 1314] A required privilege is not held by the client: 'C:\\\\Users\\\\tahoe\\\\AppData\\\\Local\\\\Temp\\\\tmpps87dal3\\\\external-skills' -> 'C:\\\\Users\\\\tahoe\\\\AppData\\\\Local\\\\Temp\\\\tmpps87dal3\\\\data\\\\skills'\nSKIPPED [1] Validation\\test_skill_catalog.py:319: Symlinks unavailable: [WinError 1314] A required privilege is not held by the client: 'C:\\\\Users\\\\tahoe\\\\AppData\\\\Local\\\\Temp\\\\tmp6tr91y6o\\\\external.md' -> 'C:\\\\Users\\\\tahoe\\\\AppData\\\\Local\\\\Temp\\\\tmp6tr91y6o\\\\vendor\\\\agent-skills\\\\frontend-ui-engineering\\\\SKILL.md'\nSKIPPED [1] Validation\\test_skill_catalog.py:207: Symlinks unavailable: [WinError 1314] A required privilege is not held by the client: 'C:\\\\Users\\\\tahoe\\\\AppData\\\\Local\\\\Temp\\\\tmpdb4e7fqh\\\\external-bundle' -> 'C:\\\\Users\\\\tahoe\\\\AppData\\\\Local\\\\Temp\\\\tmpdb4e7fqh\\\\vendor\\\\agent-skills'\nSKIPPED [1] Validation\\test_skill_catalog.py:292: Symlinks unavailable: [WinError 1314] A required privilege is not held by the client: 'C:\\\\Users\\\\tahoe\\\\AppData\\\\Local\\\\Temp\\\\tmpk5pnmxjl\\\\external-reference.md' -> 'C:\\\\Users\\\\tahoe\\\\AppData\\\\Local\\\\Temp\\\\tmpk5pnmxjl\\\\vendor\\\\agent-skills\\\\references\\\\accessibility-checklist.md'\nSKIPPED [1] Validation\\test_skill_catalog.py:263: Symlinks unavailable: [WinError 1314] A required privilege is not held by the client: 'C:\\\\Users\\\\tahoe\\\\AppData\\\\Local\\\\Temp\\\\tmp3tgdwgmo\\\\external-references' -> 'C:\\\\Users\\\\tahoe\\\\AppData\\\\Local\\\\Temp\\\\tmp3tgdwgmo\\\\vendor\\\\agent-skills\\\\references'\nSKIPPED [1] Validation\\test_skill_catalog.py:231: Symlinks unavailable: [WinError 1314] A required privilege is not held by the client: 'C:\\\\Users\\\\tahoe\\\\AppData\\\\Local\\\\Temp\\\\tmpw5pdagp_\\\\external-skill' -> 'C:\\\\Users\\\\tahoe\\\\AppData\\\\Local\\\\Temp\\\\tmpw5pdagp_\\\\vendor\\\\agent-skills\\\\frontend-ui-engineering'\nSKIPPED [1] Validation\\test_toolbox_mcp.py:1558: Symlinks unavailable: [WinError 1314] A required privilege is not held by the client: 'C:\\\\Users\\\\tahoe\\\\AppData\\\\Local\\\\Temp\\\\pytest-of-tahoe\\\\pytest-3165\\\\test_game_libraries_reject_red0\\\\outside' -> 'C:\\\\Users\\\\tahoe\\\\AppData\\\\Local\\\\Temp\\\\pytest-of-tahoe\\\\pytest-3165\\\\test_game_libraries_reject_red0\\\\registered-project\\\\vendor'\n1486 passed, 15 skipped, 252 subtests passed in 258.70s (0:04:18)\n",
       "limits": [
-        "Twenty-four accepted modules only; not an installed full-suite or end-to-end media quality check.",
-        "Windows symlink and invalid-question-mark path skips are explicit; mocked and platform-independent controls do not establish OS privilege support."
+        "All26 affected module suites only; not an installed full-suite or end-to-end media/model quality result.",
+        "The other PC public404 remains unconfirmed. This validates local restart diagnostics without claiming remote delivery."
       ]
     },
     "prior_to_test_fixture_correction": {
@@ -1409,10 +1418,11 @@
     "793": "Description is already included in the content hash. The redundant change removes missing-FTS repair and its altered test fails; independent reproduction confirms index repair regression."
   },
   "limits": [
-    "Twenty-four changed module suites only, not a fresh installation or end-to-end voice/music/camera quality result.",
-    "Windows symlink privileges, POSIX locking, Tk initialization and an invalid-question-mark path have explicit platform skips; no real symlink or device support is claimed from mocked controls.",
-    "793 was rejected: a redundant hash comparison change disabled missing full-text-index repair and failed its own tests.",
-    "Installed checks remain independent; the 535 run changed source mid-suite and is not a proven stable-version pass. Private native-agent fixes are excluded."
+    "26 affected module suites only; not a full537 installed-suite, fresh-PC installation or end-to-end voice/music/camera/model quality result.",
+    "Windows symlink/POSIX/Tk/invalid-question-mark skips are explicit; no unavailable OS privilege/device support is claimed.",
+    "Other-PC public delivery remains unconfirmed: saved links are displayed as unconfirmed without new GitHub or model requests.",
+    "Shared-lane cache revision is not a cross-process ledger transaction; SQLite100ms VM budget is not a hard wall-time interrupt within built-ins.",
+    "Private experimental native code is excluded; latest actualprivate task stayed6/8 with no appsourceedit."
   ],
   "selfcheck_test_fixture_correction": {
     "candidate": "6b045d484cb46401b34039f543b9fe872108476d",
@@ -1423,5 +1433,119 @@
     "production_timeouts_changed": false,
     "production_stop_asserted_before_fallback_cleanup": true,
     "limits": "Recovered535 run changed version mid-suite; no stable full-installed result is claimed from it."
+  },
+  "source_before_final_release_commit": "b929c47f71c3ac6f17a1e82538383fdcbe9b0c94",
+  "maintainer_corrections": {
+    "selfcheck_source_invalidation": {
+      "base": "b929c47f71c3ac6f17a1e82538383fdcbe9b0c94",
+      "candidate": "1ae2a28cbef26f15015a3b2353b1b6a52d7d6e0d",
+      "checkout": "C:\\Users\\tahoe\\Documents\\Codex\\2026-10-31\\can\\outputs\\review-selfdiag-source-invalidation-537",
+      "source_sha256": {
+        "self_diagnostics.py": "06541cd5cb2b596969418a50978b55da0509a4ade6062c23bf98bcf8c3c72a9a",
+        "Validation/test_self_diagnostics.py": "60a592d22c471fbdc171f269e3802e8a5852f1bf4c61117bcb88cac948f63bc1"
+      },
+      "diagnosis": "Initial package failure reached real child boundary after one completed case; stale activity_unknown deferral overrode the final fresh source mismatch. No evidence of initial-preflight deferral. The exact low-level origin of the transient activity_unknown classification remains unproven; no activity guard is weakened.",
+      "original_package_result": "1 failed,1100 passed,15 skipped,141 subtests; preserved unchanged initial-package-failure.log. Original installer payload remains untouched.",
+      "baseline_proof": {
+        "selector": "test_final_source_change_overrides_prior_child_deferral",
+        "result": "1 failed,1 passed in8.55s",
+        "evidence": [
+          "baseline-changed-report.json",
+          "baseline-unchanged-report.json"
+        ],
+        "scope": "Actual owned child reports activity deferral after test_a; parent changes actual runtime source only at final basis check. No sleeps or looser expected status."
+      },
+      "additional_proofs": [
+        {
+          "log": "restored-child-before.log",
+          "result": "1 failed in2.97s",
+          "scope": "Known child invalidation with restored parent basis previously remained deferred."
+        },
+        {
+          "log": "restored-child-complete-before.log",
+          "result": "1 failed,1 passed in6.07s",
+          "scope": "Classification-specific test seals explicit child invalidation after asserting real temporary basis change and restoration; completed tests previously yielded a false pass. This does not claim to test the child detection implementation itself."
+        }
+      ],
+      "final_validation": {
+        "exit_code": 0,
+        "seconds": 98.96781830000691,
+        "command": [
+          "C:\\Users\\tahoe\\Documents\\Codex\\2026-10-31\\can\\outputs\\Hermes-Agent\\Toolbox\\python\\Scripts\\python.exe",
+          "-B",
+          "-m",
+          "pytest",
+          "Validation/test_self_diagnostics.py",
+          "-q",
+          "-rs",
+          "-p",
+          "no:cacheprovider"
+        ]
+      },
+      "final_result": "72 passed,1 skipped(POSIX file locking),2 subtests passed in98.48s",
+      "behavior": "Exact source_runtime_changed invalidation forces interrupted with incomplete/bindingfalse evidence; retains stale pause metadata and existing prior failure count. Unchanged-source genuine activity remains deferred. Original pause/source-change expectation untouched.",
+      "limits": [
+        "No production activity queries, pause/stop controls, source coherence calculation or failure counter policy changed.",
+        "No installer execution, package edits, installed/source integration mutation, actual account/device/model/process controls or protected Original fixture edits.",
+        "Default pytest TEMP retention eventually removed the old failing test fixture JSON; initial raw package failure log and earlier independent baseline report snapshots are preserved."
+      ]
+    },
+    "donation_restart_link": {
+      "commit": "392293340fafe1cf84f69340fb4b39e3d338c991",
+      "base": "b929c47f71c3ac6f17a1e82538383fdcbe9b0c94",
+      "checkout": "C:\\Users\\tahoe\\Documents\\Codex\\2026-10-31\\can\\outputs\\review-public404-restart-isolated",
+      "patch": "public404-restart-hydration.patch",
+      "patch_sha256": "19a1cc50d3a5f85a53ddf127dab287f17e87be7f77d3edd724c43a1538dccef3",
+      "hashes": {
+        "donation.py": "a9869c5739ca69e9ef17714d7e27b9ac27597bd7344325f95d56cfa184f8ea45",
+        "Validation/test_donation.py": "ff984f6598b06c536a478721d366f59a43327f3e69a2b9a7c2e8cdaa615b09bd"
+      },
+      "qualification": {
+        "final_full": "368 passed101.80s",
+        "final_focused": "21 passed347deselected26.04s",
+        "original_restart_red": "1failed364deselected1.44s; canonical link absent after new Service despite unchanged outbox/run data",
+        "cache_races_red": "2failed366deselected2.10s; fresh404 erased/staleURL resurrected after submitted onempty cache",
+        "earlier_full_results": [
+          "365passed78.14s before shared-lane filter correction",
+          "366passed80.44s before CAS",
+          "366passed106.14s before CAS with portable regression tests"
+        ]
+      },
+      "behavior": "Existing-only read-only background hydration of up to16 confirmed outbox rows, ordered checkedDESC/runDESC. URL bound to current explicit account/resource consent and matching run/payload job metadata. Shared revision CAS prevents stale hydration overwriting fresh404/submitted outcomes. Cache only status_message unchanged. Public delivery remains unconfirmed, no submitted credit.",
+      "controls": [
+        "Restart/cooldown preserves canonical link with one fake model call/PR, same ledger rows and no new remote calls.",
+        "Malformed, nonobject,BLOB,ASCII/unicode-byte-oversized,unsafe URL state rejected.",
+        "Wrong job/resource/account, changed/withdrawn consent and disabled source rejected.",
+        "Newest deterministic tie and16-row cap; missingDB creates no state.",
+        "No I/O permitted in status_message; child resource lane cannot erase another allowed pending source.",
+        "Fresh404/submitted-empty-cache races reproduced RED and corrected.",
+        "Existing347test prefix LF-byte identical. Publication policy-hash compatibility test remainsgreen."
+      ],
+      "limits": [
+        "Current saved explicit account consent binds display-only public link; no GitHub account query during cooldown and no claim of current remote account verification.",
+        "Shared revision coordinates one Service shared-memory lane group, not atomic freshness across independent processes.",
+        "100ms SQLite VM deadline cannot preempt native SQLite built-ins or filesystem I/O.",
+        "This fixes proven local missing-link observability; other-PC actual cause remains unknown."
+      ],
+      "preservation": [
+        "No root integration/private/installed/original benchmark edits.",
+        "No real GitHub writes, account actions, services, device/model or process controls.",
+        "Only own clone runtime+existing test modified; no new runtime file/manifest entry."
+      ],
+      "evidence": [
+        "public404-restart-red-proof.json",
+        "public404-restart-green-proof.json",
+        "public404-hydration-original-red.log",
+        "public404-hydration-cache-races-red.log",
+        "public404-hydration-final-focused.log",
+        "public404-hydration-cas-full-final.log"
+      ]
+    }
+  },
+  "prior_installed536_suite": {
+    "status": "passed",
+    "scope": "Actual installed536 suite only; not a full537 result or end-to-end task benchmark.",
+    "console": "3887passed31skipped447subtests",
+    "all_finalized_nodes": 3916
   }
 }

@@ -1299,6 +1299,50 @@ def claim_publication(root, consent, login, resource=None):
     return None
 
 
+def pending_publication_url(root, consent):
+    """Restore one unconfirmed link in a background worker, never upload authority.
+
+    Use current explicit account consent rather than an extra GitHub request
+    during cooldown. Read at most 16 bounded states from the existing ledger;
+    malformed, unavailable or changed consent leaves the diagnostic unknown.
+    """
+    login = consent.get("github_account", "")
+    if not consent.get("enabled") or not isinstance(login, str) or not re.fullmatch(r"[A-Za-z0-9-]{1,39}", login):
+        return ""
+    permitted = permitted_sources(consent, root)
+    path = Path(root) / "LongTasks/donations.db"
+    try:
+        deadline = time.monotonic() + .1
+        with closing(sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True, timeout=0)) as conn:
+            conn.set_progress_handler(lambda: int(time.monotonic() >= deadline), 1000)
+            rows = conn.execute("""SELECT o.run,o.resource,o.account,substr(o.state,1,8193),
+                length(CAST(o.state AS BLOB)),r.job,r.resource,
+                CASE WHEN length(CAST(o.payload AS BLOB))<=? AND json_valid(o.payload)
+                     THEN json_extract(o.payload,'$.job.id') END
+                FROM publication_outbox o JOIN runs r ON r.id=o.run
+                WHERE o.phase='confirmed' AND r.status!='submitted'
+                ORDER BY o.checked DESC,o.run DESC LIMIT 16""", (_OUTBOX_BYTES,))
+            for run_id, source, account, raw, size, job, run_source, payload_job in rows:
+                if (source not in permitted
+                        or run_source != source or account != _publication_account(consent, login, source)
+                        or not isinstance(run_id, str) or not re.fullmatch(r"[a-f0-9]{32}", run_id)
+                        or not isinstance(job, str) or not re.fullmatch(r"[a-z0-9-]{1,60}", job)
+                        or payload_job != job or not isinstance(raw, str) or not 0 < size <= 8192):
+                    continue
+                try:
+                    state = json.loads(raw)
+                except (ValueError, RecursionError):
+                    continue
+                if not isinstance(state, dict) or not valid_proposal_url(state.get("url")):
+                    continue
+                if settings(root) != consent:
+                    return ""
+                return state["url"]
+    except (OSError, sqlite3.Error, ValueError, TypeError):
+        pass
+    return ""
+
+
 class DurablePublication:
     """Original-run upload journal. Leases are never stolen from a live thread.
 
@@ -1863,8 +1907,11 @@ class Service:
             if failure.stage == "proposal-public" and valid_proposal_url(pr_url):
                 event["pending_pr_url"] = pr_url
         with self._events["lock"]:
-            if phase == "submitted" and self._events.get("pending_proposal_url") == pr_url:
-                self._events.pop("pending_proposal_url", None)
+            if phase == "submitted":
+                # Invalidate stale reads even when the cache was already empty.
+                self._events["pending_proposal_revision"] = self._events.get("pending_proposal_revision", 0) + 1
+                if self._events.get("pending_proposal_url") == pr_url:
+                    self._events.pop("pending_proposal_url", None)
             queue = self._events["queue"]
             if len(queue) >= 256:
                 discard = next((index for index, old in enumerate(queue) if old["phase"] != "submitted"), None)
@@ -1991,6 +2038,14 @@ class Service:
                 return
             public_wait = resource_cooldown(self.root, "public_visibility")
             if public_wait:
+                with self._events["lock"]:
+                    revision = self._events.get("pending_proposal_revision", 0)
+                pending_url = pending_publication_url(self.root, settings(self.root))
+                check_cancel()
+                with self._events["lock"]:
+                    if self._events.get("pending_proposal_revision", 0) == revision:
+                        self._events["pending_proposal_url"] = pending_url
+                        self._events["pending_proposal_revision"] = revision + 1
                 self.next_attempt = time.monotonic() + public_wait
                 self.message = "Public GitHub delivery is not confirmed · saved work kept; retrying automatically."
                 return
@@ -2260,6 +2315,7 @@ class Service:
             saved_url = publication.state.get("url", "") if publication is not None else ""
             with self._events["lock"]:
                 self._events["pending_proposal_url"] = saved_url if valid_proposal_url(saved_url) else ""
+                self._events["pending_proposal_revision"] = self._events.get("pending_proposal_revision", 0) + 1
             self._emit_event("waiting", run_id, resource, pr_url=saved_url, github_failure={
                 "stage": "proposal-public", "status": error.status, "kind": error.kind})
         except PublicationPending as error:

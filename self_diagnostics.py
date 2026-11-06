@@ -816,6 +816,14 @@ def run(root: Path = ROOT, state: Path = STATE) -> dict:
                 progress["complete"] = False
                 progress["binding_unchanged"] = False
                 progress["invalidated"] = "source_runtime_changed"
+        if progress.get("invalidated") == "source_runtime_changed":
+            # Neither a fresh parent mismatch nor a sealed child invalidation
+            # can be resumed as the same check, even if source was restored.
+            # Keep the pause evidence; existing interruption rules retain counts.
+            passed = False
+            progress["complete"] = False
+            progress["binding_unchanged"] = False
+            deferred = False
         previous = _read(state / "self-check.json")
         log.write_text(output, encoding="utf-8")
         if deferred:
