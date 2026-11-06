@@ -1,0 +1,1048 @@
+{
+  "release": "0.5.538",
+  "source_before_release_docs": "955bca3799852abffaa62d8329265c3231c8489b",
+  "cutoff": 826,
+  "sha256": {
+    "Validation/test_chat_assistant.py": "8f5613f5e58e79b4909a02b076ef6f54ecf5ffc5807485eb306476a741329839",
+    "Validation/test_core_tool_health.py": "74d3e2302b9bd7b275b1176c797d0f012c70091b79cffbdb795d54a9adb5ccc5",
+    "Validation/test_feedback_learning.py": "b58e2f18f9a326c6e3a118703f5b60b0545e5fc17e40f8b75c009ac01cb326b7",
+    "Validation/test_ffmpeg_runtime.py": "b42a2858853f17637066c0de47e4d8366bfe42f3194c19ac4c1007a12744b2b8",
+    "Validation/test_model_fitness.py": "5d9980f3e63bec558f20422140dfce82af9948cc80d031685df813406617aef4",
+    "Validation/test_music_analysis.py": "06e444e1423c90bd4a8d387d682e32eae483253b4a5925175062f720c762611f",
+    "Validation/test_music_lyrics.py": "9328f069a2b93ea91a12f944e980b14d8ccdd7dec63e70755bfe51b23b1a712b",
+    "Validation/test_music_stems.py": "ea64fc8b945a6fa22317ce536c3e58a00112d7f8bd1d5d25cc1a9071e2e58c48",
+    "Validation/test_music_style.py": "2722b5c1d4f9c85229afffca23fffeaae2955b3389dc4e1063f45836428f8d99",
+    "Validation/test_project_documents.py": "f0560877cf6a889b6d126edbe93774f68bfd87536cb7ace10bd12e91fa120352",
+    "Validation/test_quick_image.py": "69274bbe1897527c1ef02181f42306c09bc0d5c78bb2ff73115ba9b83139ad87",
+    "Validation/test_site_crawler.py": "05c1ca607f96d2111af0c6ced4cd214d174e81a39652ebb820da793cc5c4a31c",
+    "Validation/test_table_ml.py": "66abcccea6982de4d5eff78800b4e4dd80d45ba50863c13732ae2695110cc390",
+    "Validation/test_toolbox_mcp.py": "c0210fcbbed2389eea103db8032c0b70945ae9f6ec30191a024c8162586885d7",
+    "Validation/test_voice_assistant.py": "0904089fe8942b0f1cf32c740641bea10bca38e7d281773b627abf886fe641a1",
+    "chat_assistant.py": "a3abd9d5de8a5e26305890511586fb3d3263a5476be2b24af2b6d921765ceb6a",
+    "core_tool_health.py": "f643d44cbf8918c33def7c244766ea12245780d7b5b7954c6c87ec79301a3575",
+    "feedback_learning.py": "e0db56955e7a1b3d3b5f84100f5a83f31542e226b5f8321a1e770651a234ddc0",
+    "ffmpeg_runtime.py": "08b8acdc5fbd08b4276b7078f81473052db3256b9d1db19c994d9c955118fb54",
+    "model_fitness.py": "117a3b2ab5ef72ff8ec2593a313ea04d5569ec2777a24ccdc4df1bb4b81f4abf",
+    "music_analysis.py": "997e380f00c80df33662c7b7f6b7a676bb3cf85886e5b14c198a09b35afdb08c",
+    "music_lyrics.py": "8e31298fcd1ec9d9e9782b245a7c2265747ad80f0be27d925e948b5858353aa8",
+    "music_stems.py": "79730f357db93fbc1edc4273edf0e23667faffed4e4e113d6112019171a0af0f",
+    "music_style.py": "8ced8f6e8e9e0dd2e475975162412086a6fe08616e5e5dcf821c4a8c537a35de",
+    "project_documents.py": "31f14e6b65fb1888934bdcb24003988596a91f812202cc986bb917a06f6fb544",
+    "quick_image.py": "d306b82ebf70f07213d5c52712278d72382f688c8eac926e72728d38b23934df",
+    "site_crawler.py": "a3bc735ffd463e9b75b131a90ec29f686822a9152700e06f15d1a1f8f06ea51e",
+    "table_ml.py": "5e4f45e390d1143c4141555c72043b39b87151122fa91389cbdc1f815d29a0bc",
+    "toolbox_mcp.py": "7f0a4fa222675b362e3dd310098dc7b9c29dbb8fcd35a1b1a9da7d9d1d191f8f",
+    "voice_assistant.py": "fcbd895b7485f4adb03e5d5bf90a64d973fd1bc5dc1f7a477ef1d13cfa127bc6"
+  },
+  "validation": {
+    "affected_modules": {
+      "exit_code": 0,
+      "seconds": 26.035545300052036,
+      "sha256": {
+        "Validation/test_chat_assistant.py": "8f5613f5e58e79b4909a02b076ef6f54ecf5ffc5807485eb306476a741329839",
+        "Validation/test_core_tool_health.py": "74d3e2302b9bd7b275b1176c797d0f012c70091b79cffbdb795d54a9adb5ccc5",
+        "Validation/test_feedback_learning.py": "b58e2f18f9a326c6e3a118703f5b60b0545e5fc17e40f8b75c009ac01cb326b7",
+        "Validation/test_ffmpeg_runtime.py": "b42a2858853f17637066c0de47e4d8366bfe42f3194c19ac4c1007a12744b2b8",
+        "Validation/test_model_fitness.py": "5d9980f3e63bec558f20422140dfce82af9948cc80d031685df813406617aef4",
+        "Validation/test_music_analysis.py": "06e444e1423c90bd4a8d387d682e32eae483253b4a5925175062f720c762611f",
+        "Validation/test_music_lyrics.py": "9328f069a2b93ea91a12f944e980b14d8ccdd7dec63e70755bfe51b23b1a712b",
+        "Validation/test_music_stems.py": "ea64fc8b945a6fa22317ce536c3e58a00112d7f8bd1d5d25cc1a9071e2e58c48",
+        "Validation/test_music_style.py": "2722b5c1d4f9c85229afffca23fffeaae2955b3389dc4e1063f45836428f8d99",
+        "Validation/test_project_documents.py": "f0560877cf6a889b6d126edbe93774f68bfd87536cb7ace10bd12e91fa120352",
+        "Validation/test_quick_image.py": "69274bbe1897527c1ef02181f42306c09bc0d5c78bb2ff73115ba9b83139ad87",
+        "Validation/test_site_crawler.py": "05c1ca607f96d2111af0c6ced4cd214d174e81a39652ebb820da793cc5c4a31c",
+        "Validation/test_table_ml.py": "66abcccea6982de4d5eff78800b4e4dd80d45ba50863c13732ae2695110cc390",
+        "Validation/test_toolbox_mcp.py": "c0210fcbbed2389eea103db8032c0b70945ae9f6ec30191a024c8162586885d7",
+        "Validation/test_voice_assistant.py": "0904089fe8942b0f1cf32c740641bea10bca38e7d281773b627abf886fe641a1",
+        "chat_assistant.py": "a3abd9d5de8a5e26305890511586fb3d3263a5476be2b24af2b6d921765ceb6a",
+        "core_tool_health.py": "f643d44cbf8918c33def7c244766ea12245780d7b5b7954c6c87ec79301a3575",
+        "feedback_learning.py": "e0db56955e7a1b3d3b5f84100f5a83f31542e226b5f8321a1e770651a234ddc0",
+        "ffmpeg_runtime.py": "08b8acdc5fbd08b4276b7078f81473052db3256b9d1db19c994d9c955118fb54",
+        "model_fitness.py": "117a3b2ab5ef72ff8ec2593a313ea04d5569ec2777a24ccdc4df1bb4b81f4abf",
+        "music_analysis.py": "997e380f00c80df33662c7b7f6b7a676bb3cf85886e5b14c198a09b35afdb08c",
+        "music_lyrics.py": "8e31298fcd1ec9d9e9782b245a7c2265747ad80f0be27d925e948b5858353aa8",
+        "music_stems.py": "79730f357db93fbc1edc4273edf0e23667faffed4e4e113d6112019171a0af0f",
+        "music_style.py": "8ced8f6e8e9e0dd2e475975162412086a6fe08616e5e5dcf821c4a8c537a35de",
+        "project_documents.py": "31f14e6b65fb1888934bdcb24003988596a91f812202cc986bb917a06f6fb544",
+        "quick_image.py": "d306b82ebf70f07213d5c52712278d72382f688c8eac926e72728d38b23934df",
+        "site_crawler.py": "a3bc735ffd463e9b75b131a90ec29f686822a9152700e06f15d1a1f8f06ea51e",
+        "table_ml.py": "5e4f45e390d1143c4141555c72043b39b87151122fa91389cbdc1f815d29a0bc",
+        "toolbox_mcp.py": "7f0a4fa222675b362e3dd310098dc7b9c29dbb8fcd35a1b1a9da7d9d1d191f8f",
+        "voice_assistant.py": "fcbd895b7485f4adb03e5d5bf90a64d973fd1bc5dc1f7a477ef1d13cfa127bc6"
+      },
+      "source_bytes_unchanged": true,
+      "modules": [
+        "Validation/test_chat_assistant.py",
+        "Validation/test_core_tool_health.py",
+        "Validation/test_feedback_learning.py",
+        "Validation/test_ffmpeg_runtime.py",
+        "Validation/test_model_fitness.py",
+        "Validation/test_music_analysis.py",
+        "Validation/test_music_lyrics.py",
+        "Validation/test_music_stems.py",
+        "Validation/test_music_style.py",
+        "Validation/test_project_documents.py",
+        "Validation/test_quick_image.py",
+        "Validation/test_site_crawler.py",
+        "Validation/test_table_ml.py",
+        "Validation/test_toolbox_mcp.py",
+        "Validation/test_voice_assistant.py"
+      ],
+      "log_tail": "........................................................................ [ 11%]\n........................................................................ [ 23%]\n.............................s.......................................... [ 35%]\n........................................................................ [ 47%]\n.......................s................................................ [ 59%]\n........................................................................ [ 71%]\n............................................................ [ 81%]\n.................................................s...................... [ 93%]\n.....................................            [100%]\n=========================== short test summary info ===========================\nSKIPPED [1] Validation\\test_model_fitness.py:104: This JSON decoder accepts the bounded nested marker\nSKIPPED [1] Validation\\test_music_stems.py:428: Symbolic links are unavailable\nSKIPPED [1] Validation\\test_toolbox_mcp.py:1620: Symlinks unavailable: [WinError 1314] A required privilege is not held by the client: 'C:\\\\Users\\\\tahoe\\\\AppData\\\\Local\\\\Temp\\\\pytest-of-tahoe\\\\pytest-3190\\\\test_game_libraries_reject_red0\\\\outside' -> 'C:\\\\Users\\\\tahoe\\\\AppData\\\\Local\\\\Temp\\\\pytest-of-tahoe\\\\pytest-3190\\\\test_game_libraries_reject_red0\\\\registered-project\\\\vendor'\n598 passed, 3 skipped, 36 subtests passed in 24.75s\n",
+      "limits": [
+        "Fifteen candidate modules only; not an installed full-suite or end-to-end media quality check.",
+        "Platform skips are explicit; mocked controls do not establish end-to-end media generation or hardlink support on every filesystem."
+      ]
+    }
+  },
+  "merged": [
+    {
+      "headRefOid": "0b128c36a12bd2e97fb8af3c9b106729c91eb147",
+      "isDraft": false,
+      "mergeCommit": {
+        "oid": "fd880629d22f107aea2a2034631d77c91d2082b8"
+      },
+      "mergedAt": "2026-11-06T02:34:35Z",
+      "number": 812,
+      "state": "MERGED",
+      "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/812"
+    },
+    {
+      "headRefOid": "74f295274e7a3f7b8de6f17edadb9d8dddfc4736",
+      "isDraft": false,
+      "mergeCommit": {
+        "oid": "5263018c1968b48952b5f08f260f789edfb319c5"
+      },
+      "mergedAt": "2026-11-06T02:34:41Z",
+      "number": 813,
+      "state": "MERGED",
+      "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/813"
+    },
+    {
+      "headRefOid": "030825d7012f86e997a88a9d46133fb7e472a6f0",
+      "isDraft": false,
+      "mergeCommit": {
+        "oid": "73841eb23c1ea177a22c2639aedf9097d34bbe34"
+      },
+      "mergedAt": "2026-11-06T02:34:47Z",
+      "number": 814,
+      "state": "MERGED",
+      "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/814"
+    },
+    {
+      "headRefOid": "cc9e7d3e78b13e8c74432f00af66acfac8c3f597",
+      "isDraft": false,
+      "mergeCommit": {
+        "oid": "4bceaf271e0a138e396e242288d2872a612ed01c"
+      },
+      "mergedAt": "2026-11-06T02:34:52Z",
+      "number": 815,
+      "state": "MERGED",
+      "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/815"
+    },
+    {
+      "headRefOid": "d22a765b67949980e3012c9e4958ed78f87a5484",
+      "isDraft": false,
+      "mergeCommit": {
+        "oid": "9be7bc8f7eac7759102cd15a304c122daa0269a4"
+      },
+      "mergedAt": "2026-11-06T02:34:58Z",
+      "number": 816,
+      "state": "MERGED",
+      "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/816"
+    },
+    {
+      "headRefOid": "0b267fb82fd450bd56ccea3ea6eada4cdb9df20b",
+      "isDraft": false,
+      "mergeCommit": {
+        "oid": "3832e5283e6d868b1997fd08f5aeceafc3fb8f07"
+      },
+      "mergedAt": "2026-11-06T02:35:04Z",
+      "number": 817,
+      "state": "MERGED",
+      "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/817"
+    },
+    {
+      "headRefOid": "ad5f45348c5ad94e36cac18f672b9d17acedbb17",
+      "isDraft": false,
+      "mergeCommit": {
+        "oid": "4bcda73e2b07b2f03cb104137979d6ad243d7d36"
+      },
+      "mergedAt": "2026-11-06T02:35:09Z",
+      "number": 818,
+      "state": "MERGED",
+      "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/818"
+    },
+    {
+      "headRefOid": "ccb12f7643d345a0c59153fee3983597a5b885ed",
+      "isDraft": false,
+      "mergeCommit": {
+        "oid": "d8a9c377b0032b80e1b9cc9f2510a848950a6e1d"
+      },
+      "mergedAt": "2026-11-06T02:35:15Z",
+      "number": 819,
+      "state": "MERGED",
+      "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/819"
+    },
+    {
+      "headRefOid": "b54024fd809a0c495f17d4dd0b1e2a252cb3a05b",
+      "isDraft": false,
+      "mergeCommit": {
+        "oid": "2313d138e6c27e12c7307dd885b89fec620f3086"
+      },
+      "mergedAt": "2026-11-06T02:35:20Z",
+      "number": 820,
+      "state": "MERGED",
+      "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/820"
+    },
+    {
+      "headRefOid": "f80bbbc1851467c0453fcad8b900b5146f4bd9ca",
+      "isDraft": false,
+      "mergeCommit": {
+        "oid": "d7af9eb9798ec2fc001fa4f331079ed6031731c2"
+      },
+      "mergedAt": "2026-11-06T02:35:28Z",
+      "number": 821,
+      "state": "MERGED",
+      "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/821"
+    },
+    {
+      "headRefOid": "9ef85e0701b36b69145d81d5e1384947e29d79e7",
+      "isDraft": false,
+      "mergeCommit": {
+        "oid": "4ac6097b33ba9842d0453007029603814d8f77a4"
+      },
+      "mergedAt": "2026-11-06T02:35:33Z",
+      "number": 822,
+      "state": "MERGED",
+      "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/822"
+    },
+    {
+      "headRefOid": "d2461c2b5c4965088be3b60f0ffa8131b0fddfa5",
+      "isDraft": false,
+      "mergeCommit": {
+        "oid": "09b3c9c1f207a38a646d2c6daea8e7939ac2ae93"
+      },
+      "mergedAt": "2026-11-06T02:35:38Z",
+      "number": 823,
+      "state": "MERGED",
+      "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/823"
+    },
+    {
+      "headRefOid": "ed6f863bcad20f78baf62126c2b62bf32e07beac",
+      "isDraft": false,
+      "mergeCommit": {
+        "oid": "68dd03aa7e2657d7fb09a9d474ad871a627c4bc9"
+      },
+      "mergedAt": "2026-11-06T02:35:42Z",
+      "number": 824,
+      "state": "MERGED",
+      "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/824"
+    },
+    {
+      "headRefOid": "315ce95df3869e9cbb67ae28fc1aacda0c80f11e",
+      "isDraft": false,
+      "mergeCommit": {
+        "oid": "916c75fb166c2c2cf68b7fa7dfebfa1c59e4c55e"
+      },
+      "mergedAt": "2026-11-06T02:35:48Z",
+      "number": 825,
+      "state": "MERGED",
+      "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/825"
+    },
+    {
+      "headRefOid": "19cdde13cb6940f44fc1151f4a4e979eb643f30d",
+      "isDraft": false,
+      "mergeCommit": {
+        "oid": "955bca3799852abffaa62d8329265c3231c8489b"
+      },
+      "mergedAt": "2026-11-06T02:35:53Z",
+      "number": 826,
+      "state": "MERGED",
+      "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/826"
+    }
+  ],
+  "independent_reviews": {
+    "812-819": {
+      "schema": "donation-pr812819-review-v1",
+      "recorded_utc": "2026-11-06T02:29:48.718712+00:00",
+      "base": "210d9cc043695c31219dbeb48ccf424636bf4032",
+      "checkout": "C:\\Users\\tahoe\\Documents\\Codex\\2026-10-31\\can\\outputs\\review-pr812819-537",
+      "cutoff": 819,
+      "parent_batch_cutoff": 826,
+      "results": [
+        {
+          "number": 812,
+          "head": "0b128c36a12bd2e97fb8af3c9b106729c91eb147",
+          "module": "music_analysis",
+          "head_tests": {
+            "exit": 0,
+            "seconds": 2.086,
+            "log": "C:\\Users\\tahoe\\Documents\\Codex\\2026-10-31\\can\\outputs\\open-pr-review-20261106\\pr812819-evidence\\812-head-module.txt",
+            "pytest_summary": "13 passed in 1.19s"
+          },
+          "baseline_tests": {
+            "exit": 1,
+            "seconds": 2.858,
+            "log": "C:\\Users\\tahoe\\Documents\\Codex\\2026-10-31\\can\\outputs\\open-pr-review-20261106\\pr812819-evidence\\812-baseline.txt",
+            "pytest_summary": "1 failed, 12 deselected in 0.39s"
+          },
+          "disposition": "accept",
+          "reason": "Numerically indistinguishable normalized triad scores now decline instead of allowing floating summation order to choose a chord. Conservative1e-12 tolerance retains existing clear-triad controls.",
+          "parent_commit": "c79ad6b9b5c5af3577046bac88772744c57c1322",
+          "files": {
+            "music_analysis.py": {
+              "sha256": "5913217c11d5ce76e03bf6bf1724e85838921b0f6db71793fc6f9d08574874f9",
+              "bytes": 5622
+            },
+            "Validation/test_music_analysis.py": {
+              "sha256": "6352654fd466e5de2d007577d1f1dc8efcf360bd3f946289542cddaf0e9d3b6d",
+              "bytes": 10375
+            }
+          }
+        },
+        {
+          "number": 813,
+          "head": "74f295274e7a3f7b8de6f17edadb9d8dddfc4736",
+          "module": "quick_image",
+          "head_tests": {
+            "exit": 0,
+            "seconds": 1.762,
+            "log": "C:\\Users\\tahoe\\Documents\\Codex\\2026-10-31\\can\\outputs\\open-pr-review-20261106\\pr812819-evidence\\813-head-module.txt",
+            "pytest_summary": "19 passed in 1.00s"
+          },
+          "baseline_tests": {
+            "exit": 1,
+            "seconds": 1.289,
+            "log": "C:\\Users\\tahoe\\Documents\\Codex\\2026-10-31\\can\\outputs\\open-pr-review-20261106\\pr812819-evidence\\813-baseline.txt",
+            "pytest_summary": "1 failed, 18 deselected in 0.43s"
+          },
+          "disposition": "accept",
+          "reason": "Malformed HTTP is transport failure in optional prompt clarification; HTTPException includes prior IncompleteRead and returns original prompt, without claiming image success.",
+          "parent_commit": "c79ad6b9b5c5af3577046bac88772744c57c1322",
+          "files": {
+            "quick_image.py": {
+              "sha256": "dcf9c0e46e70024e5ab5f1b63e35aaf955d6e1cdbc130192a1251a68d0a30c69",
+              "bytes": 12797
+            },
+            "Validation/test_quick_image.py": {
+              "sha256": "f17ffe0803a59562a057efdae6842681d8e6750562a0e49ab9f0da4ea891b8ec",
+              "bytes": 19531
+            }
+          }
+        },
+        {
+          "number": 814,
+          "head": "030825d7012f86e997a88a9d46133fb7e472a6f0",
+          "module": "site_crawler",
+          "head_tests": {
+            "exit": 0,
+            "seconds": 2.554,
+            "log": "C:\\Users\\tahoe\\Documents\\Codex\\2026-10-31\\can\\outputs\\open-pr-review-20261106\\pr812819-evidence\\814-head-module.txt",
+            "pytest_summary": "32 passed in 1.57s"
+          },
+          "baseline_tests": {
+            "exit": 1,
+            "seconds": 2.311,
+            "log": "C:\\Users\\tahoe\\Documents\\Codex\\2026-10-31\\can\\outputs\\open-pr-review-20261106\\pr812819-evidence\\814-baseline.txt",
+            "pytest_summary": "3 failed, 29 deselected in 1.37s"
+          },
+          "disposition": "accept",
+          "reason": "Empty/whitespace/missing href must not resolve to redirected base URL and consume finite crawl budget; valid child remains crawled/indexed.",
+          "parent_commit": "c79ad6b9b5c5af3577046bac88772744c57c1322",
+          "files": {
+            "site_crawler.py": {
+              "sha256": "5b1b8098c2e15d2781ff488865323a570ec863eadc0b9ee8307d0126e798650d",
+              "bytes": 5024
+            },
+            "Validation/test_site_crawler.py": {
+              "sha256": "8e9afca7821d5fbfef1ba43ddac52334f0548650d9408bab19223d8861472a75",
+              "bytes": 16327
+            }
+          }
+        },
+        {
+          "number": 815,
+          "head": "cc9e7d3e78b13e8c74432f00af66acfac8c3f597",
+          "module": "music_stems",
+          "head_tests": {
+            "exit": 0,
+            "seconds": 2.335,
+            "log": "C:\\Users\\tahoe\\Documents\\Codex\\2026-10-31\\can\\outputs\\open-pr-review-20261106\\pr812819-evidence\\815-head-module.txt",
+            "pytest_summary": "28 passed, 1 skipped in 1.44s"
+          },
+          "baseline_tests": {
+            "exit": 1,
+            "seconds": 2.771,
+            "log": "C:\\Users\\tahoe\\Documents\\Codex\\2026-10-31\\can\\outputs\\open-pr-review-20261106\\pr812819-evidence\\815-baseline.txt",
+            "pytest_summary": "2 failed, 4 passed, 23 deselected in 0.79s"
+          },
+          "disposition": "accept",
+          "reason": "EPERM can mean hardlink publication unavailable; use existing exclusive/unbuffered verified-copy fallback, preserving interruption rollback and source/output ownership.",
+          "parent_commit": "c79ad6b9b5c5af3577046bac88772744c57c1322",
+          "files": {
+            "music_stems.py": {
+              "sha256": "13f4223fd7bc2abb6d0d2d9e73ab7313e25b160f590e86886debccd20c584ae1",
+              "bytes": 10540
+            },
+            "Validation/test_music_stems.py": {
+              "sha256": "4590aa8e69bd568340d1c62b4f33192e68548f7fe9eb98d3cb89b14395ebeae6",
+              "bytes": 28875
+            }
+          },
+          "test_efficacy_note": "Baseline2fail are EPERM success/interrupted cases;4existingENOTSUP/EXDEV controls pass. Existing symlink test skips because creation unavailable."
+        },
+        {
+          "number": 816,
+          "head": "d22a765b67949980e3012c9e4958ed78f87a5484",
+          "module": "project_documents",
+          "head_tests": {
+            "exit": 0,
+            "seconds": 4.066,
+            "log": "C:\\Users\\tahoe\\Documents\\Codex\\2026-10-31\\can\\outputs\\open-pr-review-20261106\\pr812819-evidence\\816-head-module.txt",
+            "pytest_summary": "18 passed in 3.12s"
+          },
+          "baseline_tests": {
+            "exit": 1,
+            "seconds": 1.407,
+            "log": "C:\\Users\\tahoe\\Documents\\Codex\\2026-10-31\\can\\outputs\\open-pr-review-20261106\\pr812819-evidence\\816-baseline.txt",
+            "pytest_summary": "1 failed, 17 deselected in 0.60s"
+          },
+          "disposition": "accept",
+          "reason": "Disposable cache may disappear between is_file/open; recover from OSError with authoritative source snapshot extraction and fresh cache instead of crashing.",
+          "parent_commit": "c79ad6b9b5c5af3577046bac88772744c57c1322",
+          "files": {
+            "project_documents.py": {
+              "sha256": "b49b83b0308dc967378bce07de4348c40cce253307201610da5e748cfd8f3f2f",
+              "bytes": 7650
+            },
+            "Validation/test_project_documents.py": {
+              "sha256": "5859f9188338ff2d6e2f3f488b5b1d9e80de672256c88fbbcfd4eec341ecde71",
+              "bytes": 24339
+            }
+          }
+        },
+        {
+          "number": 817,
+          "head": "0b267fb82fd450bd56ccea3ea6eada4cdb9df20b",
+          "module": "model_fitness",
+          "head_tests": {
+            "exit": 0,
+            "seconds": 3.466,
+            "log": "C:\\Users\\tahoe\\Documents\\Codex\\2026-10-31\\can\\outputs\\open-pr-review-20261106\\pr812819-evidence\\817-head-module.txt",
+            "pytest_summary": "31 passed, 1 skipped in 2.66s"
+          },
+          "baseline_tests": {
+            "exit": 1,
+            "seconds": 1.193,
+            "log": "C:\\Users\\tahoe\\Documents\\Codex\\2026-10-31\\can\\outputs\\open-pr-review-20261106\\pr812819-evidence\\817-baseline.txt",
+            "pytest_summary": "1 failed, 31 deselected in 0.42s"
+          },
+          "disposition": "accept",
+          "reason": "Malformed huge integer timestamps must fail cache eligibility rather than overflow routing. Both rank and freshness-check callers now recover, and valid evidence can be used afterward.",
+          "parent_commit": "c79ad6b9b5c5af3577046bac88772744c57c1322",
+          "files": {
+            "model_fitness.py": {
+              "sha256": "6acd2b4a547e1c53652dfc850149e8ac7a38ab411fef2bb51f02defe6855bea0",
+              "bytes": 21614
+            },
+            "Validation/test_model_fitness.py": {
+              "sha256": "1696484273b45b13f1cbb83e98547375994e7e05b3722d939171ee2fc47ced20",
+              "bytes": 31949
+            }
+          },
+          "supplementary_independent_proof": "C:\\Users\\tahoe\\Documents\\Codex\\2026-10-31\\can\\outputs\\open-pr-review-20261106\\pr812819-evidence\\817-both-callers-proof.json",
+          "test_efficacy_note": "Supplied baseline stops at first rank overflow; supplementary proof independently exercises both rank and game_probe_current errors. Existing bounded-nestedJSON compatibility test explicitly skips on3.13 decoder."
+        },
+        {
+          "number": 818,
+          "head": "ad5f45348c5ad94e36cac18f672b9d17acedbb17",
+          "module": "core_tool_health",
+          "head_tests": {
+            "exit": 0,
+            "seconds": 1.56,
+            "log": "C:\\Users\\tahoe\\Documents\\Codex\\2026-10-31\\can\\outputs\\open-pr-review-20261106\\pr812819-evidence\\818-head-module.txt",
+            "pytest_summary": "22 passed in 0.75s"
+          },
+          "baseline_tests": {
+            "exit": 1,
+            "seconds": 2.158,
+            "log": "C:\\Users\\tahoe\\Documents\\Codex\\2026-10-31\\can\\outputs\\open-pr-review-20261106\\pr812819-evidence\\818-baseline.txt",
+            "pytest_summary": "1 failed, 21 deselected in 1.40s"
+          },
+          "disposition": "accept",
+          "reason": "Isolated Python SDK probes cannot be satisfied by unrelated current-directory/PYTHONPATH packages; managed environment site packages remain supported. Test runs genuine tiny local Python import-only subprocesses.",
+          "parent_commit": "c79ad6b9b5c5af3577046bac88772744c57c1322",
+          "files": {
+            "core_tool_health.py": {
+              "sha256": "6d92e7ef581f3976b17d26c3ab5b1906bdbb41a9ff0c8fdddb789ab158c2854c",
+              "bytes": 8239
+            },
+            "Validation/test_core_tool_health.py": {
+              "sha256": "437933df0d542cc23abe8194f54bea5838059e678e027e4b829ced7e87b2ca16",
+              "bytes": 23937
+            }
+          }
+        },
+        {
+          "number": 819,
+          "head": "ccb12f7643d345a0c59153fee3983597a5b885ed",
+          "module": "music_lyrics",
+          "head_tests": {
+            "exit": 0,
+            "seconds": 2.634,
+            "log": "C:\\Users\\tahoe\\Documents\\Codex\\2026-10-31\\can\\outputs\\open-pr-review-20261106\\pr812819-evidence\\819-head-module.txt",
+            "pytest_summary": "79 passed in 1.77s"
+          },
+          "baseline_tests": {
+            "exit": 1,
+            "seconds": 2.335,
+            "log": "C:\\Users\\tahoe\\Documents\\Codex\\2026-10-31\\can\\outputs\\open-pr-review-20261106\\pr812819-evidence\\819-baseline.txt",
+            "pytest_summary": "4 failed, 2 passed, 73 deselected in 1.37s"
+          },
+          "disposition": "accept",
+          "reason": "A malformed non-list/tuple segment container should produce controlled No clear lyrics before any output creation; valid list/tuple and per-row validation remain.",
+          "parent_commit": "c79ad6b9b5c5af3577046bac88772744c57c1322",
+          "files": {
+            "music_lyrics.py": {
+              "sha256": "b64aa8f96c6b0fd4510f4e538dbcb851cc83eae81eaadc714b9f3867f03d9ebe",
+              "bytes": 5093
+            },
+            "Validation/test_music_lyrics.py": {
+              "sha256": "71147481b368561f199c3c69d3d3ef8e86e995e573ee34ce8152def4fc78d177",
+              "bytes": 19313
+            }
+          },
+          "test_efficacy_note": "Baseline4fail None/False/True/int123; string and emptydict already produced controlled no-lyrics errors and remain2passing controls."
+        }
+      ],
+      "overlap": "Eight distinct production/test modules; no intra-range edit overlap or duplicates.815 reuses already-reviewed fallback publication guarantees,816 builds on v4 document-cache newline fix,818 complements absolute managed environment guard.",
+      "corrections": [],
+      "limits": [
+        "Fresh537 isolated clone only. No integration/private/installed source or protected Original fixture writes; no pushes/merges/comments/releases.",
+        "No models, devices, real media rendering, GPU/camera/audio access, live service or producer controls. Git fetch is read-only public-source retrieval; tests use fakes and owned TEMP assets/SQLite.",
+        "818 performs bounded own Python import-only subprocesses to verify actual interpreter isolation. No packages installed or actual SDK/account/model calls.",
+        "All touched modules individually tested; no combined integration/full installed self-check claim. Existing platform/decoder skips recorded honestly.",
+        "Current heads bound to saved queue and freshly fetched exact objects; parent must continue exact-head merge guards."
+      ]
+    },
+    "812-819-provenance": {
+      "schema": "pr812819-provenance-supplement-v1",
+      "recorded_utc": "2026-11-06T02:32:18.950423+00:00",
+      "original_ledger": "C:\\Users\\tahoe\\Documents\\Codex\\2026-10-31\\can\\outputs\\open-pr-review-20261106\\pr812819-evidence\\review-ledger.json",
+      "original_ledger_sha256": "9617809776f116699fc61b94b1737b1045ad776cfcfa4c63f1a36922e74802fd",
+      "correction": "Earlier summary saying all head parents bound to537 was inaccurate. ALL8 exact PR heads actually descend from536c79ad6b. Receipts correctly recorded actual parents and remain unchanged. Fresh-clone origin does not change checkout provenance.",
+      "results": [
+        {
+          "number": 812,
+          "reviewed_exact_head": "0b128c36a12bd2e97fb8af3c9b106729c91eb147",
+          "actual_head_parent": "c79ad6b9b5c5af3577046bac88772744c57c1322",
+          "files": {
+            "music_analysis.py": {
+              "parent": "c79ad6b9b5c5af3577046bac88772744c57c1322",
+              "public537": "210d9cc043695c31219dbeb48ccf424636bf4032",
+              "parent_blob": "8a0b0da326050d6c90ce25d6d2f8b2fcc5054a20",
+              "public537_blob": "8a0b0da326050d6c90ce25d6d2f8b2fcc5054a20",
+              "parent_sha256": "547fe86a6c79f2b7d650cc0dd146f6c44cabf11178a48fffe16ba645cd1d4ca7",
+              "public537_sha256": "547fe86a6c79f2b7d650cc0dd146f6c44cabf11178a48fffe16ba645cd1d4ca7",
+              "byte_equal": true,
+              "overlap": false
+            },
+            "Validation/test_music_analysis.py": {
+              "parent": "c79ad6b9b5c5af3577046bac88772744c57c1322",
+              "public537": "210d9cc043695c31219dbeb48ccf424636bf4032",
+              "parent_blob": "d4cfa68f44a4ab4e7c8e95ee366060d8437bc9f5",
+              "public537_blob": "d4cfa68f44a4ab4e7c8e95ee366060d8437bc9f5",
+              "parent_sha256": "b6f2de2e2beaae7636fbf2f6669eb9c9dd0bf030cef8780eefa82c0b2f2585d9",
+              "public537_sha256": "b6f2de2e2beaae7636fbf2f6669eb9c9dd0bf030cef8780eefa82c0b2f2585d9",
+              "byte_equal": true,
+              "overlap": false
+            }
+          },
+          "changed537_direct_repo_imports": [],
+          "original_qualification_scope": "Full touched-module tests ran at exact PR head based on536. Baseline regressions replaced only production module with537 bytes (which equal536 parent bytes); remaining checkout/dependencies stayed536. No complete537 integration test run by author."
+        },
+        {
+          "number": 813,
+          "reviewed_exact_head": "74f295274e7a3f7b8de6f17edadb9d8dddfc4736",
+          "actual_head_parent": "c79ad6b9b5c5af3577046bac88772744c57c1322",
+          "files": {
+            "quick_image.py": {
+              "parent": "c79ad6b9b5c5af3577046bac88772744c57c1322",
+              "public537": "210d9cc043695c31219dbeb48ccf424636bf4032",
+              "parent_blob": "75fabe0e55e1f2eedf0e2bad21a4f78a0530372a",
+              "public537_blob": "75fabe0e55e1f2eedf0e2bad21a4f78a0530372a",
+              "parent_sha256": "78e6ce4e3f38c0ca735416639356a1d9757e2bd49e9e95480fbc97a69f579f8c",
+              "public537_sha256": "78e6ce4e3f38c0ca735416639356a1d9757e2bd49e9e95480fbc97a69f579f8c",
+              "byte_equal": true,
+              "overlap": false
+            },
+            "Validation/test_quick_image.py": {
+              "parent": "c79ad6b9b5c5af3577046bac88772744c57c1322",
+              "public537": "210d9cc043695c31219dbeb48ccf424636bf4032",
+              "parent_blob": "85f52c7f487ca39763f77cb4016d1781943e4486",
+              "public537_blob": "85f52c7f487ca39763f77cb4016d1781943e4486",
+              "parent_sha256": "197b2f73184c64cee32750cb316588d561155f0b91febc4a46ae70afda8fcd23",
+              "public537_sha256": "197b2f73184c64cee32750cb316588d561155f0b91febc4a46ae70afda8fcd23",
+              "byte_equal": true,
+              "overlap": false
+            }
+          },
+          "changed537_direct_repo_imports": [],
+          "original_qualification_scope": "Full touched-module tests ran at exact PR head based on536. Baseline regressions replaced only production module with537 bytes (which equal536 parent bytes); remaining checkout/dependencies stayed536. No complete537 integration test run by author."
+        },
+        {
+          "number": 814,
+          "reviewed_exact_head": "030825d7012f86e997a88a9d46133fb7e472a6f0",
+          "actual_head_parent": "c79ad6b9b5c5af3577046bac88772744c57c1322",
+          "files": {
+            "site_crawler.py": {
+              "parent": "c79ad6b9b5c5af3577046bac88772744c57c1322",
+              "public537": "210d9cc043695c31219dbeb48ccf424636bf4032",
+              "parent_blob": "cd5930bded30843922f8f6a13e8f52ae65cf29b2",
+              "public537_blob": "cd5930bded30843922f8f6a13e8f52ae65cf29b2",
+              "parent_sha256": "7c01187d1041976205924feacc1634d30c03c3968cc0cdbdb40ef94c85dc2acb",
+              "public537_sha256": "7c01187d1041976205924feacc1634d30c03c3968cc0cdbdb40ef94c85dc2acb",
+              "byte_equal": true,
+              "overlap": false
+            },
+            "Validation/test_site_crawler.py": {
+              "parent": "c79ad6b9b5c5af3577046bac88772744c57c1322",
+              "public537": "210d9cc043695c31219dbeb48ccf424636bf4032",
+              "parent_blob": "57c310e8a6e6b054b4d1ca83c41645ce7e9516a3",
+              "public537_blob": "57c310e8a6e6b054b4d1ca83c41645ce7e9516a3",
+              "parent_sha256": "8938eb5732481e84c6a7490cae4ff62e770ef4ca2517ec1055773b04ca7d6b61",
+              "public537_sha256": "8938eb5732481e84c6a7490cae4ff62e770ef4ca2517ec1055773b04ca7d6b61",
+              "byte_equal": true,
+              "overlap": false
+            }
+          },
+          "changed537_direct_repo_imports": [
+            "project_memory.py",
+            "web_tools.py"
+          ],
+          "original_qualification_scope": "Full touched-module tests ran at exact PR head based on536. Baseline regressions replaced only production module with537 bytes (which equal536 parent bytes); remaining checkout/dependencies stayed536. No complete537 integration test run by author."
+        },
+        {
+          "number": 815,
+          "reviewed_exact_head": "cc9e7d3e78b13e8c74432f00af66acfac8c3f597",
+          "actual_head_parent": "c79ad6b9b5c5af3577046bac88772744c57c1322",
+          "files": {
+            "music_stems.py": {
+              "parent": "c79ad6b9b5c5af3577046bac88772744c57c1322",
+              "public537": "210d9cc043695c31219dbeb48ccf424636bf4032",
+              "parent_blob": "927d19ef9112f15161aaa98cd44e997f4de85f49",
+              "public537_blob": "927d19ef9112f15161aaa98cd44e997f4de85f49",
+              "parent_sha256": "2b346cbbc5134b87d0c349fc7bfbe030e67ea2376e687d05118e2508ea1f7e21",
+              "public537_sha256": "2b346cbbc5134b87d0c349fc7bfbe030e67ea2376e687d05118e2508ea1f7e21",
+              "byte_equal": true,
+              "overlap": false
+            },
+            "Validation/test_music_stems.py": {
+              "parent": "c79ad6b9b5c5af3577046bac88772744c57c1322",
+              "public537": "210d9cc043695c31219dbeb48ccf424636bf4032",
+              "parent_blob": "ef5dcbc0ea3df5876eddd9da3de55019895ab9ef",
+              "public537_blob": "ef5dcbc0ea3df5876eddd9da3de55019895ab9ef",
+              "parent_sha256": "5c6a813b008608ba7186f76284d1d9e4c47121820d2b6859a05d3af6dfac570f",
+              "public537_sha256": "5c6a813b008608ba7186f76284d1d9e4c47121820d2b6859a05d3af6dfac570f",
+              "byte_equal": true,
+              "overlap": false
+            }
+          },
+          "changed537_direct_repo_imports": [],
+          "original_qualification_scope": "Full touched-module tests ran at exact PR head based on536. Baseline regressions replaced only production module with537 bytes (which equal536 parent bytes); remaining checkout/dependencies stayed536. No complete537 integration test run by author."
+        },
+        {
+          "number": 816,
+          "reviewed_exact_head": "d22a765b67949980e3012c9e4958ed78f87a5484",
+          "actual_head_parent": "c79ad6b9b5c5af3577046bac88772744c57c1322",
+          "files": {
+            "project_documents.py": {
+              "parent": "c79ad6b9b5c5af3577046bac88772744c57c1322",
+              "public537": "210d9cc043695c31219dbeb48ccf424636bf4032",
+              "parent_blob": "2a9380f65d6b12ce47c922da105b0ba8bb1b5faf",
+              "public537_blob": "2a9380f65d6b12ce47c922da105b0ba8bb1b5faf",
+              "parent_sha256": "84225816b70e99405538f29056165d65e51b333ab0c4e0a2cb8a1aa5adef499f",
+              "public537_sha256": "84225816b70e99405538f29056165d65e51b333ab0c4e0a2cb8a1aa5adef499f",
+              "byte_equal": true,
+              "overlap": false
+            },
+            "Validation/test_project_documents.py": {
+              "parent": "c79ad6b9b5c5af3577046bac88772744c57c1322",
+              "public537": "210d9cc043695c31219dbeb48ccf424636bf4032",
+              "parent_blob": "ed263fa227596d852415bfc689c9f045dcb33932",
+              "public537_blob": "ed263fa227596d852415bfc689c9f045dcb33932",
+              "parent_sha256": "b0e246e02bf2121ab38e33e980365e34412e4d97a1f64a4b5ebfb21921e76c07",
+              "public537_sha256": "b0e246e02bf2121ab38e33e980365e34412e4d97a1f64a4b5ebfb21921e76c07",
+              "byte_equal": true,
+              "overlap": false
+            }
+          },
+          "changed537_direct_repo_imports": [
+            "project_memory.py"
+          ],
+          "original_qualification_scope": "Full touched-module tests ran at exact PR head based on536. Baseline regressions replaced only production module with537 bytes (which equal536 parent bytes); remaining checkout/dependencies stayed536. No complete537 integration test run by author."
+        },
+        {
+          "number": 817,
+          "reviewed_exact_head": "0b267fb82fd450bd56ccea3ea6eada4cdb9df20b",
+          "actual_head_parent": "c79ad6b9b5c5af3577046bac88772744c57c1322",
+          "files": {
+            "model_fitness.py": {
+              "parent": "c79ad6b9b5c5af3577046bac88772744c57c1322",
+              "public537": "210d9cc043695c31219dbeb48ccf424636bf4032",
+              "parent_blob": "1714981492dba3811b38790429ead287104085b2",
+              "public537_blob": "1714981492dba3811b38790429ead287104085b2",
+              "parent_sha256": "91ec31ae56a77459204abf7404690744911621a0ffe7eb7c8d85d87309323ea3",
+              "public537_sha256": "91ec31ae56a77459204abf7404690744911621a0ffe7eb7c8d85d87309323ea3",
+              "byte_equal": true,
+              "overlap": false
+            },
+            "Validation/test_model_fitness.py": {
+              "parent": "c79ad6b9b5c5af3577046bac88772744c57c1322",
+              "public537": "210d9cc043695c31219dbeb48ccf424636bf4032",
+              "parent_blob": "07660a567b3da8130d465ce49ac5330f8e70c1e6",
+              "public537_blob": "07660a567b3da8130d465ce49ac5330f8e70c1e6",
+              "parent_sha256": "3489107cb9cfb35a6d96563aed23e2553c879df5ed26fa3ef2b01f794454f784",
+              "public537_sha256": "3489107cb9cfb35a6d96563aed23e2553c879df5ed26fa3ef2b01f794454f784",
+              "byte_equal": true,
+              "overlap": false
+            }
+          },
+          "changed537_direct_repo_imports": [
+            "model_library.py"
+          ],
+          "original_qualification_scope": "Full touched-module tests ran at exact PR head based on536. Baseline regressions replaced only production module with537 bytes (which equal536 parent bytes); remaining checkout/dependencies stayed536. No complete537 integration test run by author."
+        },
+        {
+          "number": 818,
+          "reviewed_exact_head": "ad5f45348c5ad94e36cac18f672b9d17acedbb17",
+          "actual_head_parent": "c79ad6b9b5c5af3577046bac88772744c57c1322",
+          "files": {
+            "core_tool_health.py": {
+              "parent": "c79ad6b9b5c5af3577046bac88772744c57c1322",
+              "public537": "210d9cc043695c31219dbeb48ccf424636bf4032",
+              "parent_blob": "1e904ac1e6f039893939fd8d17eb31ad30268e19",
+              "public537_blob": "1e904ac1e6f039893939fd8d17eb31ad30268e19",
+              "parent_sha256": "9396a7ec2f8493d7d03c25052b778dba6ba6e4af9196de6b62d70fdaf02bf8e9",
+              "public537_sha256": "9396a7ec2f8493d7d03c25052b778dba6ba6e4af9196de6b62d70fdaf02bf8e9",
+              "byte_equal": true,
+              "overlap": false
+            },
+            "Validation/test_core_tool_health.py": {
+              "parent": "c79ad6b9b5c5af3577046bac88772744c57c1322",
+              "public537": "210d9cc043695c31219dbeb48ccf424636bf4032",
+              "parent_blob": "e31813d5646063075718090f68e5b57ef6102427",
+              "public537_blob": "e31813d5646063075718090f68e5b57ef6102427",
+              "parent_sha256": "f6acfba88e37889f311653a0d55e8a81961f797efc22dbab1df01bdf1980f774",
+              "public537_sha256": "f6acfba88e37889f311653a0d55e8a81961f797efc22dbab1df01bdf1980f774",
+              "byte_equal": true,
+              "overlap": false
+            }
+          },
+          "changed537_direct_repo_imports": [],
+          "original_qualification_scope": "Full touched-module tests ran at exact PR head based on536. Baseline regressions replaced only production module with537 bytes (which equal536 parent bytes); remaining checkout/dependencies stayed536. No complete537 integration test run by author."
+        },
+        {
+          "number": 819,
+          "reviewed_exact_head": "ccb12f7643d345a0c59153fee3983597a5b885ed",
+          "actual_head_parent": "c79ad6b9b5c5af3577046bac88772744c57c1322",
+          "files": {
+            "music_lyrics.py": {
+              "parent": "c79ad6b9b5c5af3577046bac88772744c57c1322",
+              "public537": "210d9cc043695c31219dbeb48ccf424636bf4032",
+              "parent_blob": "4eec6a5d2ad65a8d50ae258264dea60989400fb0",
+              "public537_blob": "4eec6a5d2ad65a8d50ae258264dea60989400fb0",
+              "parent_sha256": "a426ec6e6d026bcf04ddde02c2f4cc70d4ce5c53b6ef5a592597126ee9c332ef",
+              "public537_sha256": "a426ec6e6d026bcf04ddde02c2f4cc70d4ce5c53b6ef5a592597126ee9c332ef",
+              "byte_equal": true,
+              "overlap": false
+            },
+            "Validation/test_music_lyrics.py": {
+              "parent": "c79ad6b9b5c5af3577046bac88772744c57c1322",
+              "public537": "210d9cc043695c31219dbeb48ccf424636bf4032",
+              "parent_blob": "086ae4e4a32e2b112b1b30b5f92b778d7f7f01c1",
+              "public537_blob": "086ae4e4a32e2b112b1b30b5f92b778d7f7f01c1",
+              "parent_sha256": "95743275fb5da03d00a223eb04f2037c67b7f6d5bf0ca394ec2fad7db793dcb1",
+              "public537_sha256": "95743275fb5da03d00a223eb04f2037c67b7f6d5bf0ca394ec2fad7db793dcb1",
+              "byte_equal": true,
+              "overlap": false
+            }
+          },
+          "changed537_direct_repo_imports": [],
+          "original_qualification_scope": "Full touched-module tests ran at exact PR head based on536. Baseline regressions replaced only production module with537 bytes (which equal536 parent bytes); remaining checkout/dependencies stayed536. No complete537 integration test run by author."
+        }
+      ],
+      "direct_touched_file_overlap_with536_to537": [],
+      "all16_touched_files_parent_to537_byte_identical": true,
+      "536_to537_changed_files": [
+        "README.md",
+        "Validation/test_auto_route.py",
+        "Validation/test_camera_presence.py",
+        "Validation/test_chat_assistant.py",
+        "Validation/test_chrome_connector.py",
+        "Validation/test_document_check.py",
+        "Validation/test_donation.py",
+        "Validation/test_feedback_learning.py",
+        "Validation/test_ffmpeg_runtime.py",
+        "Validation/test_model_library.py",
+        "Validation/test_music_mastering.py",
+        "Validation/test_music_midi.py",
+        "Validation/test_music_style.py",
+        "Validation/test_native_browser.py",
+        "Validation/test_radio_station.py",
+        "Validation/test_readiness_checklist.py",
+        "Validation/test_routing_memory.py",
+        "Validation/test_self_diagnostics.py",
+        "Validation/test_skill_catalog.py",
+        "Validation/test_table_ml.py",
+        "Validation/test_task_eta.py",
+        "Validation/test_toolbox_mcp.py",
+        "Validation/test_video_edit.py",
+        "Validation/test_video_generation.py",
+        "Validation/test_voice_assistant.py",
+        "Validation/test_web_tools.py",
+        "auto_route.py",
+        "benchmarks/results/reviewed-donations-537-20261106.json",
+        "camera_presence.py",
+        "chat_assistant.py",
+        "chrome_connector.py",
+        "document_check.py",
+        "donation.py",
+        "feedback_learning.py",
+        "ffmpeg_runtime.py",
+        "model_library.py",
+        "music_mastering.py",
+        "music_midi.py",
+        "music_style.py",
+        "native_browser.py",
+        "pack-release.py",
+        "project_memory.py",
+        "radio_station.py",
+        "readiness_checklist.py",
+        "self_diagnostics.py",
+        "skill_catalog.py",
+        "table_ml.py",
+        "task_eta.py",
+        "toolbox_mcp.py",
+        "video_edit.py",
+        "video_generation.py",
+        "voice_assistant.py",
+        "web_tools.py"
+      ],
+      "independent_test_efficacy_audit": {
+        "812": "Baseline new test FAILS actual floating summation-order choice. Head exercises12transpositions and clear-triad neighbors. Normalized score tolerance1e-12 is conservative estimator policy, not exact music groundtruth.",
+        "813": "Actual BadStatusLine class raised from mocked urlopen; baseline propagates, head preserves original prompt. Prior IncompleteRead remains subclass of broader HTTPException. No network/model calls.",
+        "814": "Real async flow with fake crawler, redirected URL and max_pages2; baseline empty links consume child slot, head visits start+validchild and preserves files/indexing. All3empty variants RED.",
+        "815": "Only2EPERM cases newly fail baseline;4ENOTSUP/EXDEV cases are existing passing controls. Head verifies successful copy plus interrupted-copy rollback/retry through existing exclusive publication. No real stem inference.",
+        "816": "Actual cache file deleted immediately before real Path.open; baseline FileNotFoundError, head reextracts twice then thirdcachedreuse. Source bytes and cache/tmp cleanup checked. No real PDF engine.",
+        "817": "Supplied baseline rank call raises before second caller, so supplementary817-both-callers-proof independently proves both real OverflowErrors and head fallback+valid recovery. Hardware/weights/API mocked; API forbidden in independent proof.",
+        "818": "Real bounded Python subprocess with fake SDK at CWD/PYTHONPATH and -S. Baseline imports unrelated package and falsely reports healthy; head-I rejects both SDK probes then cache preserves missing state. Other executables/browser/launcher mocked; no installed config changes.",
+        "819": "4new baseline TypeErrors (None/False/True/int);2existing controlled failures (string/emptydict) remain passing. Head translates malformed container to no-lyrics RuntimeError before output writes; valid segment-list behavior covered by neighbors. JSON transcription contract is list; arbitrary generator preservation is not claimed."
+      },
+      "qualification_boundary": "Approvals remain based on production review plus exact-head536 standalone tests with identical touched-file baselines. This proves per-PR regressions, not complete537 runtime integration. Changed direct dependencies identified explicitly; parent owns combined537 integration checks. No additional code changes or integration/test reruns performed for supplement.",
+      "controls": "Only read git objects and saved logs; no source checkout/Original/installed mutations or process/device/model controls."
+    },
+    "820-826": {
+      "base": "210d9cc043695c31219dbeb48ccf424636bf4032",
+      "cutoff": 826,
+      "verdict": "accept all seven commit patches on537",
+      "results": [
+        {
+          "number": 820,
+          "head": "b54024fd809a0c495f17d4dd0b1e2a252cb3a05b",
+          "files": [
+            "Validation/test_voice_assistant.py",
+            "voice_assistant.py"
+          ],
+          "candidate_on_base": "210d9cc043695c31219dbeb48ccf424636bf4032",
+          "selector": "test_media_cleanup_remains_bounded_when_killed_worker_does_not_exit",
+          "baseline_exit": 1,
+          "candidate_exit": 0,
+          "baseline_tail": "^^^^^^\n_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _\n\nself = <Mock name='mock.wait' id='2640498614896'>, args = ()\nkwargs = {'timeout': 2}\n\n    def _execute_mock_call(self, /, *args, **kwargs):\n        # separate from _increment_mock_call so that awaited functions are\n        # executed separately from their call, also AsyncMock overrides this method\n    \n        effect = self.side_effect\n        if effect is not None:\n            if _is_exception(effect):\n>               raise effect\nE               subprocess.TimeoutExpired: Command 'media worker' timed out after 2 seconds\n\nC:\\Users\\tahoe\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\unittest\\mock.py:1228: TimeoutExpired\n=========================== short test summary info ===========================\nFAILED Validation/test_voice_assistant.py::VoiceTests::test_media_cleanup_remains_bounded_when_killed_worker_does_not_exit\n1 failed, 53 deselected in 0.40s\n",
+          "candidate_tail": "................................................ [ 88%]\n......                                                                   [100%]\n54 passed, 24 subtests passed in 1.18s\n",
+          "hashes": {
+            "Validation/test_voice_assistant.py": "0904089fe8942b0f1cf32c740641bea10bca38e7d281773b627abf886fe641a1",
+            "voice_assistant.py": "fcbd895b7485f4adb03e5d5bf90a64d973fd1bc5dc1f7a477ef1d13cfa127bc6"
+          },
+          "seconds": 3.02,
+          "patch_sha256": "015e615f41898236e99069bd3ba93fb9f92636785b4144cd9ae3a300659ece08",
+          "verdict": "accept",
+          "review": "Accept. Suppresses only final post-kill TimeoutExpired; preserves bounded cancellation cleanup. Does not prove a hung process actually exited; no new kill authority.",
+          "commits_not_in_public_base": 1
+        },
+        {
+          "number": 821,
+          "head": "f80bbbc1851467c0453fcad8b900b5146f4bd9ca",
+          "files": [
+            "Validation/test_ffmpeg_runtime.py",
+            "ffmpeg_runtime.py"
+          ],
+          "candidate_on_base": "210d9cc043695c31219dbeb48ccf424636bf4032",
+          "selector": "test_ensure_repairs_package_after_discovery_timeout",
+          "baseline_exit": 1,
+          "candidate_exit": 0,
+          "baseline_tail": "on.exe', '-c', 'import imageio_ffmpeg; print(imageio_ffmpeg.get_ffmpeg_exe())']\nkwargs = {'capture_output': True, 'text': True, 'timeout': 30, 'creationflags': 134217728}\n\n    def run(args, **kwargs):\n        nonlocal discoveries\n        if args[1] == \"-c\":\n            discoveries += 1\n            if discoveries == 1:\n>               raise subprocess.TimeoutExpired(args, kwargs[\"timeout\"])\nE               subprocess.TimeoutExpired: Command '['C:\\\\Users\\\\tahoe\\\\AppData\\\\Local\\\\Temp\\\\pytest-of-tahoe\\\\pytest-3186\\\\test_ensure_repairs_package_af0\\\\Toolbox\\\\python\\\\Scripts\\\\python.exe', '-c', 'import imageio_ffmpeg; print(imageio_ffmpeg.get_ffmpeg_exe())']' timed out after 30 seconds\n\nValidation\\test_ffmpeg_runtime.py:133: TimeoutExpired\n=========================== short test summary info ===========================\nFAILED Validation/test_ffmpeg_runtime.py::test_ensure_repairs_package_after_discovery_timeout\n1 failed, 21 deselected in 0.91s\n",
+          "candidate_tail": "......................                                                   [100%]\n22 passed in 1.77s\n",
+          "hashes": {
+            "Validation/test_ffmpeg_runtime.py": "b42a2858853f17637066c0de47e4d8366bfe42f3194c19ac4c1007a12744b2b8",
+            "ffmpeg_runtime.py": "08b8acdc5fbd08b4276b7078f81473052db3256b9d1db19c994d9c955118fb54"
+          },
+          "seconds": 4.11,
+          "patch_sha256": "7bafd7c4c50462fb34ddb68d9974f62f5540af189283b4aa12b6754c38b5f9f2",
+          "verdict": "accept",
+          "review": "Accept. One pinned package repair after first discovery timeout; independent second timeout still propagates, exactly2discovery+1install calls, no staged/published binary.",
+          "commits_not_in_public_base": 1
+        },
+        {
+          "number": 822,
+          "head": "9ef85e0701b36b69145d81d5e1384947e29d79e7",
+          "files": [
+            "Validation/test_table_ml.py",
+            "table_ml.py"
+          ],
+          "candidate_on_base": "210d9cc043695c31219dbeb48ccf424636bf4032",
+          "selector": "test_failed_model_save_cleans_up_and_allows_retry",
+          "baseline_exit": 1,
+          "candidate_exit": 0,
+          "baseline_tail": "             writer.writerow([index, \"hot\" if index >= 20 else \"cold\"])\n            model = root / \"model.json\"\n    \n            def fail_after_partial_write(payload, stream, **kwargs):\n                stream.write('{\"format\":')\n                raise OSError(\"simulated model write failure\")\n    \n            with patch(\"table_ml.json.dump\", side_effect=fail_after_partial_write):\n                with self.assertRaisesRegex(OSError, \"simulated model write failure\"):\n                    train_table_model(str(training), \"label\", str(model),\n                                      \"classification\")\n>           self.assertFalse(model.exists())\nE           AssertionError: True is not false\n\nValidation\\test_table_ml.py:60: AssertionError\n=========================== short test summary info ===========================\nFAILED Validation/test_table_ml.py::TableMLTests::test_failed_model_save_cleans_up_and_allows_retry\n1 failed, 24 deselected in 2.93s\n",
+          "candidate_tail": ".........................                                    [100%]\n25 passed, 12 subtests passed in 3.71s\n",
+          "hashes": {
+            "Validation/test_table_ml.py": "66abcccea6982de4d5eff78800b4e4dd80d45ba50863c13732ae2695110cc390",
+            "table_ml.py": "5e4f45e390d1143c4141555c72043b39b87151122fa91389cbdc1f815d29a0bc"
+          },
+          "seconds": 8.58,
+          "patch_sha256": "fbead6239f0632939d19fe9f15aebdd9a162096a6ec17301ca487e9a36b70666",
+          "verdict": "accept",
+          "review": "Accept commit patch on537 only; retain legacy feature-owner correction/tests. Complete staging+no-replace hardlink fixes partial JSON failure/retry. Independent race preserves newly created owner output. Unsupported hardlinks fail safely; this PR does not add support for those volumes.",
+          "commits_not_in_public_base": 1
+        },
+        {
+          "number": 823,
+          "head": "d2461c2b5c4965088be3b60f0ffa8131b0fddfa5",
+          "files": [
+            "Validation/test_toolbox_mcp.py",
+            "toolbox_mcp.py"
+          ],
+          "candidate_on_base": "210d9cc043695c31219dbeb48ccf424636bf4032",
+          "selector": "test_backend_schema_serialization_failure_isolated_before_publication",
+          "baseline_exit": 1,
+          "candidate_exit": 0,
+          "baseline_tail": "      ^^^^^^^^^^^^^^^\nValidation\\test_toolbox_mcp.py:977: in check\n    async with toolbox_mcp.lifespan(None):\n               ^^^^^^^^^^^^^^^^^^^^^^^^^^\nC:\\Users\\tahoe\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\contextlib.py:214: in __aenter__\n    return await anext(self.gen)\n           ^^^^^^^^^^^^^^^^^^^^^\ntoolbox_mcp.py:384: in lifespan\n    CATALOG[f\"{group}.{tool.name}\"] = tool.model_dump(\n_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _\n\nkwargs = {'by_alias': True, 'exclude_none': True}\n\n    def broken_dump(**kwargs):\n>       raise ValueError(\"Backend schema serialization failed\")\nE       ValueError: Backend schema serialization failed\n\nValidation\\test_toolbox_mcp.py:943: ValueError\n=========================== short test summary info ===========================\nFAILED Validation/test_toolbox_mcp.py::test_backend_schema_serialization_failure_isolated_before_publication\n1 failed, 99 deselected in 1.42s\n",
+          "candidate_tail": "........................................................................ [ 72%]\n......................s.....                                             [100%]\n=========================== short test summary info ===========================\nSKIPPED [1] Validation\\test_toolbox_mcp.py:1620: Symlinks unavailable: [WinError 1314] A required privilege is not held by the client: 'C:\\\\Users\\\\tahoe\\\\AppData\\\\Local\\\\Temp\\\\pytest-of-tahoe\\\\pytest-3189\\\\test_game_libraries_reject_red0\\\\outside' -> 'C:\\\\Users\\\\tahoe\\\\AppData\\\\Local\\\\Temp\\\\pytest-of-tahoe\\\\pytest-3189\\\\test_game_libraries_reject_red0\\\\registered-project\\\\vendor'\n99 passed, 1 skipped in 8.92s\n",
+          "hashes": {
+            "Validation/test_toolbox_mcp.py": "c0210fcbbed2389eea103db8032c0b70945ae9f6ec30191a024c8162586885d7",
+            "toolbox_mcp.py": "7f0a4fa222675b362e3dd310098dc7b9c29dbb8fcd35a1b1a9da7d9d1d191f8f"
+          },
+          "seconds": 12.28,
+          "patch_sha256": "6ccdd55d53bce3661c401551e27cf63a9e460b07b5cc0bf2ca579613d976bd32",
+          "verdict": "accept",
+          "review": "Accept. Complete backend catalog serialized inside existing guarded startup scope before publishing session/catalog, isolated failure cleans failed backend and retains independent local/backend tools.",
+          "commits_not_in_public_base": 1
+        },
+        {
+          "number": 824,
+          "head": "ed6f863bcad20f78baf62126c2b62bf32e07beac",
+          "files": [
+            "Validation/test_feedback_learning.py",
+            "feedback_learning.py"
+          ],
+          "candidate_on_base": "210d9cc043695c31219dbeb48ccf424636bf4032",
+          "selector": "test_video_design_feedback_is_not_grouped_with_app_design",
+          "baseline_exit": 1,
+          "candidate_exit": 0,
+          "baseline_tail": "                                           [100%]\n================================== FAILURES ===================================\n__________ test_video_design_feedback_is_not_grouped_with_app_design __________\n\ntmp_path = WindowsPath('C:/Users/tahoe/AppData/Local/Temp/pytest-of-tahoe/pytest-3191/test_video_design_feedback_is_0')\n\n    def test_video_design_feedback_is_not_grouped_with_app_design(tmp_path):\n        for medium in (\"video\", \"animation\", \"film\"):\n>           assert feedback_learning.kind_for({\"title\": \"Design a \" + medium}) == \"video\"\nE           AssertionError: assert 'app_design' == 'video'\nE             \nE             - video\nE             + app_design\n\nValidation\\test_feedback_learning.py:340: AssertionError\n=========================== short test summary info ===========================\nFAILED Validation/test_feedback_learning.py::test_video_design_feedback_is_not_grouped_with_app_design\n1 failed, 15 deselected in 0.29s\n",
+          "candidate_tail": "................                                                         [100%]\n16 passed in 2.47s\n",
+          "hashes": {
+            "Validation/test_feedback_learning.py": "b58e2f18f9a326c6e3a118703f5b60b0545e5fc17e40f8b75c009ac01cb326b7",
+            "feedback_learning.py": "e0db56955e7a1b3d3b5f84100f5a83f31542e226b5f8321a1e770651a234ddc0"
+          },
+          "seconds": 4.3,
+          "patch_sha256": "c41220cb62c3fe45eaa70d4a92c91ef2160210a037a93c26de3c437daaae405f",
+          "verdict": "accept",
+          "review": "Accept. Specific video/animation/film category precedes generic design fallback; explicit app/dashboard/website/image/music priorities remain unchanged.",
+          "commits_not_in_public_base": 1
+        },
+        {
+          "number": 825,
+          "head": "315ce95df3869e9cbb67ae28fc1aacda0c80f11e",
+          "files": [
+            "Validation/test_music_style.py",
+            "music_style.py"
+          ],
+          "candidate_on_base": "210d9cc043695c31219dbeb48ccf424636bf4032",
+          "selector": "test_negated_lead_singer_preserves_vocal_texture",
+          "baseline_exit": 1,
+          "candidate_exit": 0,
+          "baseline_tail": "st_negated_lead_singer_preserves_vocal_texture _______________\n\n    def test_negated_lead_singer_preserves_vocal_texture():\n        for exclusion in (\"no lead singer\", \"without a lead singer\",\n                          \"avoid any lead singer\", \"don't want a lead singer\"):\n            request = \"Heavy dubstep with vocal chops, \" + exclusion\n>           assert not music_style.explicit_lead_vocals(request)\nE           AssertionError: assert not True\nE            +  where True = <function explicit_lead_vocals at 0x0000018851D3AF20>('Heavy dubstep with vocal chops, no lead singer')\nE            +    where <function explicit_lead_vocals at 0x0000018851D3AF20> = music_style.explicit_lead_vocals\n\nValidation\\test_music_style.py:363: AssertionError\n=========================== short test summary info ===========================\nFAILED Validation/test_music_style.py::test_negated_lead_singer_preserves_vocal_texture\n1 failed, 28 deselected in 0.31s\n",
+          "candidate_tail": ".............................                                            [100%]\n29 passed in 0.20s\n",
+          "hashes": {
+            "Validation/test_music_style.py": "2722b5c1d4f9c85229afffca23fffeaae2955b3389dc4e1063f45836428f8d99",
+            "music_style.py": "8ced8f6e8e9e0dd2e475975162412086a6fe08616e5e5dcf821c4a8c537a35de"
+          },
+          "seconds": 1.99,
+          "patch_sha256": "e4bfc3b40a4dc5c4d694a11a4dfe577186106b6e9986e38072d05848eae363bd",
+          "verdict": "accept",
+          "review": "Accept. Removes negated lead singer before detecting positive lead requests; retained positive/sparse-vocal neighbors all pass.",
+          "commits_not_in_public_base": 1
+        },
+        {
+          "number": 826,
+          "head": "19cdde13cb6940f44fc1151f4a4e979eb643f30d",
+          "files": [
+            "Validation/test_chat_assistant.py",
+            "chat_assistant.py"
+          ],
+          "candidate_on_base": "210d9cc043695c31219dbeb48ccf424636bf4032",
+          "selector": "test_named_unicode_revision_routes_to_the_existing_task",
+          "baseline_exit": 1,
+          "candidate_exit": 0,
+          "baseline_tail": "epted] ______\n\nstatus = 'accepted'\n\n    @pytest.mark.parametrize(\"status\", [\"working\", \"accepted\"])\n    def test_named_unicode_revision_routes_to_the_existing_task(status):\n        task = {\"id\": \"site\", \"title\": \"Stra\u00dfe website\", \"status\": status}\n        text = \"Improve Stra\u00dfe website with a contact page\"\n        candidates = chat_assistant.followup_tasks([task], text)\n        assert candidates == [task]\n>       assert chat_assistant.route(text, candidates) == \"note\"\nE       AssertionError: assert 'task' == 'note'\nE         \nE         - note\nE         + task\n\nValidation\\test_chat_assistant.py:546: AssertionError\n=========================== short test summary info ===========================\nFAILED Validation/test_chat_assistant.py::test_named_unicode_revision_routes_to_the_existing_task[working]\nFAILED Validation/test_chat_assistant.py::test_named_unicode_revision_routes_to_the_existing_task[accepted]\n2 failed, 109 deselected in 0.66s\n",
+          "candidate_tail": "........................................................................ [ 64%]\n.......................................                                  [100%]\n111 passed in 2.23s\n",
+          "hashes": {
+            "Validation/test_chat_assistant.py": "8f5613f5e58e79b4909a02b076ef6f54ecf5ffc5807485eb306476a741329839",
+            "chat_assistant.py": "a3abd9d5de8a5e26305890511586fb3d3263a5476be2b24af2b6d921765ceb6a"
+          },
+          "seconds": 4.57,
+          "patch_sha256": "e6763ca166315369de8ee7a3979ee5672f2e4ed645b6d9fad16d59c87cbfb46c",
+          "verdict": "accept",
+          "review": "Accept. Route title matching uses same Unicode casefold basis as task naming helpers; working+accepted named revisions both genuinely RED on537.",
+          "commits_not_in_public_base": 1
+        }
+      ],
+      "qualification": {
+        "baseline_behaviors_failed": 7,
+        "baseline_cases_failed": 8,
+        "candidate_passed": 356,
+        "candidate_subtests_passed": 36,
+        "candidate_skipped": 1
+      },
+      "skip": "Existing toolbox_mcp Windows symlink-privilege skip; no new skip or weakened test.",
+      "independent_controls": [
+        {
+          "number": 821,
+          "exit_code": 0,
+          "output": "Second discovery timeout propagates after exactly2discoveries/1install, no published or staged binary PASS\n"
+        },
+        {
+          "number": 822,
+          "exit_code": 0,
+          "output": "Racing owner destination preserved; unsupported hardlinks fail honestly without partial model/tempfiles PASS\n"
+        }
+      ],
+      "base_drift": "822 whole stale runtime/test blobs would remove537 legacy-owner fix. Only commitpatch applied;25tabletests retain all24existing537tests plus newpartial-save regression. Other6 touched-file deltas match commitpatches against537.",
+      "isolation": "Fresh clone outputs/review-pr820-826-isolated; current537base clean after tests. No integration/private/installed/Original edits or remote mutations. Tests mocked external services/media; small CSV classification CPU training only.",
+      "limitations": [
+        "820 catches cleanup timeout but cannot promise hung worker reaped.",
+        "822 unsupported-hardlink filesystems remain unsupported for atomic model publication, matching existing prediction pattern; errors are honest and no partial file remains.",
+        "No model/media inference, device actions, actual package installation or wholeapplication/performance claims."
+      ]
+    }
+  },
+  "limits": [
+    "Fifteen affected module suites; not a full installation or end-to-end media-quality check.",
+    "Three explicit platform/decoder skips remain.",
+    "Atomic model-save publication requires filesystem hardlink support, as does existing prediction publication.",
+    "Private pagination/schema experiments are excluded."
+  ]
+}

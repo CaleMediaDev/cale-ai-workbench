@@ -2,6 +2,8 @@
 
 **A Windows assistant that builds with tools, saves its progress, and runs local models.**
 
+Release 0.5.538 includes 15 reviewed fixes for media cancellation, FFmpeg repair, model saving, tool startup, document recovery and task routing. [Validation and limits](benchmarks/results/reviewed-donations-538-20261106.json).
+
 Release 0.5.537 restores saved unconfirmed donation links after restart, preserves self-check source invalidation, and includes 24 reviewed fixes for progress, routing, browser tools, model predictions and media recovery. The timeout test now handles slow startup. Four proposals were corrected and the FTS regression rejected. [Validation and limits](benchmarks/results/reviewed-donations-537-20261106.json).
 
 Release 0.5.536 includes 14 reviewed donation fixes for local memory, file handling, routing, voice setup, image recovery, music tools and gauges. One unsafe proposal was rejected; decoder compatibility coverage is explicit. [Validation and limits](benchmarks/results/reviewed-donations-536-20261106.json).
