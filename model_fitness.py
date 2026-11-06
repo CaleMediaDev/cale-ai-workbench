@@ -256,7 +256,8 @@ def grade_game_html(html, root):
     if not isinstance(html, str) or len(html) > 100000:
         return {"valid_html": False}
     scripts = re.findall(r"<script\b[^>]*>(.*?)</script>", html, re.I | re.S)
-    return grade_game_code(GAME_DOM + "\n".join(scripts), root, GAME_BUILD_CHECKS)
+    # Separate script elements cannot continue each other's expressions.
+    return grade_game_code(GAME_DOM + "\n;\n".join(scripts), root, GAME_BUILD_CHECKS)
 
 
 def probe_game_coding(source, root):
