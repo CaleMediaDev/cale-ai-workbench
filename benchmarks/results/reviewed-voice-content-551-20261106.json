@@ -1,0 +1,61 @@
+{
+  "release": "0.5.551",
+  "base": "912a5dc2fbaf8f922e8aa616e0a53184286ff035",
+  "integration_commit": "0d806927d2f756e17105ed34c1df00570667bcc5",
+  "pr": 960,
+  "reviewed_head": "dff231a3be16a5563572c902e71bf9d0d47e07ac",
+  "qualification_sha256": "cfbf39ea54dde41fcadf57f1b66c13446c999174a93de70f29f90760fe4b61cd",
+  "sha256": {
+    "voice_assistant.py": "511b223f3d899d74def20bb069a4f2a4de99b61459f2e6470578670af1d78ce1",
+    "Validation/test_voice_assistant.py": "0427be6997a5433dbfea3686d50357405122959a052bd828c8947fde6579651c"
+  },
+  "validation": {
+    "affected_modules": {
+      "exit_code": 0,
+      "source_bytes_unchanged": true,
+      "passed": 7,
+      "subtests_passed": 15,
+      "skipped": 0,
+      "scope": "Seven rephrase/status controls only; full device/microphone module not qualified."
+    }
+  },
+  "before": {
+    "directory": "base-evidence-v2",
+    "actual": "2 failed list/dict subcases, 1 parent passed, 4 subtests passed in0.29s. Public550 production plus exact head test.",
+    "already_safe_controls": [
+      "42",
+      "True",
+      "None"
+    ],
+    "valid_text_control": "same text accepted"
+  },
+  "after": {
+    "directory": "head-status-evidence",
+    "passed": 7,
+    "deselected": 51,
+    "subtests_passed": 15,
+    "seconds": 0.19,
+    "job_empty": true,
+    "source_unchanged": true,
+    "blocked_attempts": []
+  },
+  "preserved_failures": [
+    {
+      "directory": "base-evidence",
+      "kind": "Harness prerequisite: ctypes deny blocked colorama import BEFORE collection, not baseline proof."
+    },
+    {
+      "directory": "head-evidence-v2",
+      "kind": "Harness refused winsound import before test could mock PlaySound; corrected only bootstrap with PlaySound/Beep/MessageBeep denied."
+    },
+    {
+      "directory": "head-evidence-v3",
+      "kind": "Full module1F27P10subtests then refused pre-existing real media_worker --voice-server subprocess; child not launched. Not candidate regression or full green."
+    }
+  ],
+  "limits": [
+    "No real voice playback, model or account use.",
+    "Existing microphone-worker test was blocked by the review boundary; not a product regression or full-suite pass.",
+    "Exact installer qualification required before publication."
+  ]
+}
