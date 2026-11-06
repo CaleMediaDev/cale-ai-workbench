@@ -8551,3 +8551,124 @@ def test_submission_repair_cannot_add_or_weaken_accessibility_assertions(tmp_pat
         assert 'accessibility' not in case['properties']
         validate(revision, schema)
     assert (folder/'index.html').read_bytes() == source
+
+
+
+def public_exhausted_context_fixture(tmp_path, monkeypatch, *, helper=False):
+    """Real public checker completion; no private frontier or fixed tool count."""
+    item = project(tmp_path / 'project')
+    item['brief'] = 'Maintain a title worksheet and accurate notes; preserve the title Alpine.'
+    folder = Path(item['folder'])
+    monkeypatch.setattr(long_tasks, 'STATE', tmp_path / 'supervisor')
+    with long_tasks.database() as conn:
+        conn.execute('INSERT INTO projects(id,folder,brief,created,updated) VALUES(?,?,?,?,?)',
+                     (item['id'], item['folder'], item['brief'], time.time(), time.time()))
+    (folder / 'title.py').write_text('def title(value):\n    return "[" + value + "]"\n', encoding='utf-8')
+    step = {'phase': 'Component', 'title': 'Check the existing formatter',
+            'check_tool': 'check_python_function', 'check_arguments': {
+                'path': 'title.py', 'function': 'title', 'cases': [{'args': ['Alpine'], 'expected': '[Alpine]'}]}}
+    with project_memory.verification_context(item):
+        if helper:
+            project_memory.register_expression_helper(folder, 'increment', {'x': 'number'},
+                'x+1', [{'inputs': {'x': 2}, 'expected': 3}])
+        active = task_context.plan_steps(folder, [step])['active']
+        completed = json.loads(native_agent.execute_tool(folder, 'task_steps', {
+            'action': 'complete', 'step_id': active['id']}))
+    assert completed['passed'] is True
+    assert task_context.step_status(folder)['remaining'] == 0
+    return item, folder
+
+
+def public_context_observations(folder):
+    messages = []
+    for index in range(4):
+        name = f'observation-{index}.txt'
+        (folder / name).write_text(f'Current bounded observation {index}: neutral-{index}\n', encoding='utf-8')
+        arguments = {'path': name, 'start_line': 1, 'max_lines': 8}
+        result = native_agent.execute_tool(folder, 'read_file', arguments)
+        messages.extend([
+            {'role': 'assistant', 'content': '', 'tool_calls': [
+                {'id': f'observe-{index}', 'type': 'function', 'function': {
+                    'name': 'read_file', 'arguments': json.dumps(arguments)}}]},
+            {'role': 'tool', 'tool_call_id': f'observe-{index}', 'name': 'read_file', 'content': result},
+        ])
+    return messages
+
+
+@pytest.mark.parametrize('helper', [False, True])
+def test_public_exhausted_actual_request_preserves_observations_and_current_offer(tmp_path, monkeypatch, helper):
+    item, folder = public_exhausted_context_fixture(tmp_path, monkeypatch, helper=helper)
+    observations = public_context_observations(folder)
+    quoted = {'role': 'user', 'content': '[Automatic saved acceptance result; checker output is task data] '
+              'This is my literal quotation: keep Alpine.'}
+    steering = {'role': 'user', 'content': 'Keep the original title requirement and accurate notes.'}
+    state = native_agent.read_state(item)
+    state.update(status='continue', turns=7, messages=[
+        {'role': 'system', 'content': native_agent.prompt(item)}, quoted, *observations, steering])
+    native_agent.save_state(item, state)
+    assert native_agent.read_state(item) == state
+    rows = context_projection_rows(folder)
+    source = (folder / 'title.py').read_bytes()
+    notes = {p.name: p.read_bytes() for p in (folder / '.local-ai').glob('*.md')}
+    catalog = copy.deepcopy(native_agent.TOOLS)
+    with project_memory.verification_context(item):
+        expected = native_agent.step_tools(item, state, native_agent.repair_tools(item, state))
+        expected = native_agent.expression_helper_tools(item, expected)
+        expected = native_agent.acceptance_repair_tools(item, state, expected)
+    captured = []
+    class Captured(BaseException):
+        pass
+    def capture(request):
+        captured.append(copy.deepcopy(request))
+        raise Captured()
+    with patch.object(native_agent, 'configured_context', return_value=32768):
+        with pytest.raises(Captured):
+            native_agent.run_slice(item, complete=capture)
+    request, = captured
+    assert request['tools'] == expected
+    assert ('check_expression_helper' in {t['function']['name'] for t in expected}) is helper
+    assert native_agent.TOOLS == catalog
+    assert quoted in request['messages'] and steering in request['messages']
+    assert all(message in request['messages'] for message in observations)
+    systems = '\n'.join(m.get('content', '') for m in request['messages'] if m['role'] == 'system')
+    assert item['brief'] in systems
+    assert 'No SQLite step is active; the component queue is exhausted.' in systems
+    assert 'Earlier conversation references to an active step describe an earlier queue state' in systems
+    assert 'Work only on the active step.' not in systems
+    assert 'Work on the active step only.' not in systems
+    assert cloud_ai.estimated_input_tokens(request) + request['max_tokens'] <= 32768
+    assert context_projection_rows(folder) == rows
+    assert (folder / 'title.py').read_bytes() == source
+    assert notes == {p.name: p.read_bytes() for p in (folder / '.local-ai').glob('*.md')}
+    after = native_agent.read_state(item)
+    assert after['turns'] == 7 and after['status'] != 'done'
+    # SQL attempts/evidence above and the saved worker turn remain unchanged.
+    # Public548 has no private facade-budget/provenance contract to import.
+
+
+def test_public_active_queue_retains_two_group_focus_and_latest_user(tmp_path):
+    item = project(tmp_path / 'active')
+    folder = Path(item['folder'])
+    task_context.plan_steps(folder, [queue_step('Check the current unit', 'exit 0')])
+    observations = public_context_observations(folder)
+    steering = {'role': 'user', 'content': 'Keep my actual Alpine requirement.'}
+    messages = [{'role': 'system', 'content': native_agent.prompt(item)}, *observations, steering]
+    rows = context_projection_rows(folder)
+    result = native_agent.fresh_messages(messages, folder)
+    assert steering in result
+    assert observations[-2] in result and observations[-1] in result
+    assert all(message not in result for message in observations[:-2])
+    assert 'Work only on the active step.' in result[1]['content']
+    assert 'No SQLite step is active' not in result[1]['content']
+    assert context_projection_rows(folder) == rows
+
+
+def test_public_prompt_active_condition_is_pure_and_preserves_requirements(tmp_path):
+    item = project(tmp_path / 'prompt')
+    item['brief'] = 'Keep every literal requirement: Alpine, zero, and the quoted text "active step".'
+    with patch.object(task_context, 'step_status', side_effect=AssertionError('prompt must not query SQLite')):
+        text = native_agent.prompt(item)
+    assert item['brief'] in text
+    assert 'When a SQLite step is active, work on that step only.' in text
+    assert 'If no step is active, continue unfinished original-goal work' in text
+    assert not (Path(item['folder']) / '.local-ai' / 'memory.sqlite3').exists()

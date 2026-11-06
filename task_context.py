@@ -350,9 +350,16 @@ def snapshot(folder: str | Path) -> str:
             except ValueError as error:
                 lines.append("Repair the invalid saved acceptance definition with task_steps action=revise "
                              "and steps=[one corrected step] before completing it: " + str(error)[:600])
-        lines.append("Work only on the active step. Make one small source change, run its check "
-                     "with task_steps action=complete, then continue from the fresh checkpoint. "
-                     "Use split if it is too broad. Completing a batch is not completing the whole request.")
+        if queue["active"]:
+            lines.append("Work only on the active step. Make one small source change, run its check "
+                         "with task_steps action=complete, then continue from the fresh checkpoint. "
+                         "Use split if it is too broad. Completing a batch is not completing the whole request.")
+        elif not queue["remaining"]:
+            lines.append("No SQLite step is active; the component queue is exhausted. "
+                         "Continue unfinished original-goal work with ordinary implementation, planning and verification tools. "
+                         "Earlier conversation references to an active step describe an earlier queue state; "
+                         "the user requirements and steering remain in force. "
+                         "Component records grant no whole-task completion credit.")
         if queue["active"] and queue["active"]["check_tool"] in {"check_python_function", "check_javascript_function", "check_webapp"}:
             lines.append("SQLite check_arguments above are authoritative for this step. If a case contradicts "
                          "the original requirement, revise the active step through task_steps action=revise, "

@@ -1,0 +1,57 @@
+{
+  "release": "0.5.549",
+  "base": "a1c8ef6ed406794a94cb5cae75fa96eb40c0a0fb",
+  "sha256": {
+    "native_agent.py": "c47ac846afff19fbb0a01e337c4b02bfb9bfcba2cd915be5d0a35f00601e9598",
+    "task_context.py": "832b2af0bca11cec915600e5146ae028972200628977f205da4e3ae1281f8a4f",
+    "Validation/test_native_agent.py": "c300415bbfaf86118f1c07f905588e522531ba6aa517341992a9cf3f0e12a537",
+    "music_stems.py": "25b4bd5d0954f5b4b827d743b99b0e9eaf9e74e26ffecbefc1d1596016b5a1dd",
+    "Validation/test_music_stems.py": "6967e7da383e76e88a7dbaec5c896ca8ac5a66991ff13432a210bd36286a4f4a"
+  },
+  "validation": {
+    "affected_modules": {
+      "exit_code": 0,
+      "source_bytes_unchanged": true,
+      "scope": "29 public context checks and one Windows FFmpeg retry control; separate real Linux before/after regression, not a full suite"
+    }
+  },
+  "context": {
+    "qualification_sha256": "a4b04c6298ec025d4d7eea52036bdd282db4c48e4bbd9061cc38ef6295ad1a3b",
+    "red": "1 failed in 6.17s",
+    "green": "29 passed in 18.56s",
+    "meaning": "Completed component queues retain real exchanges for the unchanged budget compactor; active-only directions apply only to active steps.",
+    "source": {
+      "native_agent.py": "c47ac846afff19fbb0a01e337c4b02bfb9bfcba2cd915be5d0a35f00601e9598",
+      "task_context.py": "832b2af0bca11cec915600e5146ae028972200628977f205da4e3ae1281f8a4f",
+      "Validation/test_native_agent.py": "c300415bbfaf86118f1c07f905588e522531ba6aa517341992a9cf3f0e12a537",
+      "music_stems.py": "25b4bd5d0954f5b4b827d743b99b0e9eaf9e74e26ffecbefc1d1596016b5a1dd",
+      "Validation/test_music_stems.py": "6967e7da383e76e88a7dbaec5c896ca8ac5a66991ff13432a210bd36286a4f4a"
+    },
+    "limits": [
+      "No full native_agent suite or installed/full self-check qualification claimed.",
+      "RED stops at missing genuine quoted user history; later payload/wording assertions are exercised on GREEN, not separately established baseline REDs.",
+      "Execution was root-owned. This receipt reads artifacts and bytes only.",
+      "The integration working tree changed to candidate bytes during inspection; immutable explicit a1c8 git archive used instead of a moving working-tree baseline.",
+      "Owned test boundary allows approved local fixture operations; not an OS sandbox.",
+      "No inference, device, live service or Original fixture operation performed for this receipt."
+    ]
+  },
+  "reviewed_proposals": [
+    {
+      "number": 926,
+      "head": "6c66559580055b8804c7f3e604eaff8df8ee9882",
+      "url": "https://github.com/CaleMediaDev/cale-ai-workbench/pull/926",
+      "fix": "Use ffmpeg on POSIX and ffmpeg.exe on Windows in the stem worker.",
+      "validation": "Real Linux baseline: new lookup fails, original retry passes. Head: both pass. Real Windows: retry passes.",
+      "credit": "CaleMediaDev",
+      "integration_status": "qualified_for_integration",
+      "qualification_sha256": "c105395446ddaf0359f1b3ee9fcd71dc17c99819b06fdfacfd80b430d47f1907"
+    }
+  ],
+  "limits": [
+    "No real audio generation, performance or full Linux app support claimed.",
+    "No model-driven complete-app success claimed. A real local trial failed before the context correction.",
+    "Private experimental native core, matcher and worker hooks are excluded.",
+    "Exact installer qualification is required before publication."
+  ]
+}

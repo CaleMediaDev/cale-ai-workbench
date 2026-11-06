@@ -2158,9 +2158,11 @@ def prompt(project: dict) -> str:
         "Use check_command for other checks. "
         "Retain earlier test cases as you add steps. "
         "Build the minimal working skeleton, then one feature, then its edge cases, then integration. "
-        "Work on the active step only. Use task_steps action=complete to run its check before "
+        "When a SQLite step is active, work on that step only. Use task_steps action=complete to run its check before "
         "advancing; use split if it needs several unrelated edits. After a batch, plan the next "
-        "phase from the original requirements. Keep PLAN.md as the overall roadmap. "
+        "phase from the original requirements. If no step is active, continue unfinished original-goal work "
+        "through ordinary source, plan and verification tools; component success is not whole-task completion. "
+        "Keep PLAN.md as the overall roadmap. "
         f"{verification_hint}"
         "The verifier must only inspect files; it must not create, overwrite, or repair the requested output. "
         "Use noninteractive commands. Never invoke a program that waits for stdin; put test code in a file and run that file. "
@@ -2495,7 +2497,11 @@ def fresh_messages(messages: list, folder: Path, state: dict | None = None,
         groups.append(current)
     # The current DB unit replaces older step conversations, not the original
     # request, architecture notes, failed checks or project files.
-    chosen = groups[-(2 if queue["total"] else RECENT_WORK_GROUPS):]
+    # An exhausted queue has no active-unit conversation to replace. Let
+    # the existing token-budget compactor select from these real exchanges
+    # instead of discarding observations before it can measure them.
+    exhausted = bool(queue["total"] and not queue["remaining"] and active is None)
+    chosen = groups if exhausted else groups[-(2 if queue["total"] else RECENT_WORK_GROUPS):]
     # User steering is also written to USER-REQUESTS.md, but preserve the
     # latest message verbatim in case a crash precedes that file write.
     latest_user = next((group for group in reversed(groups) if group[0].get("role") == "user"), None)
