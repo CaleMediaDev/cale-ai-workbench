@@ -98,6 +98,28 @@ def test_rejected_singer_does_not_turn_vocal_texture_into_sustained_singing():
         assert music_style.requires_sustained_vocals(request, lyrics="Sing this verse")
 
 
+def test_negated_gendered_singing_preserves_vocal_texture():
+    for gender in ("female", "male"):
+        for negation in ("no", "without any", "don't want"):
+            exclusion = negation + " " + gender + " singing"
+            request = "Heavy dubstep with vocal chops, " + exclusion
+            assert not music_style.explicit_lead_vocals(request)
+            assert not music_style.unambiguous_vocal_song(request)
+            assert not music_style.requires_sustained_vocals(request)
+            caption = music_style.enhance(request)
+            assert "Sparse chopped vocal syllables" in caption
+            assert "clear sung verses and chorus" not in caption
+            assert exclusion not in caption
+            assert not music_style.requires_sustained_vocals(caption)
+            assert music_style.enhance(caption) == caption
+
+        positive = "Heavy dubstep with vocal chops and " + gender + " singing"
+        assert music_style.explicit_lead_vocals(positive)
+        assert music_style.unambiguous_vocal_song(positive)
+        assert music_style.requires_sustained_vocals(positive)
+        assert gender + " lead vocals throughout" in music_style.enhance(positive)
+
+
 def test_negated_gendered_lead_does_not_override_vocal_texture():
     for gender in ("male", "female"):
         request = "Heavy dubstep with vocal chops, no " + gender + " lead vocals"
