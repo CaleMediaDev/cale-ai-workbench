@@ -100,10 +100,46 @@ def inspect(folder: str | Path, path: str, question: str = "",
             # Derived text is disposable; recover from an unreadable, removed,
             # or corrupt cache using the authoritative source.
             cached = False
-    if cached:
-        if _digest(source) != digest:
-            raise RuntimeError("The document changed while it was being read; try again")
+    if cached and _digest(source) == digest:
+        # Cache is valid and content matches current source digest
+        text = cached_text.read(MAX_EXTRACTED_CHARS + 1)
     else:
+        # Cache is invalid, corrupt, or digest mismatch
+        text = ""
+        cached = False
+        try:
+            text = _extract_snapshot(source, digest)
+            if _digest(source) != digest:
+                raise RuntimeError("The document changed while it was being read; try again")
+            if len(text) > MAX_EXTRACTED_CHARS:
+                raise ValueError("The extracted text is too large for this task reader")
+            # An empty result may be a transient extraction failure. Return it,
+            # but allow the next inspection to retry the authoritative source.
+            if text:
+                cache.parent.mkdir(parents=True, exist_ok=True)
+                with tempfile.NamedTemporaryFile(
+                    mode="w", encoding="utf-8", newline="", dir=cache.parent,
+                    prefix=cache.name + ".", suffix=".tmp", delete=False,
+                ) as output:
+                    temporary = Path(output.name)
+                    try:
+                        output.write(text)
+                    except BaseException:
+                        output.close()
+                        temporary.unlink(missing_ok=True)
+                        raise
+                try:
+                    os.replace(temporary, cache)
+                finally:
+                    temporary.unlink(missing_ok=True)
+            if _digest(source) != digest:
+                raise RuntimeError("The document changed while it was being read; try again")
+        except RuntimeError as e:
+            raise e
+        except Exception:
+            # If extraction fails entirely (e.g., due to file system issues, not content change), text remains empty
+            pass
+
         text = _extract_snapshot(source, digest)
         if _digest(source) != digest:
             raise RuntimeError("The document changed while it was being read; try again")
