@@ -137,7 +137,7 @@ def music_request(text: str, *, reference: bool = False) -> dict | None:
         r"(?<![\w.])-\s*(?:\d+(?:\.\d+)?|\.\d+)\s*(?:-\s*)?"
         r"(?:minutes?|mins?|min|seconds?|secs?|sec|s)\b",
         duration_text, re.IGNORECASE,
-    ):
+    ) or re.search(r"(?<![\w.])-\s*\d{1,2}:[0-5]\d\b", duration_text):
         raise ValueError("Local music can render 10 seconds to 10 minutes. Please choose a duration in that range.")
     clock = re.search(r"\b(\d{1,2}):([0-5]\d)\b", duration_text)
     combined = re.search(
