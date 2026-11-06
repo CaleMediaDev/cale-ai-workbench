@@ -500,6 +500,8 @@ def speak(text: str, output_path: str | Path, play: bool = True,
             _idle_timer.cancel()
         try:
             if _worker is None or _worker.poll() is not None:
+                if _worker is not None:
+                    _stop_worker()
                 env = dict(os.environ, HF_HUB_OFFLINE="1")
                 log = ROOT / "LongTasks/cale-voice-worker.log"
                 log.parent.mkdir(parents=True, exist_ok=True)

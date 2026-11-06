@@ -118,6 +118,38 @@ def test_worker_stream_errors_reach_the_caller(error):
     stream.readline.assert_called_once_with()
 
 
+def test_speech_cleans_up_exited_launcher_before_starting_replacement(tmp_path):
+    launcher = Mock(pid=100)
+    launcher.poll.return_value = 0
+    replacement = Mock()
+    replacement.poll.return_value = None
+    child = Mock()
+
+    def start_replacement(*args, **kwargs):
+        assert cale_voice._worker is None
+        child.terminate.assert_called_once_with()
+        wait.assert_called_once_with([child], timeout=3)
+        return replacement
+
+    with (patch.object(cale_voice, "ROOT", tmp_path),
+          patch.object(cale_voice, "ready", return_value=True),
+          patch.object(cale_voice, "_worker", launcher),
+          patch.object(cale_voice, "_idle_timer", None),
+          patch.object(cale_voice, "_generation", 0),
+          patch("psutil.Process") as process,
+          patch("psutil.wait_procs", return_value=([child], [])) as wait,
+          patch.object(cale_voice.subprocess, "Popen", side_effect=start_replacement) as launch,
+          patch.object(cale_voice, "_line_with_timeout",
+                       side_effect=['{"ready": true}', '{"path": "speech.wav"}']),
+          patch.object(cale_voice.threading, "Timer")):
+        process.return_value.children.return_value = [child]
+        answer = cale_voice.speak("Hello", tmp_path / "speech.wav", play=False)
+        assert answer == {"path": "speech.wav"}
+        assert cale_voice._worker is replacement
+        launch.assert_called_once()
+        launcher.terminate.assert_not_called()
+
+
 def test_idle_release_ignores_newer_speech():
     with patch.object(cale_voice, "_stop_worker") as stop, patch.object(
         cale_voice, "_generation", 12
