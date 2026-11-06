@@ -249,7 +249,11 @@ def recover() -> bool:
             now = time.time()
             _write(record_path, {"attempts": attempts + 1, "started": now})
             log = STATE / "base-install-repair.log"
-            with log.open("ab") as output:
+            try:
+                output = log.open("ab")
+            except OSError:
+                return False
+            with output:
                 try:
                     subprocess.Popen(
                         ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass",
