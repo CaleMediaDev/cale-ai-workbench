@@ -58,7 +58,7 @@ def search(query: str, source: str = "skills-sh", limit: int = 5) -> dict:
     safe = []
     terms = []
     term = ""
-    for char in unicodedata.normalize("NFC", query.casefold()):
+    for char in unicodedata.normalize("NFC", unicodedata.normalize("NFC", query).casefold()):
         if char.isalnum() or (term and unicodedata.category(char).startswith("M")):
             term += char
         else:
@@ -75,7 +75,9 @@ def search(query: str, source: str = "skills-sh", limit: int = 5) -> dict:
         description = row.get("description", "")
         name = name if isinstance(name, str) else ""
         description = description if isinstance(description, str) else ""
-        haystack = unicodedata.normalize("NFC", (name + " " + description).casefold())
+        haystack = unicodedata.normalize(
+            "NFC", unicodedata.normalize("NFC", name + " " + description).casefold()
+        )
         name = name[:100]
         description = description[:500]
         if (
