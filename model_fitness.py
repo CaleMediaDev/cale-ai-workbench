@@ -228,7 +228,8 @@ catch (_) { console.log(JSON.stringify({valid_code:false})); }
             check=True,
             creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
         )
-    except (OSError, subprocess.TimeoutExpired, subprocess.CalledProcessError):
+    except (OSError, UnicodeDecodeError, subprocess.TimeoutExpired, subprocess.CalledProcessError):
+        # Generated output may also be undecodable in the system text encoding.
         # A discovered runtime can disappear or become non-executable.
         # Asynchronous work can also outlive the VM deadline or terminate Node
         # outside the synchronous driver catch (e.g. an unhandled rejection).
