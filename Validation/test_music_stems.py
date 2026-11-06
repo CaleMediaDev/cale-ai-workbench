@@ -272,6 +272,7 @@ def test_failed_publication_leaves_output_empty_for_retry(tmp_path):
 @pytest.mark.parametrize("interrupt_copy", [False, True])
 @pytest.mark.parametrize("link_errno", [
     music_stems.errno.ENOTSUP, music_stems.errno.EXDEV, music_stems.errno.EPERM,
+    music_stems.errno.ENOSYS,
 ])
 def test_publication_without_hard_links_is_retryable(tmp_path, interrupt_copy, link_errno):
     import errno
