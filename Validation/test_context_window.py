@@ -259,6 +259,34 @@ class ContextWindowTests(unittest.TestCase):
             )
             post.assert_called_once_with("/api/show", {"model": "main"})
 
+    def test_sync_preserves_inline_context_comment(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            (root / "data").mkdir()
+            config = root / "data/config.yaml"
+            original = (
+                "model:\n"
+                "  context_length: 65536  # main context budget\n"
+                "fallback_providers: []\n"
+            )
+            config.write_text(original, encoding="utf-8")
+            info = {
+                "parameters": "num_ctx 262144\n",
+                "model_info": {
+                    "general.architecture": "qwen",
+                    "qwen.context_length": 262144,
+                },
+            }
+            with (patch.object(context_window, "post", return_value=info) as post,
+                  patch.object(context_window, "physical_ram_bytes", return_value=128 * 2**30),
+                  patch.object(context_window, "model_bytes", return_value=52 * 2**30)):
+                self.assertEqual(context_window.sync(root, "main"), 262144)
+            self.assertEqual(
+                config.read_text(encoding="utf-8"),
+                original.replace("context_length: 65536", "context_length: 262144"),
+            )
+            post.assert_called_once_with("/api/show", {"model": "main"})
+
     def test_sync_grows_only_main_alias_and_hermes_together(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
