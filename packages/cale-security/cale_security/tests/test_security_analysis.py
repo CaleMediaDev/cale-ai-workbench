@@ -204,6 +204,33 @@ def test_job_cleanup_uses_exact_unassigned_child_and_real_tuple_contract(tmp_pat
     job.Close.assert_called_once()
 
 
+@pytest.mark.parametrize('declaration', [
+    'requests[security]==2.32.5',
+    'requests [security, tests] == 2.32.5 # optional features',
+    'requests[security,extra_feature,extra-feature,extra.feature]==2.32.5',
+])
+def test_exact_requirement_with_extras_remains_base_package_evidence(project, declaration):
+    root, _ = project
+    (root/'requirements.txt').write_text(declaration+'\n', encoding='utf-8')
+    identifier = engagement(root, ['requirements.txt'])
+    report = security.inspect_security_artifacts(str(root), identifier, host=HOSTS[root])
+    assert report['components'] == [{'ecosystem': 'PyPI', 'name': 'requests',
+        'version': '2.32.5', 'evidence': 'requirements.txt', 'line': 1,
+        'kind': 'pinned_declaration'}]
+    sbom = security.build_security_sbom(str(root), identifier, host=HOSTS[root])
+    assert [(row['name'], row['version']) for row in sbom['components']] == [('requests', '2.32.5')]
+
+
+@pytest.mark.parametrize('declaration', [
+    'requests[security]>=2.32.5', 'requests[security]==2.*',
+    'requests[security,]==2.32.5', 'requests[security tests]==2.32.5',
+    'requests[security]==2.32.5; python_version < "3.12"',
+])
+def test_extras_do_not_turn_unresolved_declarations_into_exact_evidence(declaration):
+    components, _ = security._dependencies('requirements.txt', declaration.encode())
+    assert components == []
+
+
 def test_sbom_preserves_explicit_declared_evidence(project):
     root,_=project
     (root/'requirements.txt').write_text('neutral==1.2.3\n')

@@ -281,8 +281,12 @@ def _dependencies(relative, raw):
                 if isinstance(name, str) and 0 < len(name) <= 200 and re.fullmatch(r'[0-9][A-Za-z0-9.+_-]{0,99}', item['version']):
                     components.append({'ecosystem': 'npm', 'name': name, 'version': item['version'], 'evidence': relative, 'kind': 'locked_declaration'})
     elif Path(relative).name.startswith('requirements') and relative.endswith('.txt'):
+        # Extras select optional dependencies of the same pinned distribution;
+        # they are not separate packages with independently known versions.
+        extra = r'[A-Za-z0-9](?:[A-Za-z0-9_.-]{0,198}[A-Za-z0-9])?'
+        extras = rf'(?:\[\s*(?:{extra}(?:\s*,\s*{extra})*)?\s*\])?'
         for number, line in enumerate(raw.decode('utf-8-sig').splitlines(), 1):
-            match = re.fullmatch(r'\s*([A-Za-z0-9][A-Za-z0-9_.-]{0,199})==([A-Za-z0-9][A-Za-z0-9.+_-]{0,99})\s*(?:#.*)?', line)
+            match = re.fullmatch(rf'\s*([A-Za-z0-9][A-Za-z0-9_.-]{{0,199}})\s*{extras}\s*==\s*([A-Za-z0-9][A-Za-z0-9.+_-]{{0,99}})\s*(?:#.*)?', line)
             if match:
                 components.append({'ecosystem': 'PyPI', 'name': match[1], 'version': match[2], 'evidence': relative, 'line': number, 'kind': 'pinned_declaration'})
     elif relative.endswith('.php'):
