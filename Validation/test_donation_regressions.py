@@ -156,6 +156,14 @@ class CalculatorPrecisionTests(unittest.TestCase):
         ):
             with self.subTest(expression=expression):
                 self.assertEqual(calculate(expression), f"{expression} = {answer}")
+        # Test fractional exponentiation rejection
+        for expression in (
+            "2 ** 1/2",
+            "2^(1/2)",
+            "0.5 ** 2",
+        ):
+            with self.subTest(expression=expression):
+                self.assertIsNone(calculate(expression))
 
     def test_thousands_separators_require_valid_numeric_grouping(self):
         for expression in (

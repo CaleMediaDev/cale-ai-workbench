@@ -50,6 +50,8 @@ def _evaluate(node: ast.AST, expression: str, depth: int = 0) -> Fraction:
             return _bounded(left / right)
         if isinstance(node.op, ast.Pow) and right.denominator == 1 and abs(right) <= 100:
             return _bounded(left ** right.numerator)
+        if isinstance(node.op, ast.Pow) and right.denominator != 1:
+            raise ValueError("Fractional exponents are not supported in quick calculator.")
     raise ValueError("Unsupported arithmetic expression.")
 
 
