@@ -88,7 +88,7 @@ def avatar_reserved_vram_gb(root=None):
                 # One capture/probe owner is enforced by the launcher. A fixed
                 # live index avoids repeated scans through old crash markers.
                 return reserved / 1024 ** 3
-        except (OSError, ValueError, OverflowError, TypeError, KeyError, psutil.Error):
+        except (OSError, ValueError, OverflowError, TypeError, KeyError, RecursionError, psutil.Error):
             continue
     return sum(reservations.values()) / 1024 ** 3
 
