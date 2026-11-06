@@ -202,6 +202,36 @@ class FileCatalogTests(unittest.TestCase):
             self.assertFalse(file_catalog.first_scan_pending(state))
             self.assertTrue((state / file_catalog.FIRST_SCAN_NAME).is_file())
 
+    def test_search_refills_candidates_after_removing_stale_matches(self):
+        with tempfile.TemporaryDirectory() as temp, patch.object(
+            file_catalog, "enough_space", return_value=True
+        ):
+            root = Path(temp) / "drive"
+            state = Path(temp) / "state"
+            root.mkdir()
+            for number in range(51):
+                (root / f"report-{number}.txt").write_text("", encoding="utf-8")
+            file_catalog.scan_computer(state, [root])
+            with file_catalog.database(state) as conn:
+                ranked = conn.execute(
+                    """SELECT entries.path
+                    FROM entry_fts JOIN entries ON entries.id=entry_fts.rowid
+                    WHERE entry_fts MATCH ? ORDER BY bm25(entry_fts,8.0,1.0)""",
+                    ('name:"report"',),
+                ).fetchall()
+            self.assertEqual(len(ranked), 51)
+            survivor = ranked[-1]["path"]
+            for row in ranked[:-1]:
+                Path(row["path"]).unlink()
+
+            results = file_catalog.search(state, "report", limit=1)
+
+            self.assertEqual([row["path"] for row in results], [survivor])
+            with file_catalog.database(state) as conn:
+                self.assertEqual(
+                    conn.execute("SELECT COUNT(*) FROM entries").fetchone()[0], 1
+                )
+
     def test_first_scan_only_holds_first_run(self):
         with tempfile.TemporaryDirectory() as temp:
             state = Path(temp)
