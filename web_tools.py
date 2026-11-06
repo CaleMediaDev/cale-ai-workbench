@@ -121,7 +121,7 @@ def fetch(url):
                     f"Unsupported content type: {content_type}. Use browser/download tools for binary files."
                 )
             raw = body.read_bytes()
-            charset = re.search(r"charset=[\"']?([\w-]+)", content_type, re.I)
+            charset = re.search(r"charset\s*=\s*[\"']?([\w-]+)", content_type, re.I)
             encoding = charset.group(1) if charset else "utf-8"
             try:
                 content = raw.decode(encoding, "replace")
