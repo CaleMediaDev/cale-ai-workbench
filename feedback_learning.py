@@ -145,9 +145,25 @@ def for_task(root: str | Path, task_id: str) -> list[dict]:
 
 
 def forget(root: str | Path, feedback_id: int) -> bool:
-    """Let the owner retract a learned example without changing task files."""
+    """Retract a review without reviving superseded same-generation reviews."""
     with _connect(root) as conn:
-        return conn.execute("DELETE FROM feedback WHERE id=?", (feedback_id,)).rowcount > 0
+        if not conn.in_transaction:
+            conn.execute("BEGIN IMMEDIATE")
+        review = conn.execute(
+            "SELECT task_id,generation,created,id FROM feedback WHERE id=?",
+            (feedback_id,),
+        ).fetchone()
+        if review is None:
+            return False
+        # Legacy databases may retain opposite ratings for one generation.
+        # Remove superseded reviews too, but never a newer review or generation.
+        conn.execute(
+            "DELETE FROM feedback WHERE task_id=? AND generation=? "
+            "AND (created<? OR (created=? AND id<=?))",
+            (review["task_id"], review["generation"], review["created"],
+             review["created"], review["id"]),
+        )
+        return True
 
 
 def _terms(text: str) -> Counter:

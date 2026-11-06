@@ -251,6 +251,37 @@ def test_existing_opposite_ratings_use_only_latest_review(tmp_path, monkeypatch)
         assert "Improve:" not in learned
 
 
+def test_retracting_latest_legacy_vote_does_not_revive_opposite_rating(tmp_path, monkeypatch):
+    import sqlite3
+
+    monkeypatch.setattr(feedback_learning.time, "time", lambda: 10.0)
+    for latest_time in (20.0, 10.0):
+        root = tmp_path / str(latest_time)
+        reviewed = task("legacy-retraction", "Techno synth bass", title="Techno synth bass")
+        historical_id = feedback_learning.record(
+            root, reviewed, -1, "Historical preference"
+        )
+        feedback_learning.record(
+            root, dict(reviewed, generation=1), -1, "Use electronic drums"
+        )
+        with sqlite3.connect(root / "feedback-learning.sqlite3") as conn:
+            latest_id = conn.execute("""INSERT INTO feedback
+                (task_id,generation,kind,rating,title,brief,note,created)
+                SELECT task_id,generation,kind,1,title,brief,'',?
+                FROM feedback WHERE task_id=? AND generation=1""",
+                (latest_time, reviewed["id"])).lastrowid
+
+        assert "Similar task the user liked:" in feedback_learning.guidance(
+            root, "music", "Techno synth bass"
+        )
+        assert feedback_learning.forget(root, latest_id)
+        assert not feedback_learning.guidance(root, "music", "Techno synth bass")
+        assert not feedback_learning.forget(root, latest_id)
+        # Only superseded reviews from the retracted generation are removed.
+        remaining = feedback_learning.for_task(root, reviewed["id"])
+        assert [row["id"] for row in remaining] == [historical_id]
+
+
 def test_generation_history_backfill_runs_once_across_connections(tmp_path, monkeypatch):
     import sqlite3
 
