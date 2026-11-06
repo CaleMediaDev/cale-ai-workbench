@@ -1075,6 +1075,27 @@ def test_reused_progress_writer_rolls_back_header_when_node_insert_fails(tmp_pat
             next(lifecycle)
 
 
+def test_deeply_nested_control_defers_at_boundary_instead_of_raising(tmp_path):
+    state, context, owned = progress_writer_fixture(tmp_path)
+    raw = "[" * 3000 + "0" + "]" * 3000
+    assert len(raw.encode("utf-8")) <= 8000
+    (state / "self-check-control.json").write_text(raw, encoding="utf-8")
+    plugin = owned._LiveSelfCheck(context)
+    try:
+        with pytest.raises(pytest.exit.Exception) as stopped:
+            plugin.boundary()
+        assert stopped.value.returncode == 2
+        assert plugin.data["deferred_reason"] == "activity_unknown"
+        assert plugin.data["waiting_at_boundary"] is True
+        with closing(sqlite3.connect(state / "self-check-progress.sqlite3")) as reader:
+            header = json.loads(reader.execute(
+                "SELECT value FROM live_session WHERE slot=1").fetchone()[0])
+        assert header["deferred_reason"] == "activity_unknown"
+        assert header["complete"] is False
+    finally:
+        plugin.close()
+
+
 def test_deeply_nested_owned_context_leaves_plugin_inactive(tmp_path, monkeypatch):
     # Use an isolated module so this probe cannot replace the suite's live plugin.
     state, context, owned = progress_writer_fixture(tmp_path)
