@@ -115,10 +115,22 @@ def installed_version() -> str:
             # version entry. Consume other escapes whole so a literal
             # backslash followed by 'u0073' is not decoded accidentally.
             try:
+                # Attempt to decode escapes within the quoted key string
+                def decode_escape(match): 
+                    group = next((g for g in match.groups() if g is not None), None)
+                    if group is not None:
+                        # Found x, u, or U escape
+                        try:
+                            return chr(int(group, 16))
+                        except ValueError:
+                            return match.group(0) # Return original match if decoding fails
+                    else:
+                        # Found literal character match
+                        return match.group(0)
+                
                 key = re.sub(
                     r"\\(?:x([0-9A-Fa-f]{2})|u([0-9A-Fa-f]{4})|U([0-9A-Fa-f]{8})|.)",
-                    lambda m: chr(int(next(g for g in m.groups() if g is not None), 16))
-                    if any(g is not None for g in m.groups()) else m[0],
+                    decode_escape,
                     key[1:-1],
                 )
             except ValueError:

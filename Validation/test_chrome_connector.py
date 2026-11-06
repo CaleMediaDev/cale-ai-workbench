@@ -295,15 +295,16 @@ def test_installed_version_rejects_continued_version_scalar(
     r'"ver\u0073ion"',
     r'"ver\U00000073ion"',
 ])
-def test_installed_version_rejects_escaped_duplicate_version_key(
+def test_installed_version_handles_escaped_version_key_correctly(
     tmp_path, monkeypatch, escaped_key
 ):
     monkeypatch.setattr(chrome_connector, "PLUGIN", tmp_path)
+    # The key should decode to 'version'
     (tmp_path / "plugin.yaml").write_text(
         f"version: 0.2.6\n{escaped_key}: 9.9.9\n", encoding="utf-8"
     )
 
-    # Each escaped key decodes to the same root key as the first entry.
+    # With the fix, this should now correctly identify two version keys, leading to failure.
     assert chrome_connector.installed_version() == ""
 
 
