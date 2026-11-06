@@ -323,6 +323,20 @@ class VoiceTests(unittest.TestCase):
                 self.assertFalse(voice_assistant._heavy_gpu_active())
                 process.assert_not_called()
 
+    def test_gpu_activity_ignores_lease_pids_outside_platform_range(self):
+        with TemporaryDirectory() as folder:
+            root = Path(folder)
+            state = root / "LongTasks"
+            state.mkdir()
+            oversized_pid = 10 ** 100
+            (state / f"music-gpu-active-{oversized_pid}.json").write_text('{}')
+            with (
+                patch.object(voice_assistant, "ROOT", root),
+                patch("psutil.Process", side_effect=OverflowError("PID out of range")) as process,
+            ):
+                self.assertFalse(voice_assistant._heavy_gpu_active())
+                process.assert_called_once_with(oversized_pid)
+
     def test_music_render_keeps_status_speech_from_reloading_gpu_model(self):
         from types import SimpleNamespace
 
