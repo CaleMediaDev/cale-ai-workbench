@@ -781,6 +781,16 @@ class AutoModelTests(unittest.TestCase):
         self.assertIs(request["think"], False)
         self.assertEqual(request["options"]["num_predict"], 512)
 
+    def test_non_object_chat_responses_fail_the_candidate_probe(self):
+        for response in (None, [], "invalid", 42, True):
+            with self.subTest(response=response):
+                with patch.object(library, "post", return_value=response) as post:
+                    with self.assertRaisesRegex(library.CandidateModelError,
+                                                "tool-use check"):
+                        library.probe_tool_use("candidate-source")
+                post.assert_called_once()
+                self.assertEqual(post.call_args.args[0], "/api/chat")
+
     def test_non_object_messages_fail_the_candidate_probe(self):
         for message in (None, [], "invalid", 42, True):
             with self.subTest(message=message):

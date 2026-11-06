@@ -316,6 +316,10 @@ def probe_tool_use(alias, reasoning_effort=None):
         request,
         timeout=240,
     )
+    if not isinstance(result, dict):
+        raise CandidateModelError(
+            "Model downloaded, but it did not pass the local tool-use check."
+        )
     message = result.get("message", {})
     if not isinstance(message, dict):
         raise CandidateModelError(
