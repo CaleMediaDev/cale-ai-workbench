@@ -34,8 +34,9 @@ def _best_chord(chroma):
     scores.sort(reverse=True)
     score, name = scores[0]
     # Equal pitch evidence for different triads cannot identify a chord;
-    # do not let alphabetical ordering of chord names decide the result.
-    if score == scores[1][0]:
+    # neither alphabetical ordering nor floating-point summation order
+    # should decide the result.
+    if np.isclose(score, scores[1][0], rtol=1e-12, atol=1e-12):
         return None
     return name if score >= 0.35 else None
 
