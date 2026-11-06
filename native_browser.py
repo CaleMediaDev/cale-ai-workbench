@@ -108,7 +108,7 @@ def _dom_contract(folder: Path, page) -> dict:
           return (copy.textContent || '').trim().slice(0,120);
         };
         const labels = el instanceof HTMLFormElement ? [] : [...(el.labels || [])].slice(0,3).map(labelText);
-        const form = el.form || el.closest('form');
+        const form = el instanceof HTMLFormElement ? el : (el.form || el.closest('form'));
         targets.push({id:id.slice(0,120),id_count:id ? counts.get(id) : 0,
           id_truncated:id.length>120,
           checker_id_supported:!!id && counts.get(id)===1 && id.length<=64 && /^[A-Za-z]/.test(id) && !/[^A-Za-z0-9_-]/.test(id),
