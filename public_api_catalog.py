@@ -80,7 +80,7 @@ def search_public_apis(query: str, max_results: int = 10) -> dict:
     if not isinstance(query, str):
         raise ValueError("Describe the public data or API you need in 2 to 120 characters.")
     terms = query.split()
-    if len(query) < 2 or len(query) > 120:
+    if len(query.strip()) < 2 or len(query) > 120:
         raise ValueError("Describe the public data or API you need in 2 to 120 characters.")
     terms = [word.casefold() for word in terms]
     if isinstance(max_results, bool) or not isinstance(max_results, int) or not 1 <= max_results <= 20:
