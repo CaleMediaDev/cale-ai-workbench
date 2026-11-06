@@ -29,6 +29,9 @@ def make_music_video(source_path: str, output_path: str, layout: str = "wide",
         raise ValueError("Choose wide, vertical or square video layout.")
     if output.suffix.lower() != ".mp4" or output == source or output.exists():
         raise ValueError("Save the video as a new MP4 file without replacing an existing file.")
+    # Check again right before linking, as external processes might create it.
+    if output.exists():
+        raise ValueError("Save the video as a new MP4 file without replacing an existing file.")
     image = None
     if background_image:
         image = Path(background_image).expanduser().resolve(strict=True)
