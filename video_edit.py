@@ -65,9 +65,14 @@ def _run(arguments: list[str], output: Path, timeout: int = 7200) -> dict:
         except OSError:
             # Cleanup is best-effort; preserve the FFmpeg failure diagnostic.
             pass
-        # Callers inspect the diagnostic to decide whether recovery is safe;
-        # trailing messages must not hide the original codec/container error.
-        raise RuntimeError((result.stderr or result.stdout) or "Video edit failed.")
+        diagnostic = (result.stderr or result.stdout) or "Video edit failed."
+        # Keep the public error bounded without losing the exact muxer reason
+        # that permits a single safe soundtrack conversion retry.
+        marker = "codec not currently supported in container"
+        message = diagnostic[-1200:]
+        if marker in diagnostic.casefold() and marker not in message.casefold():
+            message = marker + "\n" + message[-(1200 - len(marker) - 1):]
+        raise RuntimeError(message)
     return {"path": str(output), "bytes": output.stat().st_size}
 
 

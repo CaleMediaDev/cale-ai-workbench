@@ -207,7 +207,10 @@ def _scoped_repair_intent(messages):
         and isinstance(messages[index + 1], dict)
         and messages[index + 1].get("role") == "user"
     }
-    for index, message in enumerate(messages[:-1]):
+    # The newest host envelope contains the current follow-up snapshot.
+    # Older paired payloads remain diagnostics rather than ordinary user text.
+    for index in range(len(messages) - 2, -1, -1):
+        message = messages[index]
         if not isinstance(message, dict) or message.get("role") != "system":
             continue
         instruction = message_text(message.get("content"))

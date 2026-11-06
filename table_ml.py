@@ -239,6 +239,27 @@ def predict_table_model(model_path: str, csv_path: str, output_path: str) -> dic
         raise ValueError("Choose a Cale table-model JSON file under 10 MB.")
     model = json.loads(path.read_text(encoding="utf-8"))
     names, coefficients, intercepts, classes = _checked_model(model)
+    if "feature_owners" in model:
+        feature_owners = {name: tuple(owner) for name, owner in model["feature_owners"].items()}
+    else:
+        # Old v1 files did not record which column owns an encoded coordinate.
+        # Recover only unambiguous ownership; guessing can reuse another
+        # column's coefficient when categorical names contain '='.
+        feature_owners = {}
+        for name in names:
+            # Numeric columns always emitted their named coordinate during
+            # training, so a matching category would already have collided.
+            if name in model["schema"] and model["schema"][name]["kind"] == "number":
+                candidates = [(name,)]
+            else:
+                candidates = [
+                    (column, name[len(column) + 1:])
+                    for column, spec in model["schema"].items()
+                    if spec["kind"] == "category" and name.startswith(column + "=")
+                ]
+            if len(candidates) != 1:
+                raise ValueError("Feature names collide or have ambiguous legacy ownership; retrain the model.")
+            feature_owners[name] = candidates[0]
     columns, rows = _csv(csv_path)
     if not rows or any(column not in columns for column in model["schema"]):
         raise ValueError("Prediction CSV needs rows and the model's feature columns.")
@@ -263,10 +284,6 @@ def predict_table_model(model_path: str, csv_path: str, output_path: str) -> dic
         with staged.open("x", encoding="utf-8", newline="") as stream:
             writer = csv.DictWriter(stream, fieldnames=[*columns, output_column])
             writer.writeheader()
-            feature_owners = {
-                name: tuple(owner)
-                for name, owner in model.get("feature_owners", {}).items()
-            }
             for start in range(0, len(rows), 4096):
                 batch = rows[start:start + 4096]
                 matrix = vectorizer.transform(_features(batch, model["schema"], feature_owners))

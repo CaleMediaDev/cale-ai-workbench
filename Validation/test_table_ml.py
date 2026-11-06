@@ -486,3 +486,76 @@ def test_prediction_error_and_publication_preserve_concurrent_destination(tmp_pa
         assert source.read_text() == "size\n2\n"
         assert staged_paths and all(path != output and not path.exists() for path in staged_paths)
         assert not list(root.glob(".table-prediction-*"))
+
+
+def _ownership_collision_model(root):
+    training = root / "training.csv"
+    with training.open("w", newline="", encoding="utf-8") as stream:
+        writer = csv.writer(stream)
+        writer.writerow(["color", "color=red", "label"])
+        for index in range(40):
+            writer.writerow(["red=dark" if index % 2 else "blue", "light",
+                             "hot" if index % 2 else "cold"])
+    model = root / "model.json"
+    train_table_model(str(training), "label", str(model), "classification")
+    prediction = root / "prediction.csv"
+    prediction.write_text("color,color=red\nblue,dark\n", encoding="utf-8")
+    return model, prediction
+
+
+def test_training_coordinate_collision_rejected_without_metadata_assertions(tmp_path):
+    model, prediction = _ownership_collision_model(tmp_path)
+    output = tmp_path / "result.csv"
+    with unittest.TestCase().assertRaisesRegex(ValueError, "Feature names collide"):
+        predict_table_model(str(model), str(prediction), str(output))
+    assert not output.exists()
+    assert not list(tmp_path.glob(".table-prediction-*"))
+
+
+def test_legacy_ambiguous_feature_ownership_fails_before_output_setup(tmp_path):
+    model, prediction = _ownership_collision_model(tmp_path)
+    saved = json.loads(model.read_text(encoding="utf-8"))
+    saved.pop("feature_owners", None)
+    model.write_text(json.dumps(saved), encoding="utf-8")
+    before = model.read_bytes()
+    output = tmp_path / "new-output-folder" / "result.csv"
+    with unittest.TestCase().assertRaisesRegex(ValueError, "ambiguous.*retrain"):
+        predict_table_model(str(model), str(prediction), str(output))
+    assert not output.parent.exists()
+    assert model.read_bytes() == before
+
+
+def test_legacy_unambiguous_feature_ownership_remains_usable(tmp_path):
+    training = tmp_path / "train.csv"
+    with training.open("w", newline="", encoding="utf-8") as stream:
+        writer = csv.writer(stream)
+        writer.writerow(["color", "size", "label"])
+        for index in range(40):
+            writer.writerow(["red" if index % 2 else "blue", index,
+                             "hot" if index % 2 else "cold"])
+    model = tmp_path / "model.json"
+    train_table_model(str(training), "label", str(model), "classification")
+    saved = json.loads(model.read_text(encoding="utf-8"))
+    saved.pop("feature_owners")
+    model.write_text(json.dumps(saved), encoding="utf-8")
+    before = model.read_bytes()
+    prediction = tmp_path / "predict.csv"
+    prediction.write_text("color,size\nred,7\nblue,12\n", encoding="utf-8")
+    output = tmp_path / "result.csv"
+    assert predict_table_model(str(model), str(prediction), str(output))["rows"] == 2
+    assert model.read_bytes() == before
+    with output.open(encoding="utf-8") as stream:
+        assert len(list(csv.DictReader(stream))) == 2
+
+
+def test_malformed_feature_ownership_rejected_before_output_setup(tmp_path):
+    model, prediction = _ownership_collision_model(tmp_path)
+    saved = json.loads(model.read_text(encoding="utf-8"))
+    invalid_maps = (None, [], {}, {"color=red=dark": ["absent", "dark"]})
+    for index, owners in enumerate(invalid_maps):
+        malformed = dict(saved, feature_owners=owners)
+        model.write_text(json.dumps(malformed), encoding="utf-8")
+        output = tmp_path / f"invalid-output-{index}" / "result.csv"
+        with unittest.TestCase().assertRaisesRegex(ValueError, "invalid feature ownership"):
+            predict_table_model(str(model), str(prediction), str(output))
+        assert not output.parent.exists()

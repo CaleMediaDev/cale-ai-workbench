@@ -448,3 +448,32 @@ def test_speed_change_trims_requested_source_segment_before_retiming(tmp_path, s
         actual_audio = len(audio.stdout) / (8000 * 2)
         assert actual_audio == pytest.approx(expected, abs=0.2)
         assert abs(actual_video - actual_audio) < 0.2
+
+
+@pytest.mark.parametrize("prefix", ["", "leading context\n" * 150])
+def test_bounded_failure_preserves_codec_classification_anywhere(tmp_path, monkeypatch, prefix):
+    output = tmp_path / "result.mp4"
+    diagnostic = prefix + "codec not currently supported in container\n" + "later context\n" * 300
+    monkeypatch.setattr(video_edit.imageio_ffmpeg, "get_ffmpeg_exe", lambda: "ffmpeg")
+    monkeypatch.setattr(video_edit.subprocess, "run", lambda *a, **k: subprocess.CompletedProcess(a, 1, stdout="", stderr=diagnostic))
+    with pytest.raises(RuntimeError) as error:
+        video_edit._run([], output)
+    assert len(str(error.value)) <= 1200
+    assert "codec not currently supported in container" in str(error.value)
+
+
+def test_noncodec_long_failure_is_bounded_and_never_retried(tmp_path, monkeypatch):
+    source, audio, output = (tmp_path / n for n in ("source.webm", "audio.wav", "result.mp4"))
+    source.write_bytes(b"video"); audio.write_bytes(b"audio")
+    calls = []
+    def fail(command, **kwargs):
+        calls.append(command)
+        return subprocess.CompletedProcess(command, 1, stdout="", stderr="permission denied\n" * 400)
+    monkeypatch.setattr(video_edit.imageio_ffmpeg, "get_ffmpeg_exe", lambda: "ffmpeg")
+    monkeypatch.setattr(video_edit.subprocess, "run", fail)
+    with pytest.raises(RuntimeError) as error:
+        video_edit.add_video_audio(str(source), str(audio), str(output))
+    assert len(str(error.value)) <= 1200
+    assert len(calls) == 1
+    assert not output.exists()
+    assert source.read_bytes() == b"video" and audio.read_bytes() == b"audio"

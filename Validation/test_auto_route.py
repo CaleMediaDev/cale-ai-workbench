@@ -790,3 +790,29 @@ class ScopedRepairIntentTests(unittest.TestCase):
             messages.append({"role": "user", "content": raw})
             self.assertEqual(_task_intent(messages)[0], raw)
             self.assertTrue(is_game_task(messages))
+
+
+def test_latest_repair_envelope_preserves_newer_host_followups():
+    from auto_route import _task_intent
+    make = ScopedRepairIntentTests().repair_messages
+    messages = make("What is two plus two?") + make(
+        "What is two plus two?", "Build an arcade game app.",
+        tail="\nDiagnostic: unrelated private observation")
+    intent = _task_intent(messages)[0]
+    assert intent == "What is two plus two?\nBuild an arcade game app."
+    assert is_game_task(messages)
+    assert task_size(messages) == "deep"
+
+
+def test_repeated_host_followups_keep_interspersed_genuine_user_messages():
+    from auto_route import _task_intent
+    make = ScopedRepairIntentTests().repair_messages
+    messages = make("What is two plus two?", "Use whole numbers.")
+    messages.append({"role": "user", "content": "Show the answer clearly."})
+    messages += make("What is two plus two?", "Use whole numbers.",
+                     tail="\nDiagnostic: arcade shooter game")
+    messages.append({"role": "user", "content": "Keep the explanation concise."})
+    assert _task_intent(messages)[0] == (
+        "What is two plus two?\nUse whole numbers.\n"
+        "Show the answer clearly.\nKeep the explanation concise.")
+    assert not is_game_task(messages)
