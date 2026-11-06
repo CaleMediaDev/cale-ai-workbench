@@ -82,10 +82,10 @@ def ensure(root: Path = ROOT) -> Path:
             try:
                 found = subprocess.run(locate, capture_output=True, text=True,
                                        timeout=30, creationflags=HIDE)
-            except subprocess.TimeoutExpired:
-                # Discovery can hang while imageio validates a broken binary.
-                # Let the pinned-package reinstall recover it as for other
-                # discovery failures.
+            except (subprocess.TimeoutExpired, UnicodeDecodeError):
+                # Discovery can hang or emit undecodable output when the
+                # package is broken. Let the pinned-package reinstall recover
+                # it as for other discovery failures.
                 found = subprocess.CompletedProcess(locate, 1, "", "")
             source = Path(shutil.which(found.stdout.strip()) or found.stdout.strip())
             if found.returncode or not _working_executable(source):
