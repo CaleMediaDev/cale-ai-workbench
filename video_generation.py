@@ -478,6 +478,8 @@ def _render_job(job_id: str, data: dict) -> None:
                             try:
                                 with target:
                                     shutil.copyfileobj(source, target)
+                                    if target.tell() < 1000:
+                                        raise RuntimeError("The generated video file is empty.")
                             except BaseException:
                                 # Do not leave a truncated export blocking a retry.
                                 # Exclusive creation above must succeed before cleanup.
@@ -502,6 +504,8 @@ def _render_job(job_id: str, data: dict) -> None:
                                 try:
                                     with target:
                                         shutil.copyfileobj(source, target)
+                                        if target.tell() < 1000:
+                                            raise RuntimeError("The generated video file is empty.")
                                 except BaseException:
                                     try:
                                         destination.unlink()

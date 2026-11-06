@@ -392,7 +392,8 @@ def test_undersized_mp4_leaves_destination_available_for_retry(tmp_path, size):
     assert rendered.read_bytes() == content
 
 
-def test_failed_mp4_copy_removes_partial_destination(tmp_path):
+@pytest.mark.parametrize("copy_raises", [True, False])
+def test_failed_mp4_copy_removes_partial_destination(tmp_path, copy_raises):
     job_id = "d" * 32
     runtime = tmp_path / "runtime"
     jobs = tmp_path / "jobs"
@@ -415,7 +416,9 @@ def test_failed_mp4_copy_removes_partial_destination(tmp_path):
 
     def fail_after_partial_copy(source, target):
         target.write(source.read(100))
-        raise OSError("export write failed")
+        if copy_raises:
+            raise OSError("export write failed")
+        # A source truncated after the size check can reach EOF normally.
 
     with patch.object(video_generation, "RUNTIME", runtime), patch.object(
         video_generation, "JOBS", jobs
@@ -428,7 +431,9 @@ def test_failed_mp4_copy_removes_partial_destination(tmp_path):
         video_generation.shutil, "copyfileobj", side_effect=fail_after_partial_copy
     ):
         launch.return_value.poll.return_value = None
-        with pytest.raises(OSError, match="export write failed"):
+        expected_error = OSError if copy_raises else RuntimeError
+        expected_message = "export write failed" if copy_raises else "generated video file is empty"
+        with pytest.raises(expected_error, match=expected_message):
             video_generation._render_job(job_id, data)
         assert not any(call.kwargs.get("state") == "complete" for call in write.call_args_list)
         launch.return_value.terminate.assert_called_once()
