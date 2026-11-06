@@ -78,10 +78,11 @@ def ensure(root: Path = ROOT) -> Path:
             if working(root):
                 return target
             locate = [str(python), "-c",
+                      "import sys; sys.stdout.reconfigure(encoding='utf-8'); "
                       "import imageio_ffmpeg; print(imageio_ffmpeg.get_ffmpeg_exe())"]
             try:
                 found = subprocess.run(locate, capture_output=True, text=True,
-                                       timeout=30, creationflags=HIDE)
+                                       encoding="utf-8", timeout=30, creationflags=HIDE)
             except (OSError, subprocess.TimeoutExpired, UnicodeDecodeError):
                 # Discovery can fail to launch, hang, or emit undecodable
                 # output. Let the pinned-package reinstall recover it as for
@@ -98,7 +99,7 @@ def ensure(root: Path = ROOT) -> Path:
                     raise RuntimeError("Could not install FFmpeg: " +
                                        (install.stderr or install.stdout)[-300:])
                 found = subprocess.run(locate, capture_output=True, text=True,
-                                       timeout=30, creationflags=HIDE)
+                                       encoding="utf-8", timeout=30, creationflags=HIDE)
             source = Path(shutil.which(found.stdout.strip()) or found.stdout.strip())
             if found.returncode or not source.is_file():
                 raise RuntimeError("The FFmpeg package did not provide an executable")
