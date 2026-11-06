@@ -364,6 +364,10 @@ def task_size(messages):
         and not live_lookup
         and not has_media_input(messages)
         and not EXPLICIT_TOOL.search(intent)
+        # Questions can still request work on a supplied artifact. Do not
+        # confuse those with procedural questions such as creating a folder.
+        and not (TOOL_WORK.search(intent)
+                 and re.search(r"\b(?:attached|uploaded|selected)\b", intent, re.I))
     ):
         return "quick"
     if has_media_input(messages) or TOOL_WORK.search(intent) or EXPLICIT_TOOL.search(intent):
