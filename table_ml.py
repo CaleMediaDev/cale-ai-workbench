@@ -218,8 +218,13 @@ def train_table_model(csv_path: str, target_column: str, model_path: str,
                "intercepts": model.intercept_.tolist() if classes else [float(model.intercept_)],
                "metric": metric, "holdout_score": score, "baseline_score": baseline,
                "trained_rows": len(rows), "holdout_rows": len(y_test)}
-    with output.open("x", encoding="utf-8") as stream:
-        json.dump(payload, stream, ensure_ascii=False, indent=2)
+    # Publish only a complete model, without replacing a destination created
+    # while training was running. Failed writes must leave the filename reusable.
+    with tempfile.TemporaryDirectory(prefix=".table-model-", dir=output.parent) as temporary:
+        staged = Path(temporary) / output.name
+        with staged.open("x", encoding="utf-8") as stream:
+            json.dump(payload, stream, ensure_ascii=False, indent=2)
+        output.hardlink_to(staged)
     better = score > baseline if classes else score < baseline
     return {"model_path": str(output), "problem_type": problem_type,
             metric: round(score, 4), "baseline": round(baseline, 4),
