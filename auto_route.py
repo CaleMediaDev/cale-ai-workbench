@@ -378,7 +378,11 @@ def task_size(messages):
         # Questions can still request work on a supplied artifact. Do not
         # confuse those with procedural questions such as creating a folder.
         and not (TOOL_WORK.search(intent)
-                 and re.search(r"\b(?:attached|uploaded|selected)\b", intent, re.I))
+                 and re.search(
+                     r"\b(?:attached|uploaded|selected|"
+                     r"(?:my|this)\s+(?:file|folder|document|pdf|csv|spreadsheet|"
+                     r"screenshot|image|photo|video|audio|data|website|page|repo))\b",
+                     intent, re.I))
     ):
         return "quick"
     if has_media_input(messages) or TOOL_WORK.search(intent) or EXPLICIT_TOOL.search(intent):

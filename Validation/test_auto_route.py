@@ -189,6 +189,22 @@ class AutoRouteTests(unittest.TestCase):
             "quick",
         )
 
+    def test_questions_about_explicit_artifact_references_use_middle_tier(self):
+        for request in (
+            "What are the key findings? Analyze my CSV data.",
+            "What does this file contain? Read this file.",
+            "How is revenue trending? Analyze this spreadsheet.",
+        ):
+            with self.subTest(request=request):
+                self.assertEqual(
+                    task_size([{"role": "user", "content": request}]),
+                    "balanced",
+                )
+        self.assertEqual(
+            task_size([{"role": "user", "content": "How do I create a folder?"}]),
+            "quick",
+        )
+
     def test_short_tool_tasks_do_not_use_fast_tier(self):
         for request in (
             "Read the attached PDF and summarize it.",
