@@ -22,7 +22,7 @@ NEGATED_GUITAR = re.compile(
 )
 NEGATED_SINGER = re.compile(
     rf"\b{NEGATION}\s+(?:(?:a|any)\s+)?(male|man|guy|boy|female|woman|girl)"
-    r"\s+(?:lead\s+)?(?:voice|vocals?|singer|singing)\b", re.I,
+    r"\s+(?:lead\s+)?(?:voice|vocals?|singer|singing|rapper)\b", re.I,
 )
 NEGATED_LEAD_VOCALS = re.compile(
     rf"\b{NEGATION}\s+(?:(?:a|any)\s+)?(?:lead\s+vocals?|(?:lead\s+)?singer|sung\s+verses?|rap|rapping|rapper|rapped)\b", re.I,

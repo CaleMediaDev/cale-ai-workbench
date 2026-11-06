@@ -417,6 +417,30 @@ def test_negated_lead_singer_preserves_vocal_texture():
     assert music_style.requires_sustained_vocals(positive)
 
 
+def test_negated_gendered_rapper_preserves_vocal_texture():
+    for gender, other in (("male", "female"), ("female", "male")):
+        for negation in ("no", "without a", "avoid any", "don't want a"):
+            exclusion = f"{negation} {gender} rapper"
+            request = "Heavy dubstep with vocal chops, " + exclusion
+            assert music_style.vocal_intent(request) == other
+            assert not music_style.explicit_lead_vocals(request)
+            assert not music_style.unambiguous_vocal_song(request)
+            assert not music_style.requires_sustained_vocals(request)
+            caption = music_style.enhance(request)
+            assert "Sparse chopped vocal syllables" in caption
+            assert "clear sung verses and chorus" not in caption
+            assert exclusion not in caption
+            assert not music_style.requires_sustained_vocals(caption)
+            assert music_style.enhance(caption) == caption
+
+        positive = f"Heavy dubstep with vocal chops and a {gender} rapper"
+        assert music_style.vocal_intent(positive) == gender
+        assert music_style.explicit_lead_vocals(positive)
+        assert music_style.unambiguous_vocal_song(positive)
+        assert music_style.requires_sustained_vocals(positive)
+        assert f"{gender} lead vocals throughout" in music_style.enhance(positive)
+
+
 def test_explicit_bpm_is_parsed_for_music_engine():
     assert music_style.requested_bpm("Heavy dubstep at 150 BPM") == 150
     assert music_style.requested_bpm("80-bpm synth groove") == 80
