@@ -244,6 +244,14 @@ def test_full_game_grader_passes_known_game_logic_and_rejects_frame_bug():
     ).replace("</script>", "});</script>")
     deferred_checks = model_fitness.grade_game_html(deferred, root)
     assert len(deferred_checks) == 13 and all(deferred_checks.values()), deferred_checks
+    # Separate browser scripts need no semicolon between their source bodies.
+    # Joining these with just a newline incorrectly calls the number 1.
+    split_scripts = code.replace(
+        "<script>",
+        "<script>window.scriptBoundary = 1</script><script>(function(){",
+    ).replace("</script></html>", "})();</script></html>")
+    split_checks = model_fitness.grade_game_html(split_scripts, root)
+    assert len(split_checks) == 13 and all(split_checks.values()), split_checks
     broken = code.replace("dir*120*dt", "dir*120/60")
     assert model_fitness.grade_game_html(broken, root)["frame_independence"] is False
     assert model_fitness.grade_game_html("<script>window.game={};</script>", root) == {
