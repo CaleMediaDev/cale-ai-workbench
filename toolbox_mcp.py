@@ -1280,7 +1280,7 @@ def document_to_text(path: str, max_chars: int = 20000) -> dict:
         raise ValueError("Path must be a local file")
     text = file_chat.document_text(source, max_scanned_pages=20)
     output = BOX / "Results" / (uuid.uuid4().hex + ".md")
-    output.parent.mkdir(exist_ok=True)
+    output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(text, encoding="utf-8")
     return {
         "source": str(source),
