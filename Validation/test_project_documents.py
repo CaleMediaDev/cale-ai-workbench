@@ -361,6 +361,41 @@ def test_inspector_rebuilds_invalid_or_oversized_cache(tmp_path):
     assert not list(cache.parent.glob("*.tmp"))
 
 
+def test_inspector_rebuilds_cache_removed_before_open(tmp_path):
+    source = tmp_path / "notes.pdf"
+    original = b"unchanged PDF source"
+    source.write_bytes(original)
+    text = "verified document text"
+    real_open = type(source).open
+    removed = False
+
+    with patch.object(file_chat, "ROOT", tmp_path), patch.object(
+        file_chat, "document_text", return_value=text,
+    ) as extract, patch.object(project_memory, "index_document_text"):
+        first = project_documents.inspect(tmp_path, "notes.pdf")
+        assert first["text"] == text and not first["cached"]
+        cache = next((tmp_path / ".local-ai/document-cache").glob("*.txt"))
+
+        def remove_before_open(path, *args, **kwargs):
+            nonlocal removed
+            if path == cache and not removed:
+                removed = True
+                path.unlink()
+            return real_open(path, *args, **kwargs)
+
+        with patch.object(type(source), "open", new=remove_before_open):
+            recovered = project_documents.inspect(tmp_path, "notes.pdf")
+        reused = project_documents.inspect(tmp_path, "notes.pdf")
+
+    assert removed
+    assert recovered["text"] == reused["text"] == text
+    assert not recovered["cached"] and reused["cached"]
+    assert extract.call_count == 2
+    assert cache.read_bytes() == text.encode("utf-8")
+    assert source.read_bytes() == original
+    assert not list(cache.parent.glob("*.tmp"))
+
+
 def test_inspector_preserves_extracted_line_endings_in_cache(tmp_path):
     source = tmp_path / "notes.pdf"
     source.write_bytes(b"placeholder PDF source")

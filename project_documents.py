@@ -96,9 +96,9 @@ def inspect(folder: str | Path, path: str, question: str = "",
             with cache.open("r", encoding="utf-8", newline="") as cached_text:
                 text = cached_text.read(MAX_EXTRACTED_CHARS + 1)
             cached = len(text) <= MAX_EXTRACTED_CHARS
-        except UnicodeDecodeError:
-            # Derived text is disposable; recover from a corrupt cache using
-            # the authoritative source rather than failing every later read.
+        except (OSError, UnicodeDecodeError):
+            # Derived text is disposable; recover from an unreadable, removed,
+            # or corrupt cache using the authoritative source.
             cached = False
     if cached:
         if _digest(source) != digest:
