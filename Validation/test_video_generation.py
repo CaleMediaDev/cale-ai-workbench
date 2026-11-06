@@ -257,6 +257,33 @@ def test_status_preserves_terminal_result_published_during_worker_check(tmp_path
     assert status["progress_percent"] == (100 if terminal_state == "complete" else None)
 
 
+@pytest.mark.parametrize("failure", [
+    FileNotFoundError("tasklist unavailable"),
+    subprocess.TimeoutExpired("tasklist", 10),
+])
+def test_status_preserves_durable_record_when_process_check_fails(tmp_path, failure):
+    job_id = "a" * 32
+    with patch.object(video_generation, "JOBS", tmp_path):
+        video_generation._write(
+            job_id, state="rendering", worker_pid=12345,
+            detail="Generating frames", output_path=str(tmp_path / "clip.mp4"),
+        )
+        record = tmp_path / f"{job_id}.json"
+        before = record.read_bytes()
+        (tmp_path / f"{job_id}-comfy.log").write_bytes(b"65%|######")
+        with patch.object(
+            video_generation, "os", SimpleNamespace(name="nt", SEEK_END=os.SEEK_END)
+        ), patch.object(video_generation.subprocess, "run", side_effect=failure):
+            status = video_generation.video_job_status(job_id)
+
+        assert record.read_bytes() == before
+        assert status["state"] == "rendering"
+        assert status["detail"] == "Generating frames"
+        assert status["output_path"] == str(tmp_path / "clip.mp4")
+        assert status["error"] is None
+        assert status["progress_percent"] == 65
+
+
 def test_video_status_reports_latest_sampler_progress(tmp_path):
     job_id = "a" * 32
     with patch.object(video_generation, "JOBS", tmp_path):

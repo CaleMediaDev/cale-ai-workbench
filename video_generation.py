@@ -154,9 +154,13 @@ def video_job_status(job_id: str) -> dict:
     data = json.loads(path.read_text(encoding="utf-8"))
     pid = data.get("worker_pid")
     if data.get("state") not in FINISHED and pid and os.name == "nt":
-        check = subprocess.run(["tasklist", "/FI", f"PID eq {pid}", "/FO", "CSV", "/NH"],
-                               capture_output=True, text=True, timeout=10, creationflags=HIDE)
-        if check.returncode == 0 and f'"{pid}"' not in check.stdout:
+        try:
+            check = subprocess.run(["tasklist", "/FI", f"PID eq {pid}", "/FO", "CSV", "/NH"],
+                                   capture_output=True, text=True, timeout=10, creationflags=HIDE)
+        except (OSError, subprocess.TimeoutExpired):
+            # An unavailable process check is not evidence that the worker died.
+            check = None
+        if check is not None and check.returncode == 0 and f'"{pid}"' not in check.stdout:
             # The worker may have published its terminal result and exited
             # while tasklist was running. Do not overwrite that result using
             # the stale record read before the process check.
