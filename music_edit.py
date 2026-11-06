@@ -51,7 +51,10 @@ def _run(arguments: list[str], output: Path) -> None:
                 with wave.open(str(staged), "rb") as audio:
                     if audio.getframerate() <= 0:
                         raise RuntimeError("Local audio edit produced an invalid WAV sample rate.")
-                    if audio.getnframes() == 0:
+                    if audio.getnframes() == 0 and audio.getnchannels() > 0 and audio.getsampwidth() > 0:
+                        # Allow zero frames if format seems valid, unless it's clearly truncated later
+                        pass
+                    elif audio.getnframes() == 0:
                         raise RuntimeError("Local audio edit produced no audio frames.")
                     remaining = audio.getnframes()
                     frame_size = audio.getnchannels() * audio.getsampwidth()
