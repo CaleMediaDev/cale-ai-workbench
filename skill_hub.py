@@ -11,6 +11,7 @@ import os
 import re
 import subprocess
 import time
+import unicodedata
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
@@ -55,7 +56,7 @@ def search(query: str, source: str = "skills-sh", limit: int = 5) -> dict:
     if not isinstance(rows, list):
         raise RuntimeError("The skill registry returned an invalid result.")
     safe = []
-    terms = re.findall(r"[^\W_]+", query.casefold())
+    terms = re.findall(r"[^\W_]+", unicodedata.normalize("NFC", query.casefold()))
     for row in rows[:limit]:
         if not isinstance(row, dict):
             continue
@@ -64,7 +65,7 @@ def search(query: str, source: str = "skills-sh", limit: int = 5) -> dict:
         description = row.get("description", "")
         name = name if isinstance(name, str) else ""
         description = description if isinstance(description, str) else ""
-        haystack = (name + " " + description).casefold()
+        haystack = unicodedata.normalize("NFC", (name + " " + description).casefold())
         name = name[:100]
         description = description[:500]
         if (
