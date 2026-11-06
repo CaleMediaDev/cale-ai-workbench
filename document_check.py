@@ -75,7 +75,7 @@ def validate_spec(folder: Path, spec: dict) -> tuple[Path, Path]:
     """Bound paths and fact lists before inspecting a potentially large source."""
     source = _project_path(folder, spec.get("source_path"))
     report = _project_path(folder, spec.get("report_path"))
-    if source == report:
+    if source.samefile(report):
         raise ValueError("Source and report must be different files")
     if report.stat().st_size > MAX_REPORT_BYTES:
         raise ValueError("Report is too large to check")

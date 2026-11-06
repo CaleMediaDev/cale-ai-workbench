@@ -80,6 +80,19 @@ def test_document_check_rejects_non_string_operations(tmp_path, operation):
         document_check.validate_spec(folder, spec)
 
 
+def test_document_check_rejects_hard_linked_source_and_report(tmp_path):
+    folder = _project(tmp_path)
+    # Distinct files are valid, but distinct names for one file are not.
+    document_check.validate_spec(folder, SPEC)
+    report = folder / "summary.md"
+    report.unlink()
+    report.hardlink_to(folder / "terms.txt")
+    assert report.resolve() != (folder / "terms.txt").resolve()
+    assert report.samefile(folder / "terms.txt")
+    with pytest.raises(ValueError, match="Source and report must be different files"):
+        document_check.validate_spec(folder, SPEC)
+
+
 def test_document_check_rejects_wrong_amount_and_prefix_match(tmp_path):
     folder = _project(tmp_path)
     wrong = {**SPEC, "calculations": [{**SPEC["calculations"][0],
