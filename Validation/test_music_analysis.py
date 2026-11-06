@@ -33,6 +33,15 @@ def test_chord_detection_declines_equally_supported_triads():
         assert music_analysis._best_chord(chroma) == expected
 
 
+def test_chord_detection_declines_ties_with_floating_point_roundoff():
+    chroma = np.zeros(12)
+    # C major and A minor have equal support, but their sums use
+    # different operand orders: 0.3 + 0.2 + 0.1 versus 0.1 + 0.3 + 0.2.
+    chroma[[0, 4, 7, 9]] = [0.3, 0.2, 0.1, 0.1]
+    for transposition in range(12):
+        assert music_analysis._best_chord(np.roll(chroma, transposition)) is None
+
+
 def test_key_estimate_declines_empty_input():
     assert music_analysis._best_key(np.zeros(12)) is None
 
