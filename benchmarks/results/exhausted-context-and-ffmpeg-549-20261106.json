@@ -6,13 +6,13 @@
     "task_context.py": "832b2af0bca11cec915600e5146ae028972200628977f205da4e3ae1281f8a4f",
     "Validation/test_native_agent.py": "c300415bbfaf86118f1c07f905588e522531ba6aa517341992a9cf3f0e12a537",
     "music_stems.py": "25b4bd5d0954f5b4b827d743b99b0e9eaf9e74e26ffecbefc1d1596016b5a1dd",
-    "Validation/test_music_stems.py": "6967e7da383e76e88a7dbaec5c896ca8ac5a66991ff13432a210bd36286a4f4a"
+    "Validation/test_music_stems.py": "48b98a9a23e7b5f8490ad2ce95a83da04a00fb6f9dd53921b905ea4ebc3b5b51"
   },
   "validation": {
     "affected_modules": {
       "exit_code": 0,
       "source_bytes_unchanged": true,
-      "scope": "29 public context checks and one Windows FFmpeg retry control; separate real Linux before/after regression, not a full suite"
+      "scope": "Historical qualified 29 public context checks and exact PR-head Windows retry; Linux before/after. Corrected test fixture requires final package qualification before publication."
     }
   },
   "context": {
@@ -44,8 +44,9 @@
       "fix": "Use ffmpeg on POSIX and ffmpeg.exe on Windows in the stem worker.",
       "validation": "Real Linux baseline: new lookup fails, original retry passes. Head: both pass. Real Windows: retry passes.",
       "credit": "CaleMediaDev",
-      "integration_status": "qualified_for_integration",
-      "qualification_sha256": "c105395446ddaf0359f1b3ee9fcd71dc17c99819b06fdfacfd80b430d47f1907"
+      "integration_status": "locally_integrated_pending_packaged_validation_and_main_push",
+      "qualification_sha256": "c105395446ddaf0359f1b3ee9fcd71dc17c99819b06fdfacfd80b430d47f1907",
+      "integration_commit": "3f8f423f8a22063690f7901cf1b31b2052a81e9d"
     }
   ],
   "limits": [
@@ -53,5 +54,13 @@
     "No model-driven complete-app success claimed. A real local trial failed before the context correction.",
     "Private experimental native core, matcher and worker hooks are excluded.",
     "Exact installer qualification is required before publication."
-  ]
+  ],
+  "test_isolation_correction": {
+    "first_package": "1 failed, 30 passed; existing invalid-output test attempted live model inventory via GPU lease, blocked before transport.",
+    "boundary_sha256": "2334fc7852e6047e822806ac3d50ad195408bd3df097f2085d499813049e5d81",
+    "log_sha256": "cf5ba53eed1bf5c63e387f8c4b91a3b47e30a1ba701cf071ac409f81088f0a8e",
+    "change": "Only this unit test substitutes fresh nullcontext setup and GPU leases; all original error and file-preservation assertions retained.",
+    "production_change": false,
+    "current_corrected_test_qualification": "Exact rebuilt package must pass before publication."
+  }
 }

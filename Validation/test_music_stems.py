@@ -43,7 +43,13 @@ def test_failed_runtime_rebuild_is_retried(tmp_path):
         assert marker.read_text(encoding="ascii") == music_stems.VERSION
 
 
-def test_separation_requires_existing_audio_and_empty_output(tmp_path):
+def test_separation_requires_existing_audio_and_empty_output(tmp_path, monkeypatch):
+    from contextlib import nullcontext
+
+    # Invalid-output checks must not acquire the live GPU lease or unload a
+    # user's models. Keep both folder assertions independent of running services.
+    monkeypatch.setattr(music_stems.music_backend, "_setup_lock", nullcontext)
+    monkeypatch.setattr(music_stems.music_backend, "_music_gpu_lease", nullcontext)
     source = tmp_path / "song.mp3"
     source.write_bytes(b"music")
     with pytest.raises(ValueError, match="separate output folder"):
