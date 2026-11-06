@@ -167,6 +167,25 @@ class ProjectMemoryContributionTests(unittest.TestCase):
                 self.assertEqual([row["id"] for row in found], [saved["id"]])
 
 
+    def test_document_chunk_boundary_preserves_private_use_token(self):
+        import hashlib
+
+        source = self.folder / "report.pdf"
+        source.write_bytes(b"local document fixture")
+        term = "alpha\ue000beta"
+        text = " " * (memory.DOCUMENT_CHUNK_CHARS - len("alpha")) + term
+        result = memory.index_document_text(
+            self.folder, source, text,
+            hashlib.sha256(source.read_bytes()).hexdigest(),
+            revision="chunk-regression",
+        )
+
+        self.assertEqual(result["parts"], 2)
+        found = memory.search(self.folder, term, kind="document")
+        self.assertEqual([row["id"] for row in found], ["document:report.pdf:2"])
+        self.assertEqual(memory.get(self.folder, found[0]["id"])["body"], term)
+
+
     def test_search_preserves_unicode61_private_use_token_characters(self):
         term = "alpha\ue000beta"
         saved = memory.save(self.folder, "note", "Private-use token", term)
