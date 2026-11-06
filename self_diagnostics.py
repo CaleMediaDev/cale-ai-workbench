@@ -640,7 +640,7 @@ def pytest_configure(config):
                 and _read_live_progress(context).get("nonce") == context["nonce"]):
             _LIVE_PLUGIN = _LiveSelfCheck(context)
             _LIVE_PLUGIN.publish()
-    except (OSError, ValueError, TypeError, KeyError, sqlite3.Error):
+    except (OSError, ValueError, TypeError, KeyError, RecursionError, sqlite3.Error):
         if _LIVE_PLUGIN is not None:
             try:
                 _LIVE_PLUGIN.close()
