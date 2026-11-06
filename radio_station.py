@@ -258,6 +258,8 @@ class Player:
     def blend(self, path, seconds=FADE_SECONDS):
         if self.mixing or self.paused_at is not None:
             return False
+        # Validate before starting audio or transferring ownership of the decks.
+        fade_seconds = max(0.1, float(seconds))
         self.prepare(path)
         # Keep the outgoing channel intact if the new channel cannot start.
         try:
@@ -271,7 +273,7 @@ class Player:
         self.outgoing, self.active = self.active, self.prepared
         self.prepared = None
         self.fade_start = self.now()
-        self.fade_seconds = max(0.1, float(seconds))
+        self.fade_seconds = fade_seconds
         try:
             self.advance_mix()
         except Exception:
