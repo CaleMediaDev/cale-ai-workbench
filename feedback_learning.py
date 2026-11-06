@@ -69,6 +69,11 @@ def _connect(root: str | Path):
         # Retraction must not make superseded generations current again.
         # Keep only generation metadata here, never review text or preferences.
         generation_schema = "SELECT 1 FROM sqlite_master WHERE type='table' AND name='feedback_generations'"
+        recall_meta = conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='feedback_recall_meta_v1'").fetchone()
+        old_mode = conn.execute("SELECT floor_mode FROM feedback_recall_meta_v1 WHERE id=1").fetchone() if recall_meta else None
+        legacy_mode = old_mode is not None and old_mode[0] == 0
+        if legacy_mode and not conn.in_transaction:
+            conn.execute("BEGIN IMMEDIATE")
         if not conn.execute(generation_schema).fetchone():
             # Backfill once, under the same writer lock as table creation.
             # Rechecking after admission avoids rescanning history when two
@@ -90,6 +95,10 @@ def _connect(root: str | Path):
                 )""")
                 conn.execute("""INSERT INTO feedback_generations (task_id,generation)
                     SELECT task_id,MAX(generation) FROM feedback GROUP BY task_id""")
+        if conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='feedback_recall_meta_v1'").fetchone():
+            # Floors observed/created by this writer are now authoritative.
+            # Missing floor triggers still force the normal bounded rebuild.
+            conn.execute("UPDATE feedback_recall_meta_v1 SET floor_mode=1,complete=0 WHERE id=1 AND floor_mode=0")
         yield conn
         conn.commit()
     finally:
