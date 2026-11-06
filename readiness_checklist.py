@@ -345,7 +345,10 @@ def snapshot(root: Path = ROOT) -> dict:
     rows.append(_item("Local AI", local_state, local_detail, True))
 
     heartbeat = state / "heartbeat.txt"
-    active_monitor = heartbeat.is_file() and time.time() - heartbeat.stat().st_mtime < 90
+    try:
+        active_monitor = heartbeat.is_file() and time.time() - heartbeat.stat().st_mtime < 90
+    except OSError:
+        active_monitor = False
     rows.append(_item("Task supervisor", "ready" if active_monitor else "attention",
                       "Running and checking tasks" if active_monitor else "Waiting for supervisor heartbeat", True))
 

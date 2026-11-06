@@ -65,6 +65,36 @@ def test_checklist_distinguishes_installed_optional_tools_from_checked_core(tmp_
     assert result["rows"][-1]["state"] == "attention"
 
 
+def test_snapshot_survives_heartbeat_disappearing_between_checks(tmp_path):
+    heartbeat = tmp_path / "LongTasks/heartbeat.txt"
+    heartbeat.parent.mkdir()
+    heartbeat.write_text("alive")
+    original_stat = Path.stat
+    heartbeat_stats = 0
+
+    def stat_with_disappearing_heartbeat(path, *args, **kwargs):
+        nonlocal heartbeat_stats
+        if path == heartbeat:
+            heartbeat_stats += 1
+            if heartbeat_stats > 1:
+                raise FileNotFoundError(str(path))
+        return original_stat(path, *args, **kwargs)
+
+    with (patch.object(Path, "stat", stat_with_disappearing_heartbeat),
+          patch.object(readiness_checklist, "urlopen", side_effect=OSError),
+          patch.object(readiness_checklist.capability_index, "health",
+                       return_value={"ok": False}),
+          patch.object(readiness_checklist.core_tool_health, "missing", return_value=[]),
+          patch.object(readiness_checklist.ffmpeg_runtime, "working", return_value=False)):
+        result = readiness_checklist.snapshot(tmp_path)
+
+    assert heartbeat_stats == 2
+    supervisor = next(row for row in result["rows"] if row["label"] == "Task supervisor")
+    assert supervisor["state"] == "attention"
+    assert supervisor["detail"] == "Waiting for supervisor heartbeat"
+    assert not result["core_ready"]
+
+
 def test_completed_media_job_only_counts_when_its_output_still_exists(tmp_path):
     jobs = tmp_path / "image-jobs"
     jobs.mkdir()
