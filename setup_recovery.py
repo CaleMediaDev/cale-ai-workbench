@@ -204,13 +204,22 @@ def recover() -> bool:
         lock = lock_path.open("a+b")
     except OSError:
         return False
+    try:
+        lock.seek(0, 2)
+        if lock.tell() == 0:
+            lock.write(b"1")
+            lock.flush()
+        lock.seek(0)
+    except OSError:
+        # Buffered close retries a failed flush. Close this handle, but do not
+        # let that second initialization error escape or consume an attempt.
+        try:
+            lock.close()
+        except OSError:
+            pass
+        return False
     with lock:
         try:
-            lock.seek(0, 2)
-            if lock.tell() == 0:
-                lock.write(b"1")
-                lock.flush()
-            lock.seek(0)
             msvcrt.locking(lock.fileno(), msvcrt.LK_NBLCK, 1)
         except OSError:
             return False
