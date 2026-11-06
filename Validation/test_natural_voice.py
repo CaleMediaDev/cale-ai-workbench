@@ -176,11 +176,17 @@ class NaturalVoiceTests(unittest.TestCase):
             status.write_text(json.dumps({"status": "working"}))
             lock_path = status.parent / "natural-voice.lock"
             original_open = Path.open
+            events = []
             lock = MagicMock()
             lock.__enter__.return_value = lock
             lock.tell.return_value = 0
-            lock.flush.side_effect = OSError(errno.ENOSPC, "No space for lock byte")
-            fake_msvcrt = SimpleNamespace(LK_NBLCK=1, locking=MagicMock())
+            lock.write.side_effect = lambda data: events.append("write")
+            def fail_flush():
+                events.append("flush")
+                raise OSError(errno.ENOSPC, "No space for lock byte")
+            lock.flush.side_effect = fail_flush
+            fake_msvcrt = SimpleNamespace(LK_NBLCK=1, locking=MagicMock(
+                side_effect=lambda *args: events.append("lock")))
 
             def open_lock(path, *args, **kwargs):
                 if path == lock_path:
@@ -197,18 +203,26 @@ class NaturalVoiceTests(unittest.TestCase):
             self.assertEqual(json.loads(status.read_text())["status"], "error")
             self.assertIn("No space for lock byte", status.read_text())
             lock.write.assert_called_once_with(b"1")
-            fake_msvcrt.locking.assert_not_called()
+            fake_msvcrt.locking.assert_called_once_with(lock.fileno.return_value, fake_msvcrt.LK_NBLCK, 1)
+            self.assertEqual(events, ["lock", "write", "flush"])
             run.assert_not_called()
 
     def test_failed_lock_write_does_not_raise_again_during_close(self):
         failure = OSError(errno.ENOSPC, "No space for lock byte")
 
+        events = []
+
         class FullDisk(io.BytesIO):
+            def fileno(self):
+                return 42  # Only the fake msvcrt receives this neutral descriptor.
+
             def write(self, data):
+                events.append("write")
                 raise failure
 
         raw = FullDisk()
-        fake_msvcrt = SimpleNamespace(LK_NBLCK=1, locking=MagicMock())
+        fake_msvcrt = SimpleNamespace(LK_NBLCK=1, locking=MagicMock(
+            side_effect=lambda *args: events.append("lock")))
 
         def open_lock(path, mode, **kwargs):
             self.assertEqual(mode, "a+b")
@@ -227,7 +241,8 @@ class NaturalVoiceTests(unittest.TestCase):
                 natural_voice.install()
             save_status.assert_called_once_with(status, "error", str(failure)[:400], 0)
             self.assertTrue(raw.closed)
-            fake_msvcrt.locking.assert_not_called()
+            fake_msvcrt.locking.assert_called_once_with(42, fake_msvcrt.LK_NBLCK, 1)
+            self.assertEqual(events, ["lock", "write"])
             run.assert_not_called()
 
     def test_contended_empty_lock_does_not_overwrite_active_progress(self):
