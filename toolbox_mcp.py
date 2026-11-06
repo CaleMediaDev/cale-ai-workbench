@@ -307,6 +307,7 @@ async def _discover_tools(session):
     """Bound optional backend discovery so a broken cursor cannot stall startup."""
     tools = []
     seen = set()
+    tool_names = set()
     cursor = None
     async with asyncio.timeout(DISCOVERY_SECONDS):
         for page in range(DISCOVERY_MAX_PAGES):
@@ -314,6 +315,10 @@ async def _discover_tools(session):
                        else await session.list_tools(cursor=cursor))
             if len(tools) + len(listing.tools) > DISCOVERY_MAX_TOOLS:
                 raise ValueError("Backend tool discovery exceeded its tool limit")
+            for tool in listing.tools:
+                if tool.name in tool_names:
+                    raise ValueError("Backend tool discovery returned a duplicate tool name")
+                tool_names.add(tool.name)
             tools.extend(listing.tools)
             cursor = getattr(listing, "next_cursor", None)
             if cursor is None:
