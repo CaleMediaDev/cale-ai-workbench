@@ -10,10 +10,12 @@ Created by [Cale Media](https://calemedia.com).
 2. Click **Install** and watch the progress bar. Accounts are optional; you can connect them while models download.
 3. Click **Open Cale AI** and describe what you want in chat.
 
-Release 0.5.541 gives local feedback memory a bounded background index so older relevant lessons can be retrieved without reading every review. It also catches a known invalid pytest parameter before publishing a donated proposal. [Validation and limits](benchmarks/results/indexed-feedback-and-donation-preflight-541-20261106.json).
+Release 0.5.542 includes 20 reviewed fixes for document recovery, browser input, video trimming, skill synchronization, setup recovery and media controls. Interrupted model-metadata checks retain their interruption instead of becoming misleading context-capacity errors. [Validation and limits](benchmarks/results/reviewed-donations-and-model-discovery-542-20261106.json).
 
 <details>
 <summary>Feature history and validation</summary>
+
+Release 0.5.541 gives local feedback memory a bounded background index so older relevant lessons can be retrieved without reading every review. It also catches a known invalid pytest parameter before publishing a donated proposal. [Validation and limits](benchmarks/results/indexed-feedback-and-donation-preflight-541-20261106.json).
 
 Release 0.5.540 includes 18 reviewed fixes for duration parsing, task routing, model downloads, media tools and business contact matching. Two unsafe cleanup proposals were rejected. [Validation and limits](benchmarks/results/reviewed-donations-540-20261106.json).
 
