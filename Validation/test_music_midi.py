@@ -252,6 +252,39 @@ def test_transcription_does_not_treat_directory_as_midi(tmp_path, has_midi_file)
     assert source.read_bytes() == b"audio"
 
 
+def test_transcription_ignores_directory_matching_note_csv(tmp_path):
+    source = tmp_path / "guitar.wav"
+    source.write_bytes(b"audio")
+    target = tmp_path / "notes"
+
+    def render(args, **_kwargs):
+        staging = Path(args[-1])
+        directory = staging / "extra.csv"
+        directory.mkdir()
+        (directory / "payload").write_bytes(b"not a note-event CSV")
+        (staging / "guitar.mid").write_bytes(b"MThd")
+        (staging / "guitar.csv").write_text(
+            ",".join(music_midi.NOTE_COLUMNS) + "\n0.0,1.0,69,85,1,2\n"
+        )
+        return type("Done", (), {"returncode": 0})()
+
+    with patch.object(music_midi.music_backend, "_setup_lock", return_value=nullcontext()), \
+         patch.object(music_midi, "install", return_value=Path("python.exe")), \
+         patch.object(music_midi.subprocess, "run", side_effect=render):
+        result = music_midi.transcribe_to_midi(str(source), str(target))
+
+    assert result["midi_path"] == str(target / "guitar.mid")
+    assert set(result["files"]) == {
+        str(target / "guitar.mid"), str(target / "guitar.csv")
+    }
+    assert set(target.iterdir()) == {target / "guitar.mid", target / "guitar.csv"}
+    assert (target / "guitar.mid").read_bytes() == b"MThd"
+    with (target / "guitar.csv").open(newline="") as stream:
+        row = next(csv.DictReader(stream))
+    assert json.loads(row["pitch_bend"]) == [1.0, 2.0]
+    assert source.read_bytes() == b"audio"
+
+
 def test_failed_transcription_with_partial_output_can_be_retried(tmp_path):
     source = tmp_path / "guitar.wav"
     source.write_bytes(b"audio")
