@@ -40,7 +40,10 @@ def _working_executable(target: Path) -> bool:
         result = subprocess.run([str(target), "-version"], capture_output=True,
                                 text=False, timeout=10, creationflags=HIDE)
         return result.returncode == 0 and result.stdout.startswith(b"ffmpeg version")
-    except (OSError, subprocess.TimeoutExpired, UnicodeDecodeError):
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    except UnicodeDecodeError:
+        # Handle cases where stdout/stderr might be non-UTF8 but is still valid binary output
         return False
 
 

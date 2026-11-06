@@ -294,6 +294,7 @@ def test_ensure_resolves_discovered_ffmpeg_command_on_path(tmp_path):
     (b"ffmpeg version 7.0\nconfiguration: --extra-version=\xff\n", 0, True),
     (b"ffmpeg version 7.0\n", 1, False),
     (b"not ffmpeg\n", 0, False),
+    (b"ffmpeg version 7.0\ncorrupt data", 0, False)
 ])
 def test_version_health_check_uses_bytes(tmp_path, stdout, returncode, expected):
     target = ffmpeg_runtime.executable(tmp_path)
