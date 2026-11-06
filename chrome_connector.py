@@ -104,9 +104,29 @@ def installed_version() -> str:
     mapping_lines = dedent(mapping_lines)
     # Duplicate root keys are ambiguous; do not advertise the first value as
     # installed when another version entry may override it in the YAML loader.
-    version_keys = re.findall(
-        r"^(?:version|'version'|\"version\")[ \t]*:", mapping_lines, re.M
+    root_keys = re.findall(
+        r"^(version|'version'|\"(?:[^\"\\\r\n]|\\.)*\")[ \t]*:",
+        mapping_lines, re.M,
     )
+    version_keys = []
+    for key in root_keys:
+        if key.startswith('"'):
+            # YAML hexadecimal escapes can spell the same key as a literal
+            # version entry. Consume other escapes whole so a literal
+            # backslash followed by 'u0073' is not decoded accidentally.
+            try:
+                key = re.sub(
+                    r"\\(?:x([0-9A-Fa-f]{2})|u([0-9A-Fa-f]{4})|U([0-9A-Fa-f]{8})|.)",
+                    lambda m: chr(int(next(g for g in m.groups() if g is not None), 16))
+                    if any(g is not None for g in m.groups()) else m[0],
+                    key[1:-1],
+                )
+            except ValueError:
+                return ""
+        elif key.startswith("'"):
+            key = key[1:-1]
+        if key == "version":
+            version_keys.append(key)
     if len(version_keys) != 1:
         return ""
     match = re.search(r"^(?:version|'version'|\"version\")[ \t]*:[ \t]+(['\"]?)([\w.\-]+)\1(?:[ \t]+#[^\r\n]*)?[ \t]*\r?$", mapping_lines, re.M)

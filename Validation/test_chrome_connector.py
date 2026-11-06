@@ -290,6 +290,23 @@ def test_installed_version_rejects_continued_version_scalar(
     assert chrome_connector.installed_version() == ""
 
 
+@pytest.mark.parametrize("escaped_key", [
+    r'"ver\x73ion"',
+    r'"ver\u0073ion"',
+    r'"ver\U00000073ion"',
+])
+def test_installed_version_rejects_escaped_duplicate_version_key(
+    tmp_path, monkeypatch, escaped_key
+):
+    monkeypatch.setattr(chrome_connector, "PLUGIN", tmp_path)
+    (tmp_path / "plugin.yaml").write_text(
+        f"version: 0.2.6\n{escaped_key}: 9.9.9\n", encoding="utf-8"
+    )
+
+    # Each escaped key decodes to the same root key as the first entry.
+    assert chrome_connector.installed_version() == ""
+
+
 def test_wrong_companion_version_cannot_pair(tmp_path, monkeypatch):
     plugin = tmp_path / "plugin"
     plugin.mkdir()
