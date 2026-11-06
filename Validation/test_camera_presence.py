@@ -922,6 +922,51 @@ def test_neutral_avatar_is_the_illustrated_asset_not_a_capture():
     pixels = avatar_video.neutral_camera_avatar()
     assert pixels.dtype == np.uint8 and pixels.shape == (360, 880, 3)
 
+def test_avatar_engine_closes_when_virtual_output_shutdown_raises(monkeypatch, tmp_path):
+    import queue
+    import threading
+    import time
+    import video_generation
+    import camera_presence as camera
+
+    worker = camera.AvatarFrameWorker.__new__(camera.AvatarFrameWorker)
+    worker.profile = tmp_path
+    worker.stopped = threading.Event()
+    worker.authorized = lambda: not worker.stopped.is_set()
+    worker.virtual_output = False
+    worker.pending = queue.Queue(maxsize=1)
+    worker.pending.put((np.zeros((8, 8, 3), dtype=np.uint8), time.monotonic()))
+    failure = RuntimeError('virtual output shutdown failed')
+    worker.sender_worker = Mock()
+    worker.sender_worker.close.side_effect = failure
+    worker._publish = Mock()
+
+    engine = Mock()
+    engine.probe.return_value = {'ok': True, 'gpu_allocation_bytes': 1}
+    def render(*_args, **_kwargs):
+        worker.stopped.set()
+        return None
+    engine.render.side_effect = render
+    lease = Mock()
+    monkeypatch.setattr(camera, 'AvatarGpuLease', Mock(return_value=lease))
+    monkeypatch.setattr(camera, 'avatar_heavy_work_active', lambda: False)
+    monkeypatch.setattr(camera, 'avatar_frame_fresh', lambda _: True)
+    monkeypatch.setattr(camera, 'emit', Mock())
+    monkeypatch.setattr(avatar_video, 'CaleAvatar', Mock(return_value=engine))
+    monkeypatch.setattr(avatar_video, 'neutral_camera_avatar', lambda: np.zeros((8, 8, 3), dtype=np.uint8))
+    monkeypatch.setattr(video_generation, '_avatar_runtime_facts', lambda *_: {})
+    monkeypatch.setattr(video_generation, '_avatar_finish_deferred_probe', Mock())
+
+    with pytest.raises(RuntimeError) as caught:
+        worker._run()
+
+    assert caught.value is failure
+    engine.render.assert_called_once()
+    worker.sender_worker.close.assert_called_once_with()
+    engine.close.assert_called_once_with()
+    lease.close.assert_called_once_with()
+
+
 def test_avatar_worker_keeps_latest_frame_and_never_raw_fallback(monkeypatch,tmp_path):
     import threading,time
     import camera_presence as camera
