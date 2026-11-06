@@ -65,7 +65,9 @@ def _run(arguments: list[str], output: Path, timeout: int = 7200) -> dict:
         except OSError:
             # Cleanup is best-effort; preserve the FFmpeg failure diagnostic.
             pass
-        raise RuntimeError((result.stderr or result.stdout)[-1200:] or "Video edit failed.")
+        # Callers inspect the diagnostic to decide whether recovery is safe;
+        # trailing messages must not hide the original codec/container error.
+        raise RuntimeError((result.stderr or result.stdout) or "Video edit failed.")
     return {"path": str(output), "bytes": output.stat().st_size}
 
 

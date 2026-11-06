@@ -48,6 +48,43 @@ def test_soundtrack_replacement_does_not_retry_unrelated_io_failure(tmp_path, mo
     assert not output.exists()
 
 
+def test_soundtrack_retries_when_codec_rejection_precedes_long_diagnostics(tmp_path, monkeypatch):
+    source, audio, output = (tmp_path / name for name in ("source.webm", "soundtrack.wav", "voiced.mp4"))
+    source.write_bytes(b"original video")
+    audio.write_bytes(b"original audio")
+    attempts = []
+    diagnostic = (
+        "Could not find tag for codec vp8 in stream #0, "
+        "codec not currently supported in container\n"
+        + "Additional muxer diagnostic.\n" * 60
+    )
+    assert "codec not currently supported in container" not in diagnostic[-1200:]
+
+    def encode(command, **kwargs):
+        attempts.append(command)
+        assert command[-1] == str(output)
+        if len(attempts) == 1:
+            assert command[command.index("-c:v") + 1] == "copy"
+            output.write_bytes(b"partial container")
+            return subprocess.CompletedProcess(command, 1, stdout="", stderr=diagnostic)
+        assert len(attempts) == 2
+        assert not output.exists()
+        assert command[command.index("-c:v") + 1] == "libx264"
+        output.write_bytes(b"converted video")
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(video_edit.imageio_ffmpeg, "get_ffmpeg_exe", lambda: "ffmpeg")
+    monkeypatch.setattr(video_edit.subprocess, "run", encode)
+
+    result = video_edit.add_video_audio(str(source), str(audio), str(output))
+
+    assert len(attempts) == 2
+    assert result["path"] == str(output)
+    assert output.read_bytes() == b"converted video"
+    assert source.read_bytes() == b"original video"
+    assert audio.read_bytes() == b"original audio"
+
+
 def _clip(path, color):
     subprocess.run([imageio_ffmpeg.get_ffmpeg_exe(), "-hide_banner", "-loglevel", "error",
                     "-f", "lavfi", "-i", f"color=c={color}:s=160x90:r=10:d=0.5",
