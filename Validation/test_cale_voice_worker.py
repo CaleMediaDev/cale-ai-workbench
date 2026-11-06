@@ -118,7 +118,7 @@ def test_empty_generated_waveform_preserves_existing_recording(tmp_path):
     target = tmp_path / "voice.wav"
     target.write_bytes(b"previous recording")
     model = Mock()
-    model.generate_voice_clone.return_value = ([[]], 24000)
+    model.generate_voice_clone.return_value = ([], 24000) # Testing empty batch
     writer = Mock()
 
     with patch.dict(sys.modules, {"soundfile": SimpleNamespace(write=writer)}):

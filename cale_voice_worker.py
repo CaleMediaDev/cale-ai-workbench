@@ -50,7 +50,7 @@ def generate(model, voice_prompt, text: str, output_path: str) -> dict:
             language="English",
             voice_clone_prompt=voice_prompt,
         )
-    if len(audio) == 0 or len(audio[0]) == 0:
+    if not audio or not audio[0]:
         raise ValueError("Voice generation returned an empty waveform")
     if not all(math.isfinite(sample) for sample in audio[0]):
         raise ValueError("Voice generation returned non-finite waveform samples")
