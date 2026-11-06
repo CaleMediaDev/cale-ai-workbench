@@ -130,6 +130,14 @@ def test_prompt_clarification_falls_back_if_model_changes_subject_or_is_offline(
         assert quick_image.clarify_prompt(prompt) == prompt
 
 
+def test_prompt_clarification_falls_back_if_http_response_is_malformed():
+    from http.client import BadStatusLine
+
+    prompt = "a small red kite against a clear blue sky"
+    with patch.object(quick_image, "urlopen", side_effect=BadStatusLine("not HTTP")):
+        assert quick_image.clarify_prompt(prompt) == prompt
+
+
 def test_prompt_clarification_falls_back_if_response_body_is_truncated():
     from http.client import IncompleteRead
 
