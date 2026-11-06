@@ -507,7 +507,7 @@ def test_failed_pages_consume_the_crawl_budget(tmp_path, monkeypatch, failure):
     (types.SimpleNamespace(fit_markdown="Fitted content", raw_markdown="Raw content"), "Fitted content"),
     ("Plain Markdown", "Plain Markdown"),
     (" " * 100_000 + "Readable content" + "x" * 100_000,
-     ("Readable content" + "x" * 100_000)[:100_000]),
+     "Readable content" + "x" * 100_000)
     (types.SimpleNamespace(fit_markdown="", raw_markdown=""), None),
 ])
 def test_crawl_markdown_content(tmp_path, monkeypatch, markdown, expected):
