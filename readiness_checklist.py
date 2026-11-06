@@ -241,7 +241,10 @@ def run_optional_checks(root: Path = ROOT, *, force: bool = False,
             output = Path(folder) / "voice-check.wav"
             speech = _media_probe(root, "speak", text="Cale is ready.",
                                   output_path=str(output), play=False)
-            speech_ok = bool(speech["ok"] and output.is_file() and output.stat().st_size > 1000)
+            try:
+                speech_ok = bool(speech["ok"] and output.is_file() and output.stat().st_size > 1000)
+            except OSError:
+                speech_ok = False
         result["voice"] = {
             "ok": bool(microphone["ok"] and speech_ok and recognition_ok),
             "microphone": microphone["ok"], "speech": speech_ok,
