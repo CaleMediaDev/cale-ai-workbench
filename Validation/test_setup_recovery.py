@@ -264,6 +264,48 @@ def test_unavailable_repair_lock_returns_false_without_consuming_attempt(tmp_pat
     assert not (state / "base-install-repair.json").exists()
 
 
+def test_repair_lock_initialization_failure_does_not_consume_attempt(tmp_path, monkeypatch):
+    state = tmp_path / "LongTasks"
+    state.mkdir()
+    (tmp_path / "Install-Backend.ps1").write_text("# fixture", encoding="utf-8")
+    progress_path = state / "install-progress.json"
+    progress_text = json.dumps({
+        "status": "error", "current": "Setup needs attention: download failed",
+        "updated": 1,
+    })
+    progress_path.write_text(progress_text, encoding="utf-8")
+    monkeypatch.setattr(setup_recovery, "ROOT", tmp_path)
+    monkeypatch.setattr(setup_recovery, "STATE", state)
+    monkeypatch.setattr(setup_recovery.time, "time", lambda: 10000)
+    monkeypatch.setattr(setup_recovery, "_installer_running", lambda progress: False)
+    monkeypatch.setattr(setup_recovery, "_retry_runner_running", lambda: False)
+    lock = MagicMock()
+    lock.__enter__.return_value = lock
+    lock.tell.return_value = 0
+    lock.flush.side_effect = OSError("disk full")
+    path_type = type(state)
+    original_open = path_type.open
+
+    def open_with_failed_lock(path, *args, **kwargs):
+        if path == state / "base-install-repair.lock":
+            return lock
+        return original_open(path, *args, **kwargs)
+
+    monkeypatch.setattr(path_type, "open", open_with_failed_lock)
+    locking = MagicMock()
+    with patch.dict("sys.modules", {"msvcrt": locking}), patch.object(
+        setup_recovery.subprocess, "Popen"
+    ) as launch:
+        assert setup_recovery.recover() is False
+        launch.assert_not_called()
+        locking.locking.assert_not_called()
+    lock.write.assert_called_once_with(b"1")
+    lock.flush.assert_called_once()
+    lock.__exit__.assert_called_once()
+    assert progress_path.read_text(encoding="utf-8") == progress_text
+    assert not (state / "base-install-repair.json").exists()
+
+
 def test_unavailable_repair_log_returns_false_and_releases_lock(tmp_path, monkeypatch):
     state = tmp_path / "LongTasks"
     state.mkdir()
