@@ -103,6 +103,29 @@ def test_nonfinite_timestamp_does_not_discard_episode(tmp_path, monkeypatch, tim
     assert not diagnostics.record(tmp_path, "camera", "unavailable", now=102)
 
 
+@pytest.mark.parametrize("sample_clock", [False, True])
+def test_backward_clock_preserves_unreported_failure(tmp_path, monkeypatch, sample_clock):
+    timestamps = iter((100, 90, 91))
+    if sample_clock:
+        monkeypatch.setattr(diagnostics.time, "time", lambda: next(timestamps))
+
+    def record_failure(timestamp):
+        return diagnostics.record(
+            tmp_path, "camera", "unavailable",
+            now=None if sample_clock else timestamp,
+        )
+
+    assert not record_failure(100)
+    assert record_failure(90)
+    issue = diagnostics.issues(tmp_path)[0]
+    assert issue["first_seen"] == 90
+    assert issue["last_seen"] == 90
+    assert issue["count"] == 2
+    assert issue["reported"] == 1
+    assert not record_failure(91)
+    assert diagnostics.issues(tmp_path)[0]["count"] == 3
+
+
 def test_backward_clock_starts_a_new_reportable_episode(tmp_path):
     assert not diagnostics.record(tmp_path, "camera", "unavailable", now=10000)
     assert diagnostics.record(tmp_path, "camera", "unavailable", now=10010)
