@@ -93,7 +93,8 @@ def music_estimate_seconds(jobs_dir: Path, duration_seconds: int,
             elapsed = float(job.get("finished") or 0) - started
             result = job.get("result") if isinstance(job.get("result"), dict) else {}
             job_made_video = bool(job.get("make_video") or result.get("video"))
-            if (job.get("status") != "complete" or not length or
+            if (job.get("status") != "complete" or
+                    not math.isfinite(length) or length <= 0 or
                     bool(job.get("instrumental")) != instrumental or
                     bool(job.get("source_path")) != bool(source_path) or
                     (bool(source_path) and job.get("reference_mode") != reference_mode) or
