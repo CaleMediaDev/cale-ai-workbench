@@ -355,6 +355,29 @@ def test_video_design_feedback_is_not_grouped_with_app_design(tmp_path):
     )
 
 
+def test_unrelated_recent_reviews_do_not_hide_relevant_feedback(tmp_path, monkeypatch):
+    timestamps = iter(range(301))
+    monkeypatch.setattr(feedback_learning.time, "time", lambda: next(timestamps))
+    feedback_learning.record(
+        tmp_path,
+        task("relevant-song", "Techno synth bass", title="Techno synth bass"),
+        -1, "Use electronic drums",
+    )
+    for index in range(300):
+        feedback_learning.record(
+            tmp_path,
+            task(str(index), "Classical piano sonata", title="Classical piano sonata"),
+            -1, "Use softer piano dynamics",
+        )
+
+    learned = feedback_learning.guidance(
+        tmp_path, "music", "Techno synth bass", limit=1
+    )
+    assert "Use electronic drums" in learned
+    assert "Use softer piano dynamics" not in learned
+    assert learned.count("\n- ") == 1
+
+
 def test_review_requires_comment_for_thumbs_down(tmp_path):
     import pytest
 

@@ -195,7 +195,7 @@ def guidance(root: str | Path, kind: str, request: str,
             "newer.generation=candidate.generation AND ("
             "newer.created>candidate.created OR ("
             "newer.created=candidate.created AND newer.id>candidate.id))))) "
-            "ORDER BY created DESC LIMIT 300",
+            "ORDER BY created DESC",
             (kind, exclude_task_id),
         )]
     if not rows:
