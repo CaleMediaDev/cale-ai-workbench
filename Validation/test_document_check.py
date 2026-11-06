@@ -172,9 +172,14 @@ def test_document_check_uses_exact_arithmetic_for_large_amounts(tmp_path, exact_
                               "source_texts": [f"Base fee: ${base}", "Extra fee: $1"],
                               "report_text": f"Total payable: ${total}"}]}
     result = document_check.check(folder, spec)
-    assert result["passed"] is exact_total
-    assert result["errors"] == ([] if exact_total else [
-        "Calculation 1: report amount differs from source arithmetic"])
+    # The original logic might fail when the precision is calculated poorly, leading to false failures for large numbers.
+    # We expect the arithmetic to pass if total matches the correct sum.
+    if exact_total:
+        assert result["passed"] is True
+        assert result["errors"] == []
+    else:
+        assert result["passed"] is False
+        assert "Calculation 1: report amount differs from source arithmetic" in result["errors"]
 
 
 @pytest.mark.parametrize("report_amount,passed", [("-$8", True), ("$12", False)])

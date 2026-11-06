@@ -139,8 +139,9 @@ def check(folder: Path, requested: dict) -> dict:
         with localcontext() as context:
             # Dollar operands have at most two decimal places. Allow for
             # aligning their scales and an additional carry without rounding.
-            context.prec = max(len(left.as_tuple().digits),
-                               len(right.as_tuple().digits)) + 3
+            # Set precision to handle maximum digits + 2 decimal places + buffer
+            max_digits = max(len(left.as_tuple().digits), len(right.as_tuple().digits))
+            context.prec = max_digits + 3
             expected = left + right if calculation["operation"] == "add" else left - right
         if _money(calculation["report_text"]) != expected:
             errors.append(f"Calculation {number}: report amount differs from source arithmetic")
