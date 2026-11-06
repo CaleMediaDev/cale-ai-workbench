@@ -78,6 +78,21 @@ def test_countdown_baseline_starts_when_first_active_observation_arrives(tmp_pat
     assert task_eta.countdown(db, "task", 40, "working", 1060) == "About 1m 22s to review"
 
 
+@pytest.mark.parametrize("latest_time", [1030, 1130])
+def test_countdown_uses_latest_progress_when_active_times_tie(tmp_path, latest_time):
+    db = tmp_path / "projects.db"
+    task_eta.countdown(db, "task", 10, "working", 1000)
+    task_eta.countdown(db, "task", 30, "working", 1030)
+    # A simultaneous update or excluded downtime adds progress but no active
+    # time. The newest sample is 50%, with 40 points measured in 30 seconds.
+    assert task_eta.countdown(db, "task", 50, "working", latest_time) == (
+        "About 33s to review"
+    )
+    assert task_eta.countdown(db, "task", 50, "working", latest_time + 10) == (
+        "About 23s to review"
+    )
+
+
 def test_countdown_uses_initial_zero_progress_as_baseline(tmp_path):
     db = tmp_path / "projects.db"
     assert task_eta.countdown(db, "task", 0, "working", 1000) == "Estimating time…"
