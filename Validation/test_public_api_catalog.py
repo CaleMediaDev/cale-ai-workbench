@@ -12,20 +12,20 @@ import public_api_catalog
 import toolbox_mcp
 
 
-def test_search_public_apis_preserves_single_character_search_terms(tmp_path):
+def test_search_public_apis_handles_single_character_words_correctly(tmp_path):
     cache = tmp_path / "apis.json"
     cache.write_text(json.dumps([
-        {"name": "Vitamin C", "description": "Nutrition data", "category": "Food",
-         "url": "https://example.org/c", "auth": "none", "status": "up"},
-        {"name": "Vitamin D", "description": "Nutrition data", "category": "Food",
-         "url": "https://example.org/d", "auth": "none", "status": "up"},
+        {"name": "A B", "description": "A B data", "category": "Test",
+         "url": "https://example.org/a_b", "auth": "none", "status": "up"},
+        {"name": "C D", "description": "C D data", "category": "Test",
+         "url": "https://example.org/c_d", "auth": "none", "status": "up"},
     ]), encoding="utf-8")
     with patch.object(public_api_catalog, "CACHE", cache), \
          patch.object(public_api_catalog, "urlopen") as opened:
-        result = public_api_catalog.search_public_apis("vitamin C")
+        result = public_api_catalog.search_public_apis("a b")
     opened.assert_not_called()
     assert result["count"] == 1
-    assert [item["name"] for item in result["results"]] == ["Vitamin C"]
+    assert [item["name"] for item in result["results"]] == ["A B"]
 
 
 def test_search_public_apis_sorts_non_string_names(tmp_path):
