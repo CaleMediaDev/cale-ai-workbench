@@ -1870,6 +1870,7 @@ def test_music_start_lock_covers_wrapper_launch_and_http_readiness_without_forci
     root=tmp_path/'app';engine=root/'Media/music/ACE-Step-1.5';python=engine/'.venv/Scripts/python.exe';python.parent.mkdir(parents=True);python.touch();(python.parent/'acestep-api.exe').touch()
     monkeypatch.setattr(music_backend,'ROOT',root);monkeypatch.setattr(music_backend,'ENGINE',engine)
     monkeypatch.setenv('ACESTEP_NO_INIT','true')
+    monkeypatch.setenv('MIMALLOC_PURGE_DELAY','-1')
     held=[];polls=[];launched=[]
     @contextmanager
     def locked():
@@ -1883,6 +1884,11 @@ def test_music_start_lock_covers_wrapper_launch_and_http_readiness_without_forci
     def launch(command,**kwargs):
         assert held and command==[str(python),'-B',str(Path(music_backend.__file__).resolve()),'--run-engine']
         assert kwargs['env']['ACESTEP_INIT_LLM']=='auto' and kwargs['env']['ACESTEP_NO_INIT']=='true'
+        if os.name == 'nt':
+            assert kwargs['env']['MIMALLOC_PURGE_DELAY']=='0'
+            assert kwargs['env']['MIMALLOC_PURGE_DECOMMITS']=='1'
+            assert kwargs['env']['MIMALLOC_ARENA_EAGER_COMMIT']=='0'
+            assert kwargs['env']['MIMALLOC_EAGER_COMMIT']=='0'
         launched.append(command);return types.SimpleNamespace(poll=lambda:None)
     import types
     with (patch.object(music_backend,'_setup_lock',locked),patch.object(music_backend,'healthy',healthy),
@@ -1890,6 +1896,30 @@ def test_music_start_lock_covers_wrapper_launch_and_http_readiness_without_forci
           patch.object(music_backend.subprocess,'Popen',launch),patch.object(music_backend.time,'sleep')):
         assert music_backend.start_server() is False
     assert polls==[False,True,True,True] and len(launched)==1 and not held
+
+
+def test_music_allocator_policy_precedes_any_ace_import(tmp_path,monkeypatch):
+    """Applying options after an ACE import would silently miss torch init."""
+    import importlib
+    monkeypatch.setattr(music_backend, '_music_memory_environment', lambda: {
+        'MIMALLOC_PURGE_DELAY': '0', 'MIMALLOC_PURGE_DECOMMITS': '1'})
+    monkeypatch.setenv('MIMALLOC_PURGE_DELAY', '-1')
+    def before_import():
+        assert os.environ['MIMALLOC_PURGE_DELAY'] == '0'
+        assert os.environ['MIMALLOC_PURGE_DECOMMITS'] == '1'
+        raise ValueError('stop before runtime import')
+    monkeypatch.setattr(music_backend, '_read_engine_cpu_sources', before_import)
+    with patch.object(importlib, 'import_module') as imported:
+        with pytest.raises(ValueError, match='stop before runtime import'):
+            music_backend._run_engine([])
+    imported.assert_not_called()
+
+
+def test_music_allocator_policy_does_not_change_other_platforms(monkeypatch):
+    # Avoid patching os.name, which would affect pytest's own path handling.
+    import types
+    monkeypatch.setattr(music_backend, 'os', types.SimpleNamespace(name='posix'))
+    assert music_backend._music_memory_environment() == {}
 
 
 def test_music_start_actual_windows_setup_lock_prevents_duplicate_launch_while_first_readies(tmp_path):

@@ -298,6 +298,25 @@ def install() -> Path:
     return ENGINE
 
 
+def _music_memory_environment() -> dict[str, str]:
+    """Release freed Windows tensor storage instead of retaining commit.
+
+    PyTorch's Windows CPU allocator is mimalloc. Its delayed purge can retain
+    large, already-freed VAE buffers while the API is idle. Windows charges
+    these pages against the commit limit even when their working set is small.
+    Set these options BEFORE torch is imported in the engine process. Do not
+    change global Windows paging settings or affect other applications.
+    """
+    if os.name != "nt":
+        return {}
+    return {
+        "MIMALLOC_PURGE_DELAY": "0",
+        "MIMALLOC_PURGE_DECOMMITS": "1",
+        "MIMALLOC_ARENA_EAGER_COMMIT": "0",
+        "MIMALLOC_EAGER_COMMIT": "0",
+    }
+
+
 def start_server() -> bool:
     """Start the local API and report whether its music-planning LM is ready."""
     if healthy():
@@ -307,6 +326,7 @@ def start_server() -> bool:
             return music_lm_ready()
         install()
         env = os.environ.copy()
+        env.update(_music_memory_environment())
         env.update({
             "ACESTEP_API_HOST": "127.0.0.1",
             "ACESTEP_API_PORT": "8001",
@@ -1453,6 +1473,9 @@ def _run_engine(argv=None):
     import hashlib
     import importlib
 
+    # Also cover direct --run-engine starts and old launchers. Importing the
+    # first ACE module below imports torch, so applying this later is too late.
+    os.environ.update(_music_memory_environment())
     sources = _read_engine_cpu_sources()
 
     def checked_module(name, relative):

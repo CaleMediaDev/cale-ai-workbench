@@ -1,0 +1,50 @@
+{
+  "release": "0.5.556",
+  "date": "2026-11-06",
+  "change": "Windows music process decommits freed CPU tensor allocations immediately; no Windows pagefile configuration changes",
+  "options": {
+    "MIMALLOC_PURGE_DELAY": "0",
+    "MIMALLOC_PURGE_DECOMMITS": "1",
+    "MIMALLOC_ARENA_EAGER_COMMIT": "0",
+    "MIMALLOC_EAGER_COMMIT": "0"
+  },
+  "cpu_probe": {
+    "torch": "2.7.1+cu128",
+    "rounds": 16,
+    "max_live_tensor_bytes": 268435456,
+    "windows_job_memory_limit_bytes": 6442450944,
+    "model_loaded": false,
+    "gpu_used": false,
+    "baseline_retained_bytes": 273330176,
+    "policy_retained_bytes": 237568,
+    "logs_sha256": {
+      "baseline": "ab4a284eddafe1b034ab81543378153dd56541a7bef1ef867aa390957990873d",
+      "decommit": "254358f041d46ed262574e6f895a76bc4b3bb99b8646ef92e75a0656bf4b68ea"
+    }
+  },
+  "local_idle_recovery": {
+    "before_private_bytes": 300811284480,
+    "after_private_bytes_unloaded_engine": 2686230528,
+    "completed_job_records_unchanged": true,
+    "all_owned_producer_pauses_released": true,
+    "pagefile_before_MiB": 211841,
+    "pagefile_after_MiB": 8192,
+    "source_files_changed_by_recovery": false
+  },
+  "validation": {
+    "music_tests_passed": 128,
+    "failed": 0,
+    "skipped": 0
+  },
+  "limits": [
+    "The probe exercises CPU tensor allocation and freeing, not full-song generation.",
+    "The recovered engine is ready but its weights are lazy-loaded; 2.5 GiB is not its loaded-model working size.",
+    "This does not prove all memory leaks are eliminated, nor bound peak VAE allocation or long-running radio memory.",
+    "Existing running engines retain their original environment until restarted. No automatic engine recycle was added.",
+    "No project database, completed audio, model weights or Windows paging settings were modified by the recovery."
+  ],
+  "references": [
+    "https://github.com/microsoft/mimalloc/tree/v2.1.8",
+    "https://github.com/pytorch/pytorch/blob/v2.7.1/c10/core/impl/alloc_cpu.cpp"
+  ]
+}
