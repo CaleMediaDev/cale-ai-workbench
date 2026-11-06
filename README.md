@@ -2,6 +2,8 @@
 
 **A Windows assistant that builds with tools, saves its progress, and runs local models.**
 
+Release 0.5.540 includes 18 reviewed fixes for duration parsing, task routing, model downloads, media tools and business contact matching. Two unsafe cleanup proposals were rejected. [Validation and limits](benchmarks/results/reviewed-donations-540-20261106.json).
+
 Release 0.5.539 includes 23 reviewed fixes for setup, model readiness, file handling, media controls and tool recovery. Radio pause/resume failures remain retryable; two unsafe proposals were rejected. [Validation and limits](benchmarks/results/reviewed-donations-539-20261106.json).
 
 Release 0.5.538 includes 15 reviewed fixes for media cancellation, FFmpeg repair, model saving, tool startup, document recovery and task routing. [Validation and limits](benchmarks/results/reviewed-donations-538-20261106.json).
