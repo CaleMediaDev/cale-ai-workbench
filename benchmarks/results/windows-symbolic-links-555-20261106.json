@@ -10,19 +10,24 @@
     "files": [
       "Validation/test_install_environment.py",
       "Validation/test_install_retry.py",
-      "Validation/test_setup_recovery.py"
+      "Validation/test_setup_recovery.py",
+      "benchmarks/test_installer_window.py"
     ],
     "real_probe_on_current_nonadmin_PC": true,
     "actual_install_click_handler_exercised": true,
     "preview_and_retry_handlers_exercised": true,
     "source_bytes_unchanged": true,
     "boundary_denials": 0,
-    "owned_job_empty": true
+    "owned_job_empty": true,
+    "runtime_cases": 57,
+    "installer_artifact_cases": 2,
+    "actual_summary": "59 passed, 10 subtests passed in 48.71s"
   },
   "qualified_changed_files": {
     "Install-Environment.ps1": "504a7bb8df433086b8345bfe1711d6bb29013b9b51987ae07ffc73f21a9b17e7",
     "Setup.ps1": "c5d5d3e3536ccdf2451d1731978b5e1a2c2bfb6c66480b181f016c29e2b806b5",
-    "Validation/test_install_environment.py": "fb47b5d586603f44ffd605be12dc848f3b6a80be877422925ede8ae9ca72c0c4"
+    "Validation/test_install_environment.py": "0784823616f1c9f338035f87c152e6fc6a0a78a214d212d4e8eef87c36f6c400",
+    "benchmarks/test_installer_window.py": "91a13f1291e7e46935e4aeecafe8073a13454379bb47e1e85a5a98fcd99196b5"
   },
   "limits": [
     "Elevation and registry mutations are mocked in installer fixtures; not a clean-PC end-to-end installation.",
@@ -33,5 +38,6 @@
   "official_sources": [
     "https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-createsymboliclinkw",
     "https://learn.microsoft.com/en-us/windows/apps/get-started/developer-mode-features-and-debugging"
-  ]
+  ],
+  "retained_failure": "Initial exact-runtime gate failed because installer-window checks required non-installed Setup.ps1; unchanged UI assertions now run in the separate installer-artifact suite."
 }
