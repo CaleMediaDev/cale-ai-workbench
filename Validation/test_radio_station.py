@@ -542,6 +542,42 @@ def test_pausing_and_muting_keep_both_decks_and_fade_position_consistent(tmp_pat
     assert not old.opened and not new.opened and not player.mixing
 
 
+@pytest.mark.parametrize("mixing", [False, True])
+def test_failed_resume_keeps_pause_state_retryable(tmp_path, mixing):
+    moment = [0]
+    player = radio.Player(lambda: Deck(lambda: moment[0]), lambda: moment[0])
+    player.play(tmp_path/"first.wav")
+    if mixing:
+        player.blend(tmp_path/"second.wav", 8)
+    moment[0] = 2
+    player.advance_mix()
+    player.pause()
+    fade_start = player.fade_start
+    moment[0] = 52
+
+    with patch.object(player.active, "resume", side_effect=RuntimeError("Cannot resume")):
+        with pytest.raises(RuntimeError, match="Cannot resume"):
+            player.resume()
+
+    assert player.paused_at == 2
+    assert player.fade_start == fade_start
+    assert player.active.paused
+    if mixing:
+        assert player.outgoing.paused
+
+    moment[0] = 62
+    player.resume()
+    assert player.paused_at is None
+    assert not player.active.paused
+    assert player.active.busy()
+    if mixing:
+        assert not player.outgoing.paused
+        assert player.crossfade_position == pytest.approx(.25)
+        moment[0] = 64
+        player.advance_mix()
+        assert player.active.volume == pytest.approx(player.outgoing.volume)
+
+
 def test_failed_volume_change_during_paused_fade_still_allows_resume(tmp_path):
     moment = [0]
     player = radio.Player(lambda: Deck(lambda: moment[0]), lambda: moment[0])
