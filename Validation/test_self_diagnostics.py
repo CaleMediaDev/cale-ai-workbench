@@ -224,6 +224,26 @@ def test_overflowing_running_metadata_does_not_prevent_replacement_launch(tmp_pa
         assert report["process_started"] == 100
 
 
+def test_invalid_checked_at_does_not_prevent_replacement_launch(tmp_path):
+    invalid_timestamps = (None, "not-a-timestamp", 10 ** 1000,
+                          float("inf"), float("-inf"), float("nan"))
+    for index, checked_at in enumerate(invalid_timestamps):
+        root, state = diagnostic_install(tmp_path / str(index))
+        report_path = state / "self-check.json"
+        report_path.write_text(json.dumps({
+            "version": diagnostics.version(root), "status": "passed",
+            "checked_at": checked_at}), encoding="utf-8")
+        with patch.object(diagnostics, "active_projects", return_value=False), patch.object(
+                diagnostics.subprocess, "Popen", return_value=SimpleNamespace(pid=456)) as launch, patch(
+                "psutil.Process") as process:
+            process.return_value.create_time.return_value = 100
+            assert diagnostics.schedule(root, state, now=diagnostics.INTERVAL + 100)
+        launch.assert_called_once()
+        replacement = json.loads(report_path.read_text(encoding="utf-8"))
+        assert replacement["status"] == "running"
+        assert replacement["pid"] == 456
+
+
 class SelfDiagnosticsTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
