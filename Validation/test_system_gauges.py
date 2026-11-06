@@ -231,6 +231,13 @@ def test_network_bandwidth_includes_link_load():
     ) == (100, 20, 60)
 
 
+@pytest.mark.parametrize("link_mbps", [None, 0, -1])
+def test_network_bandwidth_preserves_throughput_with_unavailable_link_speed(link_mbps):
+    assert system_gauges.network_bandwidth(
+        (0, 0), (12_500_000, 2_500_000), 1, link_mbps
+    ) == (100, 20, None)
+
+
 def test_network_bandwidth_rejects_counter_rollback_and_recovers():
     previous = (8_000_000, 4_000_000)
     for current in ((1_000_000, 5_000_000), (9_000_000, 1_000_000)):
