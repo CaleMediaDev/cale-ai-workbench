@@ -181,6 +181,11 @@ def separate_stems(source_path: str, output_dir: str) -> dict:
                         finally:
                             if publication is not None:
                                 publication.mark()  # After close/flush, including copy failure.
+                        current, actual_digest, actual_size = _stem_digest(destination)
+                        if (_publication_signature(current) != publication.signature
+                                or actual_size != expected_size
+                                or actual_digest.digest() != expected_digest.digest()):
+                            raise OSError("A rendered stem changed during publication")
                     else:
                         publication = _StemPublication(destination, original, expected_digest, expected_size)
                         publication.mark()
