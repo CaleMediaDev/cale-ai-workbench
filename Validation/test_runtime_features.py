@@ -189,6 +189,11 @@ def test_background_setup_recovers_from_overflowing_pid(tmp_path, monkeypatch, p
     monkeypatch.setattr(runtime_features, "ready", lambda: False)
     monkeypatch.setattr(runtime_features.time, "time", lambda: 1000)
     monkeypatch.setattr(psutil, "Process", lambda *args: pytest.fail("Invalid PID must not reach process lookup"))
+    fallback_scans = []
+    def empty_processes(attrs):
+        fallback_scans.append(attrs)
+        return iter(())
+    monkeypatch.setattr(psutil, "process_iter", empty_processes)
     launches = []
     monkeypatch.setattr(runtime_features.subprocess, "Popen", lambda *args, **kwargs: launches.append(args))
 
@@ -198,6 +203,7 @@ def test_background_setup_recovers_from_overflowing_pid(tmp_path, monkeypatch, p
     current = json.loads(progress.read_text(encoding="utf-8"))
     assert current["status"] == "working"
     assert current["attempts"] == 2
+    assert fallback_scans == [["cmdline"]]
 
 
 def test_live_installer_with_launcher_pid_in_progress_is_not_restarted(tmp_path, monkeypatch):
@@ -291,6 +297,11 @@ def test_installer_path_in_another_programs_arguments_does_not_block_repair(
             return str(tmp_path)
 
     monkeypatch.setattr(psutil, "Process", lambda pid: UnrelatedProcess())
+    fallback_scans = []
+    def unrelated_processes(attrs):
+        fallback_scans.append(attrs)
+        return iter([UnrelatedProcess()])
+    monkeypatch.setattr(psutil, "process_iter", unrelated_processes)
     progress = tmp_path / "install-progress.json"
     progress.write_text(json.dumps({
         "status": "working", "updated": 900,
@@ -306,6 +317,7 @@ def test_installer_path_in_another_programs_arguments_does_not_block_repair(
     assert runtime_features.start_background()
     assert len(launches) == 1
     assert json.loads(progress.read_text(encoding="utf-8"))["attempts"] == 2
+    assert fallback_scans == [["cmdline"]]
 
 
 @pytest.mark.parametrize("script_arguments", [[], ["--install"]])
