@@ -1955,11 +1955,9 @@ def recover_blocked_audio_review(p, snapshot=None):
         audio_passed, audio_evidence = verify_audio_handoff(p) or (False, "This is not an audio task.")
         if not audio_passed:
             return False
-    passed, evidence = verify_project(p)
+    passed, evidence, checked = _verify_project_snapshot(p)
     if not passed:
         return False
-    folder = Path(p["folder"])
-    checked = fingerprint(folder)
     # A GUI-triggered pass and the background supervisor can finish at the
     # same time. Archiving is not idempotent, so an already-finished project is
     # success rather than a new failure that overwrites its task detail.
@@ -2270,25 +2268,46 @@ def verify_project(p, timeout=1200, *, _saved_browser=None, _host_admit=None):
     """Run project checks in a kill-on-close Windows Job for safe cancellation."""
     if _saved_browser is not None:
         return _verify_saved_browser_project(p, timeout, _saved_browser, _host_admit)
+    passed, evidence, _ = _verify_project_snapshot(p, timeout)
+    return passed, evidence
+
+
+def _verify_project_snapshot(p, timeout=1200):
+    """Return the exact fingerprint bracketed around a passing project check."""
     native_check = p.get("engine") == "native" and p.get("status") == "checking"
     if native_check:
         with database() as conn:
             if not _native_verification_is_current(conn, p):
-                return False, "Verification superseded by a newer task action."
+                return False, "Verification superseded by a newer task action.", ""
     folder = Path(p["folder"])
     script = folder / ".local-ai/verify.ps1"
-    if not script.is_file() or not script.read_text(encoding="utf-8-sig").strip():
-        media_result = verify_audio_handoff(p)
-        if media_result is not None:
-            return media_result
-        return (
-            False,
-            "Missing .local-ai/verify.ps1. Create and run real acceptance tests.",
-        )
+    has_script = script.is_file() and bool(script.read_text(encoding="utf-8-sig").strip())
+    if not has_script and not standalone_audio_project(p):
+        return False, "Missing .local-ai/verify.ps1. Create and run real acceptance tests.", ""
     try:
         before = fingerprint(folder)
     except OSError as exc:
-        return False, f"Could not read project files before verification: {exc}"
+        return False, f"Could not read project files before verification: {exc}", ""
+    if has_script:
+        passed, evidence = _run_project_verifier(p, folder, script, timeout, native_check)
+    else:
+        passed, evidence = verify_audio_handoff(p)
+    if not passed:
+        return False, evidence, ""
+    try:
+        after = fingerprint(folder)
+    except OSError as exc:
+        return False, evidence + f"\nCould not read project files after verification: {exc}", ""
+    if before != after:
+        return (
+            False,
+            evidence + "\nProject files changed during verification. Run the checks again after those changes finish.",
+            "",
+        )
+    return True, evidence, after
+
+
+def _run_project_verifier(p, folder, script, timeout, native_check):
     log = STATE / f"{p['id']}-verification.log"
     with log.open("w", encoding="utf-8") as out:
         out.write(f"Independent verification: {time.ctime()}\nProject: {folder}\n")
@@ -2373,16 +2392,6 @@ def verify_project(p, timeout=1200, *, _saved_browser=None, _host_admit=None):
             job.Close()
         out.write(f"\nVerification exit code: {code}\n")
     evidence = log.read_text(encoding="utf-8", errors="replace")[-12000:]
-    if code == 0:
-        try:
-            after = fingerprint(folder)
-        except OSError as exc:
-            return False, evidence + f"\nCould not read project files after verification: {exc}"
-        if before != after:
-            return (
-                False,
-                evidence + "\nProject files changed during verification. Run the checks again after those changes finish.",
-            )
     return code == 0, evidence
 
 
@@ -2395,7 +2404,7 @@ def handle_handoff(p, task, snapshot=None):
         status="checking",
         detail="Running the project's verification independently (up to 20 minutes).",
     )
-    passed, evidence = verify_project(p)
+    passed, evidence, checked = _verify_project_snapshot(p)
     with database() as conn:
         pending = conn.execute(
             "SELECT 1 FROM requests WHERE project=? AND status='pending' LIMIT 1",
@@ -2440,7 +2449,7 @@ def handle_handoff(p, task, snapshot=None):
                 board("archive", p["card"])
             update(
                 p["id"], card="", phase="review", status="ready_for_review",
-                failures=0, fingerprint=fingerprint(Path(p["folder"])),
+                failures=0, fingerprint=checked,
                 detail=("Finished. The song and saved takes are ready to hear. "
                         "Independent project checks passed. Listening feedback is optional; "
                         "the checks do not establish subjective sound quality.\n" + evidence[-2000:]),
@@ -2473,7 +2482,7 @@ def handle_handoff(p, task, snapshot=None):
             status="ready_for_review",
             failures=0,
             detail=evidence,
-            fingerprint=fingerprint(Path(p["folder"])),
+            fingerprint=checked,
         )
 
 
@@ -3332,8 +3341,7 @@ def advance_project(p):
                 update(p["id"], status="working", detail="Checking changed project files.")
             return
         if p["status"] == "checking":
-            passed, evidence = verify_project(p)
-            checked = fingerprint(Path(p["folder"])) if passed else ""
+            passed, evidence, checked = _verify_project_snapshot(p)
             with database() as conn:
                 # Serialize publication with the UI's request insert. A queued
                 # action takes precedence over success and over retry accounting.
@@ -3393,7 +3401,7 @@ def advance_project(p):
                 restart_changed_project_review(p)
                 return
             update(p["id"], status="checking", detail="Rechecking completed work after the verification upgrade.")
-            passed, evidence = verify_project(p)
+            passed, evidence, checked = _verify_project_snapshot(p)
             with database() as conn:
                 pending = conn.execute(
                     "SELECT 1 FROM requests WHERE project=? AND status='pending' LIMIT 1",
@@ -3408,7 +3416,7 @@ def advance_project(p):
                 p["id"],
                 status="ready_for_review" if passed else "needs_input",
                 detail=evidence,
-                fingerprint=fingerprint(folder) if passed else "",
+                fingerprint=checked,
             )
             return
         if review_files_changed(p):

@@ -4804,7 +4804,8 @@ def test_new_task_uses_native_worker_and_completes_independent_check():
                 long_tasks.advance_project(item)
                 item = next(p for p in long_tasks.projects() if p["id"] == task_id)
                 assert item["status"] == "checking"
-                with patch.object(long_tasks, "verify_project", return_value=(True, "Checks passed")):
+                with patch.object(long_tasks, "_verify_project_snapshot",
+                                  return_value=(True, "Checks passed", long_tasks.fingerprint(Path(item["folder"])))):
                     long_tasks.advance_project(item)
             item = next(p for p in long_tasks.projects() if p["id"] == task_id)
             assert item["status"] == "ready_for_review"
@@ -4821,9 +4822,51 @@ def test_passing_review_resets_old_verification_failures():
                                           "verification_failures": 2})
             long_tasks.advance_project(item)
             item = next(p for p in long_tasks.projects() if p["id"] == task_id)
-            with patch.object(long_tasks, "verify_project", return_value=(True, "Checks passed")):
+            with patch.object(long_tasks, "_verify_project_snapshot", return_value=(True, "Checks passed", "proof")):
                 long_tasks.advance_project(item)
             assert native_agent.read_state(item)["verification_failures"] == 0
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Requires Windows Job Objects")
+@pytest.mark.parametrize("edit_after_check", [False, True])
+def test_native_review_publishes_exact_verified_snapshot(tmp_path, edit_after_check):
+    folder = tmp_path / "page"
+    with patch.object(long_tasks, "STATE", tmp_path / "registry"):
+        task_id = long_tasks.add_project("Page", str(folder), "Make a page")
+        long_tasks.update(task_id, status="checking")
+        item = long_tasks.projects()[0]
+        native_agent.save_state(item, {"status": "done", "messages": []})
+        output = folder / "index.html"
+        output.write_text("approved", encoding="utf-8")
+        (folder / ".local-ai/verify.ps1").write_text(
+            "if ((Get-Content -LiteralPath 'index.html' -Raw) -cne 'approved') { exit 1 }; exit 0",
+            encoding="utf-8",
+        )
+        fingerprint = long_tasks.fingerprint
+        approved = fingerprint(folder)
+        scans = []
+
+        def fingerprint_then_edit(*args, **kwargs):
+            digest = fingerprint(*args, **kwargs)
+            scans.append(digest)
+            if edit_after_check and len(scans) == 2:
+                output.write_text("replaced", encoding="utf-8")
+            return digest
+
+        with patch.object(long_tasks, "fingerprint", side_effect=fingerprint_then_edit):
+            long_tasks.advance_project(item)
+        reviewed = long_tasks.projects()[0]
+        assert reviewed["status"] == "ready_for_review"
+        assert reviewed["fingerprint"] == approved
+        assert scans == [approved, approved]
+
+        if edit_after_check:
+            with pytest.raises(ValueError, match="changed after verification"):
+                native_agent.apply_request(reviewed, "accept", "")
+            long_tasks.advance_project(reviewed)
+            assert long_tasks.projects()[0]["status"] == "working"
+        else:
+            assert native_agent.apply_request(reviewed, "accept", "") == "Accepted"
 
 
 def test_bad_checkpoint_is_not_overwritten_by_independent_verification(tmp_path):
@@ -4834,7 +4877,7 @@ def test_bad_checkpoint_is_not_overwritten_by_independent_verification(tmp_path)
         checkpoint = native_agent.state_file(item)
         checkpoint.write_bytes(b'{"status":')
 
-        with patch.object(long_tasks, "verify_project", return_value=(False, "Fixture check failed")):
+        with patch.object(long_tasks, "_verify_project_snapshot", return_value=(False, "Fixture check failed", "")):
             long_tasks.advance_project(item)
 
         held = long_tasks.projects()[0]
@@ -4868,7 +4911,8 @@ def test_explicit_retry_of_blocked_native_task_gets_fresh_verification_attempts(
         native_agent.save_state(item, state)
         long_tasks.update(task_id, status="checking")
         item = next(p for p in long_tasks.projects() if p["id"] == task_id)
-        with patch.object(long_tasks, "verify_project", return_value=(False, "The new check needs a correction")):
+        with patch.object(long_tasks, "_verify_project_snapshot",
+                          return_value=(False, "The new check needs a correction", "")):
             long_tasks.advance_project(item)
         item = next(p for p in long_tasks.projects() if p["id"] == task_id)
         assert item["status"] == "working"
@@ -4889,9 +4933,9 @@ def test_native_check_does_not_publish_results_after_queued_control(tmp_path, ac
 
         def finish_check(_item):
             long_tasks.request(task_id, action, "Use the new title." if action == "note" else "")
-            return passed, "Evidence from the old run"
+            return passed, "Evidence from the old run", "proof" if passed else ""
 
-        with patch.object(long_tasks, "verify_project", side_effect=finish_check):
+        with patch.object(long_tasks, "_verify_project_snapshot", side_effect=finish_check):
             long_tasks.advance_project(item)
         assert long_tasks.projects()[0] == item
         assert native_agent.read_state(item) == state

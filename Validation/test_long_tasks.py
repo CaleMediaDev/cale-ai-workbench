@@ -1879,6 +1879,23 @@ class LongTaskTests(unittest.TestCase):
         self.assertFalse(passed)
         self.assertIn("No finished audio", evidence)
 
+    def test_audio_handoff_rejects_file_replaced_during_decode(self):
+        task_module.update(self.pid, brief="Make a 6 second instrumental song")
+        recording = self.base / "project/song_final.wav"
+        with wave.open(str(recording), "wb") as audio:
+            audio.setparams((1, 2, 8000, 0, "NONE", "not compressed"))
+            audio.writeframes(b"\x01\x00" * 48000)
+
+        def replace_after_decode(path):
+            self.assertEqual(path, recording)
+            path.write_bytes(b"not the song that passed the check")
+            return True
+
+        with patch("music_backend.audio_file_ok", side_effect=replace_after_decode):
+            passed, evidence = task_module.verify_project(self.item())
+        self.assertFalse(passed)
+        self.assertIn("Project files changed during verification", evidence)
+
     def test_finished_mp3_uses_duration_probe(self):
         task_module.update(self.pid, brief="Make a 0.1 minute instrumental song")
         (self.base / "project/song_final.mp3").write_bytes(b"encoded")
@@ -2117,7 +2134,8 @@ class LongTaskTests(unittest.TestCase):
             "runs": [{"started_at": time.time() - 300, "ended_at": time.time() - 200}],
         }
         with (patch.object(task_module, "board") as board,
-              patch.object(task_module, "verify_project", return_value=(True, "3 checks passed")),
+              patch.object(task_module, "_verify_project_snapshot",
+                           return_value=(True, "3 checks passed", task_module.fingerprint(folder))),
               patch("music_backend.audio_file_ok", return_value=True)):
             self.assertTrue(task_module.recover_blocked_audio_review(self.item(), snapshot))
         board.assert_called_once_with("archive", "song-card")
@@ -2147,7 +2165,8 @@ class LongTaskTests(unittest.TestCase):
             "runs": [{"started_at": time.time() - 300, "ended_at": time.time() - 200}],
         }
         with (patch.object(task_module, "board") as board,
-              patch.object(task_module, "verify_project", return_value=(True, "checks passed"))):
+              patch.object(task_module, "_verify_project_snapshot",
+                           return_value=(True, "checks passed", task_module.fingerprint(audio.parent)))):
             self.assertTrue(task_module.recover_blocked_audio_review(self.item(), snapshot))
         board.assert_called_once_with("archive", "review-card")
         self.assertEqual(self.item()["status"], "ready_for_review")
@@ -2167,7 +2186,7 @@ class LongTaskTests(unittest.TestCase):
             "runs": [{"started_at": time.time() - 300, "ended_at": time.time() - 200}],
         }
         with (patch.object(task_module, "board") as board,
-              patch.object(task_module, "verify_project", return_value=(False, "failed"))):
+              patch.object(task_module, "_verify_project_snapshot", return_value=(False, "failed", ""))):
             self.assertFalse(task_module.recover_blocked_audio_review(self.item(), snapshot))
         board.assert_not_called()
         self.assertEqual(self.item()["status"], "needs_input")
@@ -2196,7 +2215,8 @@ class LongTaskTests(unittest.TestCase):
             raise RuntimeError("cannot archive song-card")
 
         with (patch.object(task_module, "board", side_effect=archive),
-              patch.object(task_module, "verify_project", return_value=(True, "checks passed")),
+              patch.object(task_module, "_verify_project_snapshot",
+                           return_value=(True, "checks passed", task_module.fingerprint(folder))),
               patch("music_backend.audio_file_ok", return_value=True)):
             self.assertTrue(task_module.recover_blocked_audio_review(self.item(), snapshot))
         self.assertEqual(self.item()["status"], "ready_for_review")
@@ -2289,9 +2309,9 @@ class LongTaskTests(unittest.TestCase):
     def test_verified_build_resets_failures_before_independent_review(self):
         task_module.update(self.pid, card="build-card", failures=2)
         with (
-            patch.object(task_module, "verify_project",
-                         side_effect=[(True, "build checks passed"),
-                                      (False, "review found a missing behavior")]),
+            patch.object(task_module, "_verify_project_snapshot",
+                         side_effect=[(True, "build checks passed", task_module.fingerprint(self.base / "project")),
+                                      (False, "review found a missing behavior", "")]),
             patch.object(task_module, "board"),
             patch.object(task_module, "create_card") as create,
         ):
@@ -2996,9 +3016,9 @@ class LongTaskTests(unittest.TestCase):
 
         def interrupted(_project):
             task_module.request(self.pid, "stop")
-            return False, "Stopped by user"
+            return False, "Stopped by user", ""
 
-        with patch.object(task_module, "verify_project", side_effect=interrupted):
+        with patch.object(task_module, "_verify_project_snapshot", side_effect=interrupted):
             task_module.tick()
         self.assertEqual(self.item()["status"], "stopped")
 
@@ -4066,7 +4086,7 @@ class SavedBrowserHostReplayTests(unittest.TestCase):
     def test_saved_browser_host_dispatch_does_not_change_explicit_defaults(self):
         with (patch.object(task_module, '_verify_saved_browser_project', return_value=(False, 'typed')) as typed,
               patch.object(task_module, 'verify_audio_handoff', return_value=(False, 'no audio'))):
-            self.assertEqual(task_module.verify_project(self.item), (False, 'no audio'))
+            self.assertEqual(task_module.verify_project({**self.item, 'brief': 'Make a song'}), (False, 'no audio'))
             typed.assert_not_called()
             self.assertEqual(task_module.verify_project(self.item, timeout=2,
                 _saved_browser=self.contract, _host_admit=lambda stage: True), (False, 'typed'))
