@@ -51,6 +51,7 @@ extras = [
     # install the complete runtime and its validation suite.
     "ASSETS.md",
     "CONTRIBUTING.md",
+    "donation-reviewed-scopes.json",
     "HERMES-LICENSE",
     "LONG-TASKS-GUIDE.txt",
     "PRINT-FARM.md",

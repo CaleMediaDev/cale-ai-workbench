@@ -1115,6 +1115,59 @@ def test_full_blast_skips_closed_scope_and_immediately_uses_other_area(tmp_path)
     assert donation.settings(tmp_path)==before
 
 
+@pytest.mark.parametrize("intensity", ["slow", "full_blast"])
+@pytest.mark.parametrize("scope_changed", [False, True])
+def test_donation_skips_maintainer_reviewed_scope_before_inference(tmp_path, intensity, scope_changed):
+    donation.set_enabled(True, tmp_path, chatgpt_account=FINGERPRINT,
+                         github_account="donor", sources=["chatgpt"], intensity=intensity)
+    reviewed = {**JOB, "id": "reviewed-area"}
+    fingerprint = donation.scope_fingerprint(reviewed, BLOBS)
+    pinned = {**BLOBS}
+    if scope_changed:
+        pinned["example.py"] = "f" * 40
+    manifest = "donation-reviewed-scopes.json"
+    tree = {"tree": [{"type": "blob", "path": path, "sha": sha, "size": 100}
+                     for path, sha in {**pinned, manifest: "e" * 40}.items()]}
+    reads = []
+
+    def public(path, revision):
+        assert revision == COMMIT["sha"]
+        reads.append(path)
+        if path == "donation-tasks.json":
+            return json.dumps([reviewed])
+        if path == manifest:
+            return json.dumps({reviewed["id"]: fingerprint})
+        return SOURCES[path]
+
+    def api(endpoint):
+        if is_open_pull_list(endpoint):
+            return []
+        if "/git/trees/" in endpoint:
+            return tree
+        return COMMIT
+
+    with (patch("pc_offline.offline", return_value=False),
+          patch("github_account.account", return_value="donor"),
+          patch("chatgpt_auth.status", return_value={"sharing": True}),
+          patch("chatgpt_auth.account_fingerprint", return_value=FINGERPRINT),
+          patch.object(donation, "gh_api", side_effect=api),
+          patch.object(donation, "public_file", side_effect=public),
+          patch.object(donation, "complete_donation", return_value={
+              "choices": [{"message": {"content": '{"changes":[]}'}}]
+          }) as complete):
+        donation._read_maintainer_reviewed_scopes.cache_clear()
+        try:
+            service = donation.Service(tmp_path)
+            service.last_activity -= 3600
+            service._run(threading.Event())
+        finally:
+            donation._read_maintainer_reviewed_scopes.cache_clear()
+    assert complete.call_count == int(scope_changed)
+    assert reads == ["donation-tasks.json", manifest] + (list(SOURCES) if scope_changed else [])
+    with closing(donation.connection(tmp_path)) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM runs").fetchone()[0] == int(scope_changed)
+
+
 def test_actual_closed_review_blocks_same_fingerprint_after_global_revision_changes(tmp_path):
     fingerprint=donation.scope_fingerprint(JOB,BLOBS)
     run=donation.claim_run(tmp_path,JOB['id'],'chatgpt','full_blast','a'*40,fingerprint)
@@ -2634,6 +2687,50 @@ def test_unrelated_main_merge_keeps_pinned_original_base_and_cached_work(outbox_
     assert len(host.calls) == 1 and donation.total_tokens(host.root) == 50
     commits = [body for endpoint, body in host.remote.calls if endpoint.endswith("/git/commits") and body]
     assert commits[0]["parents"] == [COMMIT["sha"]]
+
+
+def test_reviewed_scope_holds_a_saved_slow_draft_before_publication(outbox_host, monkeypatch):
+    host = outbox_host
+    donation.set_enabled(True, host.root, github_account="donor", sources=["local"], intensity="slow")
+    host.remote.fork_failures = 1
+    service = donation.Service(host.root)
+    service.last_activity -= 3600
+    service._run(threading.Event())
+    assert len(host.calls) == 1
+    writes_before = sum(body is not None for _, body in host.remote.calls)
+    host.remote.revision = "d" * 40
+    manifest = "donation-reviewed-scopes.json"
+    fingerprint = donation.scope_fingerprint(JOB, {path: donation._public_blob(body)
+                                                  for path, body in SOURCES.items()})
+    scopes = json.dumps({JOB["id"]: fingerprint})
+
+    def api(endpoint, data=None):
+        response = host.remote.api(endpoint, data)
+        if "/git/trees/" in endpoint:
+            response["tree"].append({"path": manifest, "type": "blob", "size": len(scopes)})
+        return response
+
+    def public(path, revision):
+        if path == manifest:
+            assert revision == host.remote.revision
+            return scopes
+        return host.remote.public(path, revision)
+
+    monkeypatch.setattr(donation, "gh_api", api)
+    monkeypatch.setattr(donation, "public_file", public)
+    donation._read_maintainer_reviewed_scopes.cache_clear()
+    try:
+        with patch.object(donation.time, "time", return_value=outbox_expire(host.root)):
+            restarted = donation.Service(host.root)
+            restarted.last_activity -= 3600
+            restarted._run(threading.Event())
+    finally:
+        donation._read_maintainer_reviewed_scopes.cache_clear()
+    assert len(host.calls) == 1 and donation.total_tokens(host.root) == 50
+    assert not host.remote.prs
+    assert sum(body is not None for _, body in host.remote.calls) == writes_before
+    with closing(donation.connection(host.root)) as conn:
+        assert conn.execute("SELECT phase,length(payload) FROM publication_outbox").fetchone() == ("stale", 0)
 
 
 @pytest.mark.parametrize("changed", ["source", "job", "policy"])

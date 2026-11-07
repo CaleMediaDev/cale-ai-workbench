@@ -24,6 +24,7 @@ import time
 import uuid
 from contextlib import closing
 from collections import deque
+from functools import lru_cache
 from pathlib import Path, PurePosixPath
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlencode
@@ -1856,9 +1857,17 @@ class DurablePublication:
         for path in paths:
             bodies[path] = source(path, revision)
         blobs = {path: _public_blob(body) for path, body in bodies.items()}
-        if not job or scope_fingerprint(job, blobs) != data.get("scope"):
+        fingerprint = scope_fingerprint(job, blobs)
+        if not fingerprint or fingerprint != data.get("scope"):
             self.terminal("stale")
             raise PublicationPending("Saved draft source or task changed; fresh review is required.")
+        if data["intensity"] == "slow":
+            tree = self.request(login, check_cancel, f"repos/{UPSTREAM}/git/trees/{revision}?recursive=1")
+            reviewed = _maintainer_reviewed_scopes(revision, tree)
+            self.guard(login, check_cancel)
+            if reviewed.get(job["id"]) == fingerprint:
+                self.terminal("stale")
+                raise PublicationPending("Maintainers already reviewed the saved draft's exact inputs.")
         # Re-read the immutable base too. Unrelated main commits may move while
         # the approved public inputs remain identical; never silently rebase.
         original = {path: source(path, data["commit"]["sha"]) for path in paths}
@@ -2064,6 +2073,37 @@ def _tree_blobs(tree: dict) -> dict:
             and isinstance(entry.get("sha"), str) and re.fullmatch(r"[a-f0-9]{40}", entry["sha"])}
 
 
+def _maintainer_reviewed_scopes(revision: str, tree: dict) -> dict:
+    """Load exact reviewed inputs from the same pinned public revision."""
+    entries = tree.get("tree") if isinstance(tree, dict) and not tree.get("truncated") else None
+    if not isinstance(entries, list):
+        return {}
+    entry = next((item for item in entries if isinstance(item, dict)
+                  and item.get("path") == "donation-reviewed-scopes.json"), None)
+    if entry is None:
+        return {}
+    size = entry.get("size")
+    if entry.get("type") != "blob" or type(size) is not int or not 0 < size <= 32_768:
+        raise ValueError("Invalid public reviewed donation scope file")
+    return _read_maintainer_reviewed_scopes(revision)
+
+
+@lru_cache(maxsize=16)
+def _read_maintainer_reviewed_scopes(revision: str) -> dict:
+    """Share immutable metadata across lanes and publication rechecks."""
+    if not re.fullmatch(r"[a-f0-9]{40}", revision):
+        raise ValueError("Invalid public reviewed donation revision")
+    body = public_file("donation-reviewed-scopes.json", revision)
+    if len(body.encode("utf-8")) > 32_768:
+        raise ValueError("Public reviewed donation scopes exceed the size limit")
+    scopes = json.loads(body)
+    if (not isinstance(scopes, dict) or len(scopes) > 256
+            or any(not re.fullmatch(r"[a-z0-9-]{1,60}", job) or not isinstance(scope, str)
+                   or not re.fullmatch(r"[a-f0-9]{64}", scope) for job, scope in scopes.items())):
+        raise ValueError("Invalid public reviewed donation scopes")
+    return scopes
+
+
 def scope_suppressed(root: Path, job: str, scope_sha: str) -> bool:
     if not scope_sha:
         return False
@@ -2188,8 +2228,15 @@ def continuous_jobs(jobs: list, revision: str, *, source_budget=35_000) -> list:
                        "Preserve public interfaces and do not change authentication, consent, accounting or update policy.",
                        "paths": [path, test], "_automatic_correctness": True})
     blobs = _tree_blobs(tree)
-    return [{**job, "_scope_blobs": {path: blobs[path] for path in job["paths"]}}
-            if scope_fingerprint(job, blobs) else job for job in result]
+    reviewed = _maintainer_reviewed_scopes(revision, tree)
+    eligible = []
+    for job in result:
+        fingerprint = scope_fingerprint(job, blobs)
+        if fingerprint and reviewed.get(job["id"]) == fingerprint:
+            continue
+        eligible.append({**job, "_scope_blobs": {path: blobs[path] for path in job["paths"]}}
+                        if fingerprint else job)
+    return eligible
 
 
 class Service:
@@ -2506,13 +2553,18 @@ class Service:
             # Continuous discovery already pinned these blob IDs. Slow mode
             # needs one metadata-only tree request; no extra file downloads.
             blobs = next((job.get("_scope_blobs") for job in jobs if isinstance(job, dict) and job.get("_scope_blobs")), None)
+            reviewed = {}
             if blobs is None:
                 try:
-                    blobs = _tree_blobs(gh_api(f"repos/{UPSTREAM}/git/trees/{revision}?recursive=1"))
+                    tree = gh_api(f"repos/{UPSTREAM}/git/trees/{revision}?recursive=1")
                 except GitHubRequestError:
                     raise
                 except (OSError, RuntimeError, ValueError, TypeError):
-                    blobs = {}
+                    tree = {}
+                blobs = _tree_blobs(tree)
+                if consent["intensity"] == "slow":
+                    check_cancel()
+                    reviewed = _maintainer_reviewed_scopes(revision, tree)
             index = (int(hashlib.sha256((login + str(int(time.time() // DAY_SECONDS))).encode()).hexdigest(), 16) + count) % len(jobs)
             pending_jobs = {match for item in opened.get("items", []) for match in
                             re.findall(r"<!-- cale-donation:([a-z0-9-]{1,60}) -->", str(item.get("body") or ""))}
@@ -2537,6 +2589,8 @@ class Service:
                 check_cancel()
                 candidate_blobs = candidate.get("_scope_blobs", blobs)
                 fingerprint = scope_fingerprint(candidate, candidate_blobs)
+                if fingerprint and reviewed.get(candidate["id"]) == fingerprint:
+                    continue
                 if resource_cooldown(self.root, proposal_cooldown_key(resource, candidate, revision, fingerprint)):
                     continue
                 backfill_reviewed_scope(self.root, candidate, check_cancel)
