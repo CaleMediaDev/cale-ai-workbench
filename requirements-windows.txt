@@ -74,3 +74,4 @@ uvicorn==0.54.0
 xlsxwriter==3.3.1
 # Inert app-owned security tools; direct wheel bytes are pinned for old updaters.
 https://github.com/CaleMediaDev/cale-ai-workbench/releases/download/v0.5.553/cale_security-0.1.1-py3-none-any.whl#sha256=429a75c509fc86ca1cad26147bb208d24ea18073d747e92e8debedb8604b2956
+websocket-client==1.9.2

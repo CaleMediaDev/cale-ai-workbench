@@ -4020,6 +4020,7 @@ def gui():
     import github_account
     import ollama_runtime
     import pc_offline
+    import print_farm_ui
     import project_preview
     import radio_station
     import readiness_checklist
@@ -4355,10 +4356,11 @@ def gui():
     music_page.bind("<Configure>", lambda _: music_canvas.configure(scrollregion=music_canvas.bbox("all")))
     music_canvas.bind("<Configure>", lambda event: music_canvas.itemconfigure(music_window, width=event.width))
     create_shell = ttk.Frame(outer)
+    print_shell = ttk.Frame(outer)
     workspace = tk.StringVar(value="home")
     workspace_buttons = {}
     workspace_shells = {"home": main_shell, "music": music_shell,
-                        "create": create_shell, "supercharge": super_shell}
+                        "create": create_shell, "print_farm": print_shell, "supercharge": super_shell}
 
     def show_workspace(name):
         """Change only the visible workspace; task/audio services keep running."""
@@ -4385,7 +4387,7 @@ def gui():
 
     workspace_nav = ttk.Frame(outer)
     workspace_nav.pack(fill="x", pady=(2, 10), before=gauge_row)
-    for key, label in (("home", "Home"), ("music", "Music Studio"), ("create", "Create")):
+    for key, label in (("home", "Home"), ("music", "Music Studio"), ("create", "Create"), ("print_farm", "Print Farm")):
         button = ttk.Button(workspace_nav, text=label,
             command=lambda selected=key: show_workspace(selected),
             style="SelectedMode.TButton" if key == "home" else "Mode.TButton")
@@ -6436,6 +6438,8 @@ def gui():
 
     studio_controls = radio_station.Controls(
         music_page, window, radio_service, on_make_song=make_studio_song)
+
+    window.print_farm_controls = print_farm_ui.Controls(print_shell, window, ROOT)
 
     # Creation has a dedicated canvas-sized live preview instead of opening a
     # second window over the conversation. It uses the existing preview capture
