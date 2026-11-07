@@ -168,7 +168,12 @@ class LiveObservationTests(unittest.TestCase):
         }
         observe(record, client)
         self.assertEqual(record["active_history_id"], 2)
+        later = {**run, "id": 3}
+        client.inspect.return_value["history"] = [later]
+        observe(record, client)
+        self.assertEqual(record["active_history_id"], 2)
         run["printfinish"] = 1
+        client.inspect.return_value["history"] = [later, run]
         client.inspect.return_value["status"]["state"] = 2
         self.assertEqual(observe(record, client)["status"], "completed")
         self.assertNotIn("bed_cleared_at", record)
@@ -179,6 +184,27 @@ class LiveObservationTests(unittest.TestCase):
             "prior_history_ids": [1],
         }
         self.assertEqual(observe(unobserved, client)["status"], "printing")
+
+    def test_unbound_job_uses_unique_submission_time_and_preserves_ambiguous_history(self):
+        from print_farm_observe import observe
+
+        record = {
+            "status": "submission_uncertain",
+            "path": "/job.gcode",
+            "submitted_at": 1790000000,
+            "prior_history_ids": [],
+        }
+        original = {"id": 2, "filename": "/job.gcode", "printfinish": 1,
+                    "starttime": record["submitted_at"] + 2}
+        unrelated = {**original, "id": 3, "printfinish": 0,
+                     "starttime": record["submitted_at"] + 400}
+        client = Mock()
+        client.inspect.return_value = {"status": {"state": 0}, "history": [unrelated]}
+        self.assertEqual(observe(dict(record), client)["status"], "submission_uncertain")
+        client.inspect.return_value["history"] = [unrelated, original]
+        self.assertEqual(observe(dict(record), client)["status"], "completed")
+        unrelated["starttime"] = record["submitted_at"] + 3
+        self.assertEqual(observe(dict(record), client)["status"], "submission_uncertain")
 
     def test_video_decoder_parses_split_frames_and_closes_on_stop(self):
         live = LiveCameras(lambda: {})

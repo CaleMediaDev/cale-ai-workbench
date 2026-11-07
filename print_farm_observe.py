@@ -17,49 +17,44 @@ def observe(record, client):
         h
         for h in snap["history"]
         if h.get("filename") == record["path"]
+        and h.get("id") is not None
         and h.get("id") not in record.get("prior_history_ids", [])
     ]
-    # A later job can replace the current display before this worker reconnects.
-    # Its display cannot override a successful history entry for this exact run.
-    # Completion never clears the bed lock or authorizes another print.
-    finished_run = (
-        len(newer) == 1
-        and newer[0].get("printfinish") == 1
-        and (
-            (
-                record.get("active_history_id") is not None
-                and newer[0].get("id") == record["active_history_id"]
-            )
-            or (
-                type(record.get("submitted_at")) in (int, float)
-                and type(newer[0].get("starttime")) in (int, float)
-                and abs(newer[0]["starttime"] - record["submitted_at"]) < 30
-            )
-        )
-    )
-    if finished_run:
-        record["status"] = "completed"
-    elif (
-        int(status.get("state", -1)) in (0, 3, 4)
-        and len(newer) == 1
-        and newer[0].get("printfinish") != 1
-    ):
-        record["status"] = "failed"
-    elif (
-        int(status.get("state", -1)) in (1, 5)
-        and status.get("printFileName", "").rsplit("/", 1)[-1]
+    try:
+        state = int(status.get("state", -1))
+    except (TypeError, ValueError, OverflowError):
+        state = -1
+    active_file = (
+        state in (1, 5)
+        and str(status.get("printFileName") or "").rsplit("/", 1)[-1]
         == record["path"].rsplit("/", 1)[-1]
-    ):
+    )
+    active_id = record.get("active_history_id")
+    if active_id is not None:
+        # Once bound, a different run of the same file cannot replace it.
+        matches = [run for run in newer if run["id"] == active_id]
+    else:
+        submitted_at = record.get("submitted_at")
+        matches = [
+            run for run in newer
+            if type(submitted_at) in (int, float)
+            and type(run.get("starttime")) in (int, float)
+            and abs(run["starttime"] - submitted_at) < 30
+        ]
+        # A unique live run can be bound even on a printer with a bad clock.
+        if not matches and active_file and len(newer) == 1 and newer[0].get("printfinish") == 0:
+            matches = newer
+    run = matches[0] if len(matches) == 1 else None
+    finished = run.get("printfinish") if run is not None else None
+    # A terminal result never clears the bed lock or authorizes another print.
+    if finished == 1:
+        record["status"] = "completed"
+    elif finished == 0 and state in (0, 3, 4):
+        record["status"] = "failed"
+    elif active_file and (active_id is None or finished == 0):
         record["status"] = "printing"
-        # Some LAN printers retain an old internal clock. Bind the new history
-        # entry observed while this exact file is running, rather than requiring
-        # that firmware clock to match the PC when the run completes.
-        if (
-            len(newer) == 1
-            and newer[0].get("id") is not None
-            and newer[0].get("printfinish") != 1
-        ):
-            record["active_history_id"] = newer[0]["id"]
+        if active_id is None and finished == 0:
+            record["active_history_id"] = run["id"]
     record["last_observed_at"] = time.time()
     return record
 
