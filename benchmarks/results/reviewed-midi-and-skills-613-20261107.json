@@ -1,0 +1,27 @@
+{
+  "release": "0.5.613",
+  "cutoff_pr": 971,
+  "base": "59b24aed40a8813084cab635097a3f754a526d34",
+  "reviews": [
+    {
+      "pr": 969,
+      "reviewed_head": "ee3cab375cba8f89d65ceabf6be86cc054c3e377",
+      "disposition": "no integration",
+      "evidence": "Unchanged reviewed head. Existing fixture passed. Proposed assertion raised NameError. Existing and proposed crop formulas agreed for 10000 finite boundary and representative cases."
+    },
+    {
+      "pr": 970,
+      "reviewed_head": "051796c323d1ebf9d2043c2e6db2b8ff072cf0f5",
+      "disposition": "adapted and accepted",
+      "integration_commit": "fc191c3d16159569b17cd7ecc7fee1a79a23b156",
+      "before": "Three strengthened fixtures failed, including export of a valid four-field note. The installed Basic Pitch 0.4.0 writer emitted field counts 5, 4, 7 and Cale rejected the four-field note. The proposal alone kept the old minimum-field guard.",
+      "after": "The real writer fixture exported both notes with five fields and retained the signed bend values. All 37 MIDI tests passed, including blank fields, mixed rows, repeat normalization, missing velocity and invalid bends."
+    },
+    {
+      "pr": 971,
+      "reviewed_head": "13193f775aa9cef557662b7f4926d0b46edff7bb",
+      "disposition": "no integration",
+      "evidence": "An owned fixture tested the current and proposed guards with an existing identical file and both an absent and stale manifest. Both adopted the same file without rewriting it or incrementing any counters. Existing early continue makes the proposed additional comparison redundant."
+    }
+  ]
+}
