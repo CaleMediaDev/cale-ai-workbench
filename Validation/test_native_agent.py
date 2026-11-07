@@ -137,6 +137,69 @@ def test_worker_error_still_records_a_running_tasks_actual_failure(tmp_path):
     assert retained["error"] == "OSError: Actual operation failed"
 
 
+def test_live_unrelated_process_never_counts_as_a_native_worker():
+    import psutil
+
+    unrelated = {"pid": os.getpid(), "process_created": psutil.Process().create_time()}
+    assert not native_agent.process_alive(unrelated)
+
+
+@pytest.mark.parametrize("worker_id", ["owned-A", "owned-B"])
+def test_native_controls_only_stop_the_matching_real_worker(tmp_path, worker_id):
+    import psutil
+
+    item = {**project(tmp_path / "owned-task"), "id": "owned-A"}
+    script = tmp_path / "native_agent.py"
+    ready = script.with_suffix(".ready")
+    script.write_text("from pathlib import Path\nimport time\n"
+                      "Path(__file__).with_suffix('.ready').write_text('ready')\ntime.sleep(30)\n")
+    child = subprocess.Popen([sys.executable, str(script), "run", worker_id],
+                             stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                             creationflags=0x08000000 if os.name == "nt" else 0)
+    owned = psutil.Process(child.pid)
+    state = {"status": "running", "messages": [], "pid": child.pid, "process_created": owned.create_time()}
+    native_agent.save_state(item, state)
+    try:
+        deadline = time.monotonic() + 5
+        while not ready.is_file() and child.poll() is None and time.monotonic() < deadline:
+            time.sleep(.02)
+        assert ready.is_file() and child.poll() is None
+        with patch.object(native_agent, "__file__", str(script)), patch.object(long_tasks, "update"):
+            assert native_agent.process_alive(state, item) == (worker_id == item["id"])
+            assert not native_agent.process_alive({**state, "process_created": state["process_created"] + .5}, item)
+            native_agent.apply_request(item, "stop", "")
+        assert native_agent.read_state(item)["status"] == "stopped"
+        if worker_id == item["id"]:
+            child.wait(timeout=5)
+        else:
+            assert child.poll() is None
+    finally:
+        if child.poll() is None:
+            try:
+                for descendant in reversed(owned.children(recursive=True)):
+                    descendant.terminate()
+                owned.terminate()
+            except psutil.NoSuchProcess:
+                pass
+            child.wait(timeout=5)
+
+
+def test_unknown_native_worker_identity_never_starts_a_replacement(tmp_path):
+    import psutil
+
+    item = {**project(tmp_path / "unknown-worker"), "status": "working", "detail": ""}
+    native_agent.save_state(item, {"status": "running", "messages": [], "pid": 123, "process_created": 123.0})
+    observed = Mock()
+    observed.is_running.return_value = True
+    observed.create_time.return_value = 123.0
+    observed.cmdline.side_effect = psutil.AccessDenied(123)
+    with patch("psutil.Process", return_value=observed), \
+            patch.object(native_agent, "start_worker", side_effect=AssertionError("Do not duplicate an unknown worker")):
+        with pytest.raises(OSError, match="Cannot inspect"):
+            native_agent.advance(item)
+    observed.terminate.assert_not_called()
+
+
 def test_step_action_schema_rejects_mixed_completion_and_revision_before_dispatch():
     from jsonschema import ValidationError, validate
     schema = next(t["function"]["parameters"] for t in native_agent.TOOLS

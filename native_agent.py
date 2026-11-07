@@ -6343,13 +6343,33 @@ def worker_main(project_id: str) -> int:
         return 1
 
 
-def process_alive(state: dict) -> bool:
+def _worker_process(state: dict, project: dict | None = None):
+    """Return the matching process so controls keep its cached identity."""
+    import psutil
+
     try:
-        import psutil
         process = psutil.Process(int(state["pid"]))
-        return process.is_running() and abs(process.create_time() - float(state["process_created"])) < 2
-    except (KeyError, ValueError, TypeError, psutil.Error):
-        return False
+        if not process.is_running() or process.create_time() != float(state["process_created"]):
+            return None
+        command = process.cmdline()
+        if len(command) != 4 or command[2] != "run" or not command[3]:
+            return None
+        script = Path(command[1])
+        if not script.is_absolute():
+            script = Path(process.cwd()) / script
+        if script.resolve() != Path(__file__).resolve():
+            return None
+        if project is not None and command[3] != str(project["id"]):
+            return None
+        return process
+    except psutil.AccessDenied as exc:
+        raise OSError("Cannot inspect the native worker process; retry before starting or stopping it.") from exc
+    except (KeyError, ValueError, TypeError, OSError, psutil.NoSuchProcess):
+        return None
+
+
+def process_alive(state: dict, project: dict | None = None) -> bool:
+    return _worker_process(state, project) is not None
 
 
 def start_worker(project: dict) -> dict:
@@ -6391,7 +6411,7 @@ def advance(project: dict) -> tuple[str, str] | None:
     if status == "waiting_for_setup":
         return None
     state = read_state(project)
-    if process_alive(state):
+    if process_alive(state, project):
         detail = state.get("current") or "Cale is working"
         return ("working", detail) if project["detail"] != detail else None
     if state.get('status') in {'paused', 'stopped'}:
@@ -6425,9 +6445,9 @@ def apply_request(project: dict, action: str, note: str) -> str:
     if action in ("pause", "stop", "delete"):
         state["status"] = "paused" if action == "pause" else "stopped"
         save_state(project, state)
-        if process_alive(state):
+        process = _worker_process(state, project)
+        if process is not None:
             import psutil
-            process = psutil.Process(int(state["pid"]))
             for child in reversed(process.children(recursive=True)):
                 try:
                     child.terminate()

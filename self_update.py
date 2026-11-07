@@ -448,7 +448,7 @@ def resume_projects_after_update(force=False):
             if project.get("engine") == "native":
                 import native_agent
 
-                if native_agent.process_alive(native_agent.read_state(project)):
+                if native_agent.process_alive(native_agent.read_state(project), project):
                     continue
                 runs = []
             else:
