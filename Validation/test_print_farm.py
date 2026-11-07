@@ -94,6 +94,20 @@ def clear():
 
 
 class Decisions(unittest.TestCase):
+    def test_product_identity_cannot_be_invented_from_generic_wall_mount_words(self):
+        item = {**row(), "title": "PLA 3D PrintedAr15 Wall Mount - Strong Sturdy Made in the USA"}
+        proposal = {"confidence": 0.85, "recipes": [{"name": "Mac_mini_wall_mount.STL_PLA_3h3m28s.gcode"}],
+                    "runs_per_sale": 2, "token": "old"}
+        reviewed = farm.review_file_match(item, proposal)
+        self.assertEqual(reviewed["confidence"], 0)
+        self.assertEqual(reviewed["runs_per_sale"], 1)
+        self.assertEqual(item["quantity"] * reviewed["runs_per_sale"], 2)
+        self.assertFalse(farm.can_auto(reviewed))
+        self.assertIn("Product identity", reviewed["reason"])
+        self.assertNotEqual(reviewed["token"], "old")
+        verified = {**proposal, "quantity_basis": "verified_listing_recipe", "match_basis": "verified_listing_recipe"}
+        self.assertEqual(farm.review_file_match(item, verified)["runs_per_sale"], 2)
+
     def test_finished_status_allows_fresh_bed_ticket_through_preflight(self):
         from print_farm_transport import K1, PRINTERS
 
@@ -592,7 +606,7 @@ class Production(unittest.TestCase):
         self.recipe = {
             "id": "r",
             "printer_id": "p",
-            "name": "stand.gcode",
+            "name": "Test_stand.gcode",
             "file_fingerprint": "f" * 64,
             "color": "black",
             "content_sha256": "a" * 64,
@@ -889,6 +903,29 @@ class Production(unittest.TestCase):
         self.machine.start_order.assert_not_called()
         self.store.approve(self.key, "t")
         self.assertEqual(self.dispatch()["status"], "printing")
+
+    def test_model_cannot_double_count_purchased_quantity(self):
+        candidate = {**self.recipe, "file": {"name": self.recipe["name"], "file_size": 3}}
+        response = Mock()
+        response.__enter__ = Mock(return_value=response)
+        response.__exit__ = Mock(return_value=False)
+        response.read.return_value = b"abc"
+        with (patch.object(farm, "local_ai", return_value={"compatible": True, "recipe_id": "r",
+                    "confidence": 0.9, "runs_per_sale": 2, "reason": "Two purchased"}) as ai,
+              patch.dict(farm.PRINTERS, {"p": ("192.0.2.1", "printer", "black")}),
+              patch.object(farm.urllib.request, "urlopen", return_value=response)):
+            proposal = self.service.propose(self.item, [candidate], {})
+        self.assertEqual(proposal["runs_per_sale"], 1)
+        self.assertEqual(proposal["confidence"], 0.9)
+        self.assertNotIn('"quantity"', ai.call_args.args[0])
+        self.assertEqual(self.item["quantity"] * proposal["runs_per_sale"], 2)
+
+    def test_wrong_product_attempts_do_not_count_as_fulfilled(self):
+        for unit in range(self.item["quantity"]):
+            jid = farm.job_id(self.item, unit)
+            self.store.reserve(jid, self.key, unit, {**self.recipe, "invalid_for_order": True})
+            self.store.outcome(jid, "completed")
+        self.assertEqual(self.service.order_states(self.store, self.item, self.proposal, {}), ["held", "held"])
 
     def test_thumbs_up_sets_100_and_dispatch_still_requires_clear_bed(self):
         self.proposal.update(confidence=0.49, historical=True)

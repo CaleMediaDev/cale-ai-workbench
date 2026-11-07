@@ -596,7 +596,7 @@ class Controls:
                 down.pack(side="left", padx=3, ipady=4)
             ttk.Label(
                 card,
-                text=f"Order {row['order_id']} · {row['quantity']} purchased · {row.get('completed', 0)}/{row.get('total', '?')} prints complete",
+                text=f"Order {row['order_id']} · {row['quantity']} purchased · {row.get('runs_per_sale', (row.get('proposal') or {}).get('runs_per_sale', 1))} print(s) per item · {row.get('completed', 0)}/{row.get('total', '?')} prints complete",
                 style="Muted.TLabel",
             ).pack(anchor="w", pady=(5, 0))
             if row.get("filename"):
