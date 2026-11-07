@@ -10,6 +10,8 @@ Created by [Cale Media](https://calemedia.com).
 2. Click **Install** and watch the progress bar. Accounts are optional; you can connect them while models download.
 3. Click **Open Cale AI** and describe what you want in chat.
 
+Release 0.5.565 gives a blocked task fresh retry attempts when you resume it or give it new instructions. It retains the work and conversation, clears the old error, and reruns verification.
+
 Release 0.5.564 gives concurrent task checkpoint saves separate temporary files and retries brief Windows file contention during reads and writes. A denied checkpoint read preserves the saved history. A worker that encounters an error after a task is paused, stopped or finished preserves that saved status.
 
 Release 0.5.563 sends Music controls directly to the playback worker when you click them. Volume, pause and mixer adjustments can take effect between the radio's status checks.

@@ -6448,7 +6448,11 @@ def apply_request(project: dict, action: str, note: str) -> str:
             notes = Path(project["folder"]) / ".local-ai" / "USER-REQUESTS.md"
             with notes.open("a", encoding="utf-8") as stream:
                 stream.write("\n## New instruction\n" + note.strip() + "\n")
+        if note or project.get("status") == "needs_input":
             invalidate_checks(state)
+            state["failures"] = 0
+            state["verification_failures"] = 0
+            state.pop("error", None)
         state["status"] = "continue"
         state["messages"] = (state.get("messages") or []) + ([{"role": "user", "content": note}] if note else [])
         save_state(project, state)
