@@ -11,6 +11,35 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import print_farm as farm
 
 
+class AccountRecoveryTests(unittest.TestCase):
+    def test_malformed_saved_account_reports_reconnect_without_losing_file(self):
+        import print_farm_account as account
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root) / "account.json"
+            for document in ("{}", "null", '{"protected":42}', '{"protected":"%%%"}'):
+                with self.subTest(document=document):
+                    path.write_text(document)
+                    with self.assertRaisesRegex(RuntimeError, "Reconnect"):
+                        account.connection(root)
+                    self.assertEqual(path.read_text(), document)
+
+    def test_cancel_during_poll_does_not_save_new_account(self):
+        import print_farm_account as account
+        cancelled = [False]
+        def broker(action, body):
+            if action == "begin":
+                return {"id": "device", "url": "https://auth.ebay.com/oauth2/authorize?state=device"}
+            cancelled[0] = True
+            return {"status": "connected"}
+        with tempfile.TemporaryDirectory() as root:
+            with (patch.object(account, "call", side_effect=broker),
+                  patch.object(account.webbrowser, "open"),
+                  patch.object(account, "protect", side_effect=lambda value: value)):
+                with self.assertRaisesRegex(RuntimeError, "cancelled"):
+                    account.connect(root, cancelled=lambda: cancelled[0])
+            self.assertFalse((Path(root) / "account.json").exists())
+
+
 def row():
     return {
         "order_id": "order-1",
@@ -664,8 +693,8 @@ class Production(unittest.TestCase):
         self.printer.update(online=True, camera_url="http://camera")
         self.proposal["reason"] = "Saved file match"
         self.store.decision(self.key, self.proposal)
-        with (patch.object(self.service, "account_client", side_effect=ValueError("Unreadable account")),
-              patch.object(self.service, "scan_printers", return_value=[self.printer]),
+        (self.service.root / "account.json").write_text("{}")
+        with (patch.object(self.service, "scan_printers", return_value=[self.printer]),
               patch.object(self.service, "dispatch") as dispatch):
             self.service.cycle(self.store)
             self.service.monitor_beds([self.printer], self.store)

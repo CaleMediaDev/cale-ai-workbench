@@ -60,6 +60,7 @@ class SkillCatalogTests(unittest.TestCase):
         external.mkdir()
         try:
             destination.symlink_to(external, target_is_directory=True)
+            original_target = destination.readlink()
         except (OSError, NotImplementedError) as exc:
             self.skipTest(f"Symlinks unavailable: {exc}")
 
@@ -79,7 +80,7 @@ class SkillCatalogTests(unittest.TestCase):
             "preserved": len(skill_catalog.SKILLS) + len(skill_catalog.SHARED_REFERENCES),
         })
         self.assertTrue(destination.is_symlink())
-        self.assertEqual(destination.readlink(), external)
+        self.assertEqual(destination.readlink(), original_target)
         self.assertEqual(list(external.iterdir()), [])
 
     def test_preserves_local_dangling_skill_symlink(self):
@@ -89,6 +90,7 @@ class SkillCatalogTests(unittest.TestCase):
         installed.unlink()
         try:
             installed.symlink_to(local_target)
+            original_target = installed.readlink()
         except (OSError, NotImplementedError) as exc:
             self.skipTest(f"Symlinks unavailable: {exc}")
 
@@ -96,7 +98,7 @@ class SkillCatalogTests(unittest.TestCase):
 
         self.assertEqual(result, {"installed": 0, "updated": 0, "preserved": 1})
         self.assertTrue(installed.is_symlink())
-        self.assertEqual(installed.readlink(), local_target)
+        self.assertEqual(installed.readlink(), original_target)
         self.assertFalse(local_target.exists())
 
     def test_preserves_local_directory_and_continues_sync(self):
@@ -214,6 +216,7 @@ class SkillCatalogTests(unittest.TestCase):
             source.write_text("Not reviewed bundle content", encoding="utf-8")
         try:
             vendor.symlink_to(external, target_is_directory=True)
+            original_target = vendor.readlink()
         except (OSError, NotImplementedError) as exc:
             self.skipTest(f"Symlinks unavailable: {exc}")
 
@@ -222,7 +225,7 @@ class SkillCatalogTests(unittest.TestCase):
         self.assertEqual(result, {"installed": 0, "updated": 0, "preserved": 0})
         self.assertEqual(list((self.root / "data/skills").iterdir()), [])
         self.assertTrue(vendor.is_symlink())
-        self.assertEqual(vendor.readlink(), external)
+        self.assertEqual(vendor.readlink(), original_target)
         for source in (skill, reference):
             self.assertEqual(
                 source.read_text(encoding="utf-8"), "Not reviewed bundle content"
@@ -238,6 +241,7 @@ class SkillCatalogTests(unittest.TestCase):
             source.write_text("Not reviewed bundle content", encoding="utf-8")
         try:
             bundle.symlink_to(external, target_is_directory=True)
+            original_target = bundle.readlink()
         except (OSError, NotImplementedError) as exc:
             self.skipTest(f"Symlinks unavailable: {exc}")
 
@@ -246,7 +250,7 @@ class SkillCatalogTests(unittest.TestCase):
         self.assertEqual(result, {"installed": 0, "updated": 0, "preserved": 0})
         self.assertEqual(list((self.root / "data/skills").iterdir()), [])
         self.assertTrue(bundle.is_symlink())
-        self.assertEqual(bundle.readlink(), external)
+        self.assertEqual(bundle.readlink(), original_target)
         for source in (skill, reference):
             self.assertEqual(
                 source.read_text(encoding="utf-8"), "Not reviewed bundle content"

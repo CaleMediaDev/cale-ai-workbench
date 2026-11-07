@@ -703,13 +703,14 @@ def test_download_filename_does_not_reuse_dangling_symlink(tmp_path):
         pytest.skip("Symlinks are unavailable in this test environment")
     assert existing.is_symlink()
     assert not existing.exists()
+    original_target = existing.readlink()
 
     target = native_browser._download_target(tmp_path, "report.txt")
 
     assert target == destination / "report-2.txt"
     target.write_text("downloaded", encoding="utf-8")
     assert existing.is_symlink()
-    assert existing.readlink() == missing
+    assert existing.readlink() == original_target
     assert not missing.exists()
     assert target.read_text(encoding="utf-8") == "downloaded"
 

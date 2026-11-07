@@ -70,14 +70,27 @@ def connection(root):
     path = Path(root) / "account.json"
     if not path.exists():
         return None
-    data = json.loads(path.read_text())
-    return json.loads(protect(base64.b64decode(data["protected"]), decrypt=True))
+    try:
+        data = json.loads(path.read_text())
+        record = json.loads(protect(base64.b64decode(data["protected"], validate=True), decrypt=True))
+        if not isinstance(record, dict) or any(
+            not isinstance(record.get(key), str) or not record[key]
+            for key in ("id", "verifier")
+        ):
+            raise ValueError("Invalid saved connection")
+        return record
+    except (OSError, ValueError, TypeError, KeyError, RuntimeError):
+        raise RuntimeError("Saved eBay connection is unreadable. Reconnect your eBay account.") from None
 
 
 def connect(root, on_status=lambda value: None, cancelled=lambda: False):
     root = Path(root)
+    if cancelled():
+        raise RuntimeError("eBay sign-in cancelled or expired")
     verifier = secrets.token_urlsafe(48)
     reply = call("begin", {"challenge": hashlib.sha256(verifier.encode()).hexdigest()})
+    if cancelled():
+        raise RuntimeError("eBay sign-in cancelled or expired")
     url = reply.get("url", "")
     if not url.startswith("https://auth.ebay.com/oauth2/authorize?"):
         raise RuntimeError(
@@ -88,6 +101,8 @@ def connect(root, on_status=lambda value: None, cancelled=lambda: False):
     deadline = time.time() + 600
     while time.time() < deadline and not cancelled():
         answer = call("poll", {"id": reply["id"], "verifier": verifier})
+        if cancelled():
+            raise RuntimeError("eBay sign-in cancelled or expired")
         if answer.get("status") == "connected":
             record = {
                 "id": reply["id"],

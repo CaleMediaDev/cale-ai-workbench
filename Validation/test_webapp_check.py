@@ -434,7 +434,7 @@ def test_saved_sequences_cannot_combine_interactions_from_different_html_version
 
 @pytest.mark.parametrize("plan",["- [x] Build and check the page\n",
                                  "1. Build and check the page - Verified by browser cases\n"])
-def test_focused_json_check_runs_generated_verifier_and_finishes(tmp_path,plan):
+def test_whole_goal_tool_check_runs_generated_verifier_and_finishes(tmp_path,plan):
     (tmp_path/"index.html").write_text(PAGE,encoding="utf-8")
     notes = tmp_path / ".local-ai"
     notes.mkdir()
@@ -447,15 +447,16 @@ def test_focused_json_check_runs_generated_verifier_and_finishes(tmp_path,plan):
     seen=[]
     def complete(payload):
         seen.append(payload)
-        assert payload["tools"]==[]
-        assert payload["response_format"]=={"type":"json_object"}
-        return {"choices":[{"message":{"role":"assistant","content":json.dumps(SPEC)}}]}
-    with patch.object(long_tasks,"projects",return_value=[item]):
+        assert payload.get("_native_whole_goal_work") is True
+        assert "check_webapp" in {tool["function"]["name"] for tool in payload["tools"]}
+        assert "response_format" not in payload
+        return {"choices":[{"message":{"role":"assistant","tool_calls":[{
+            "id":"actual-browser-check", "function":{"name":"check_webapp","arguments":json.dumps(SPEC)}}]}}]}
+    with patch.object(long_tasks,"projects",return_value=[item]), patch.object(native_agent,"MAX_TURNS_PER_SLICE",1):
         state=native_agent.run_slice(item,complete=complete)
     assert len(seen)==1
-    assert state["status"]=="done"
     assert state["verify_passed"] and state["browser_verified"]
-    assert state["focused_check_calls"]==1
+    assert not state.get("focused_check_calls")
     assert (notes/"verify.ps1").is_file()
     native_agent.save_state(item,{**state,"status":"continue"})
     def no_inference(_):
@@ -466,7 +467,7 @@ def test_focused_json_check_runs_generated_verifier_and_finishes(tmp_path,plan):
     assert "recovered verified handoff" in recovered["current"]
 
 
-def test_focused_json_cannot_choose_another_tool_or_run_arbitrary_text(tmp_path):
+def test_whole_goal_json_text_cannot_choose_another_tool_or_run_arbitrary_text(tmp_path):
     (tmp_path/"index.html").write_text(PAGE,encoding="utf-8")
     notes = tmp_path / ".local-ai"
     notes.mkdir()
@@ -476,13 +477,17 @@ def test_focused_json_cannot_choose_another_tool_or_run_arbitrary_text(tmp_path)
     native_agent.save_state(item,{"status":"continue","turns":1,"premature_finishes":1})
     response={"choices":[{"message":{"role":"assistant","content":json.dumps({
         "tool":"run_command","command":"do something else","path":"index.html","cases":[]})}}]}
-    state=native_agent.run_slice(item,complete=lambda _:response)
+    seen=[]
+    def complete(payload):
+        seen.append(payload)
+        assert payload.get("_native_whole_goal_work") is True
+        return response
+    with patch.object(native_agent,"MAX_TURNS_PER_SLICE",1):
+        state=native_agent.run_slice(item,complete=complete)
     assert state["status"]=="continue"
-    assert "not valid argument JSON" in state["focused_check_error"]
+    assert len(seen)==1 and not state.get("focused_check_error")
+    assert not any(message.get("role")=="tool" for message in state["messages"])
     assert not (notes/"verify.ps1").exists()
-    assert native_agent.focused_browser_check(item,state,task_context.request_identity(tmp_path)) is not None
-    state=native_agent.run_slice(item,complete=lambda _:response)
-    assert native_agent.focused_browser_check(item,state,task_context.request_identity(tmp_path)) is None
 
 
 @pytest.mark.parametrize("case",[

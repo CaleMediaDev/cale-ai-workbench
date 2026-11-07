@@ -10764,21 +10764,29 @@ def test_public549_substantive_authored_note_may_quote_the_host_placeholder(tmp_
     assert native_agent.authored_notes_issue(folder, item) == ''
 
 
-def test_public549_whole_goal_router_reuses_validated_identity_without_late_reader(tmp_path, monkeypatch):
+@pytest.mark.parametrize('late_change', [None, 'growth', 'unreadable'])
+def test_public549_whole_goal_router_reuses_validated_identity_without_late_reader(tmp_path, monkeypatch, late_change):
     item, folder, steering = public549_worker_frontier_fixture(tmp_path, monkeypatch)
     original_mode = native_agent.remember_request_mode
     original_avoid = native_agent.repair_avoid_models
     expected = hashlib.sha256((folder / '.local-ai/USER-REQUESTS.md').read_bytes()).hexdigest()
     calls, identities = [], []
+    checkpoint = []
     class Captured(BaseException): pass
     def deny(*args, **kwargs):
         raise AssertionError('No late uncapped request_identity acquisition is allowed')
     def mode(*args, **kwargs):
         original_mode(*args, **kwargs)
-        # Arm only after the actual worker's final frame validation. Deliberate
-        # owned growth must not be acquired through a new uncapped late reader.
-        with (folder / '.local-ai/USER-REQUESTS.md').open('ab') as stream:
-            stream.write(b'Later owned data.\n' * 10000)
+        checkpoint.append(native_agent.state_file(item).read_bytes())
+        # Arm after the worker's earlier frame validation. The final provider
+        # boundary must use bounded reads and defer if the frame has changed.
+        if late_change == 'growth':
+            with (folder / '.local-ai/USER-REQUESTS.md').open('ab') as stream:
+                stream.write(b'Later owned data.\n' * 10000)
+        elif late_change == 'unreadable':
+            def unreadable(*args, **kwargs):
+                raise OSError('Owned instruction read failure')
+            monkeypatch.setattr(native_agent, '_post_queue_instruction_frame', unreadable)
         monkeypatch.setattr(task_context, 'request_identity', deny)
     def avoid(state, request):
         identities.append(request)
@@ -10788,6 +10796,13 @@ def test_public549_whole_goal_router_reuses_validated_identity_without_late_read
     monkeypatch.setattr(native_agent, 'remember_request_mode', mode)
     monkeypatch.setattr(native_agent, 'repair_avoid_models', avoid)
     monkeypatch.setattr(cloud_ai, 'Router', lambda: SimpleNamespace(complete=provider))
+    if late_change:
+        result = native_agent.run_slice(item, complete=None)
+        assert result['post_queue_instruction_defer'] == (
+            'instructions_changed' if late_change == 'growth' else 'instructions_unavailable')
+        assert not calls and not identities
+        assert native_agent.state_file(item).read_bytes() == checkpoint[-1]
+        return
     with pytest.raises(Captured): native_agent.run_slice(item, complete=None)
     assert identities == [expected] and len(calls) == 1
     assert not any(key.startswith('_native_') for key in calls[0])

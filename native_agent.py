@@ -6002,9 +6002,19 @@ def _run_slice(project: dict, complete=None) -> dict:
              'check': planned_step.get('check_arguments') if planned_step else None})
         validated_whole_request = instruction_frame['request'] if whole_goal_work else None
         try:
-            if task_context.request_identity(folder) != planned_request_hash:
+            # Whole-goal frames include bounded, identity-checked reads of both
+            # rules and followups. Do not replace that check with an uncapped
+            # followup-only read at the provider boundary.
+            request_changed = (
+                _post_queue_frame_identity(_post_queue_instruction_frame(project))
+                != _post_queue_frame_identity(instruction_frame)
+                if whole_goal_work else task_context.request_identity(folder) != planned_request_hash
+            )
+            if request_changed:
                 return _post_queue_instruction_defer(project, state, "instructions_changed")
-        except OSError:
+        except (OSError, ValueError, TypeError, KeyError, RecursionError) as exc:
+            if not whole_goal_work and not isinstance(exc, OSError):
+                raise
             return _post_queue_instruction_defer(project, state, "instructions_unavailable")
         try:
             response = call(request)
@@ -6051,7 +6061,9 @@ def _run_slice(project: dict, complete=None) -> dict:
                 return _post_queue_instruction_defer(project, state, 'instructions_unavailable')
         current_request_stamp = user_request_stamp(folder)
         try:
-            request_changed = task_context.request_identity(folder) != planned_request_hash
+            # The whole-goal frame was just revalidated above, including its
+            # followup digest. Reuse that result instead of reading it again.
+            request_changed = not whole_goal_work and task_context.request_identity(folder) != planned_request_hash
         except OSError:
             return _post_queue_instruction_defer(project, state, "instructions_unavailable")
         if current_request_stamp != request_before or request_changed:
