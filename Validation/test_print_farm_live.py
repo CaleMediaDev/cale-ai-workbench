@@ -223,13 +223,14 @@ class LiveObservationTests(unittest.TestCase):
     def test_video_decoder_parses_split_frames_and_closes_on_stop(self):
         live = LiveCameras(lambda: {})
         live.visible.set()
-        live.sources = {"p": "rtsp://localhost/p"}
+        source = ("rtsp://localhost/p", "")
+        live.sources = {"p": source}
         raw = picture("red")
         process = Mock()
         process.poll.return_value = None
         process.stdout.read1.side_effect = [raw[:10], raw[10:]]
         with patch("print_farm_live.subprocess.Popen", return_value=process):
-            stream = live.video_frames("p", "rtsp://localhost/p")
+            stream = live.video_frames("p", source)
             self.assertEqual(next(stream), raw)
             live.stop()
             stream.close()
@@ -239,9 +240,7 @@ class LiveObservationTests(unittest.TestCase):
 
     def test_failed_video_uses_configured_snapshot(self):
         live = LiveCameras(lambda: {}, capture=Mock(return_value=picture("red")))
-        live.sources = {"p": "rtsp://localhost/p"}
-        live.snapshot_urls = {"p": "http://localhost/frame"}
-        live.stream_ids = {"p"}
+        live.sources = {"p": ("rtsp://localhost/p", "http://localhost/frame")}
         live.visible.set()
         live.video_frames = Mock(side_effect=OSError("video unavailable"))
         thread = threading.Thread(target=live.camera_loop, args=("p",))
@@ -253,6 +252,26 @@ class LiveObservationTests(unittest.TestCase):
         thread.join(2)
         live.capture.assert_called_with("http://localhost/frame")
         self.assertIn("bytes", live.frames["p"])
+
+    def test_replaced_fallback_cannot_publish_a_pending_snapshot(self):
+        printer = {"id": "p", "camera_stream_url": "rtsp://camera/video",
+                   "camera_url": "http://camera/old"}
+        live = LiveCameras(lambda: {})
+        live.workers["p"] = Mock()
+        live.analysis_thread = Mock()
+        live.update([printer], True)
+        live.video_frames = Mock(side_effect=OSError("video disconnected"))
+
+        def capture(url):
+            self.assertEqual(url, "http://camera/old")
+            live.update([{**printer, "camera_url": "http://camera/new"}], True)
+            live.stop_event.set()
+            return picture("red")
+
+        live.capture = capture
+        live.camera_loop("p")
+        self.assertFalse(live.snapshot("p")[0])
+        self.assertNotIn("p", live.fallback_until)
 
     def test_rejects_invalid_confidence_and_boxes(self):
         result = observation(
@@ -274,8 +293,11 @@ class LiveObservationTests(unittest.TestCase):
         live = LiveCameras(
             lambda: {}, infer=lambda *a, **k: {"state": "occupied", "confidence": 0.9}
         )
-        live.sources = {"p": "http://camera"}
-        frame = {"bytes": raw, "at": 123, "url": "http://camera"}
+        source = ("", "http://camera")
+        live.sources = {"p": source}
+        with patch("print_farm_live.time.time", return_value=123):
+            live.accept_frame("p", source, source[1], raw)
+        frame = live.snapshot("p")[0]
         result = live.analyze("p", frame)
         live.frames["p"] = {"bytes": picture("blue")}
         self.assertEqual(result["frame"], raw)
@@ -284,15 +306,41 @@ class LiveObservationTests(unittest.TestCase):
 
     def test_changed_camera_discards_inflight_result(self):
         live = LiveCameras(lambda: {})
-        live.sources = {"p": "http://old"}
+        live.workers["p"] = Mock()
+        live.analysis_thread = Mock()
+        live.update([{"id": "p", "camera_url": "http://old"}], True)
+        live.accept_frame("p", live.sources["p"], "http://old", picture("red"))
 
         def infer(*a, **k):
-            live.sources["p"] = "http://new"
+            live.update([{"id": "p", "camera_url": "http://new"}], True)
             return {"state": "clear", "confidence": 1}
 
         live.infer = infer
-        live.analyze("p", {"bytes": picture("red"), "at": 1, "url": "http://old"})
+        live.analyze("p", live.snapshot("p")[0])
         self.assertNotIn("p", live.results)
+
+    def test_thawed_feed_discards_inflight_overlay(self):
+        live = LiveCameras(lambda: {})
+        source = ("", "http://camera")
+        live.sources = {"p": source}
+        raw, resumed = picture("red"), picture("blue")
+        with patch("print_farm_live.time.time", return_value=100):
+            live.accept_frame("p", source, source[1], raw)
+        before = live.snapshot("p")[0]
+
+        def infer(*a, **k):
+            with patch("print_farm_live.time.time", return_value=116):
+                live.accept_frame("p", source, source[1], raw)
+                self.assertEqual(live.snapshot("p")[0]["changed_at"], 100)
+                live.accept_frame("p", source, source[1], resumed)
+            return {"state": "occupied", "confidence": 0.9}
+
+        live.infer = infer
+        live.analyze("p", before)
+        frame, result, _ = live.snapshot("p")
+        self.assertEqual(frame["bytes"], resumed)
+        self.assertEqual(frame["changed_at"], 116)
+        self.assertFalse(result)
 
     def test_failed_camera_drops_old_live_frame(self):
         finished = threading.Event()
@@ -302,8 +350,9 @@ class LiveObservationTests(unittest.TestCase):
             raise OSError("offline")
 
         live = LiveCameras(lambda: {}, capture=capture)
-        live.sources = {"p": "http://camera"}
+        live.sources = {"p": ("", "http://camera")}
         live.frames["p"] = {"bytes": picture("red")}
+        live.results["p"] = {"frame": picture("red")}
         live.visible.set()
         thread = threading.Thread(target=live.camera_loop, args=("p",))
         thread.start()
@@ -312,6 +361,7 @@ class LiveObservationTests(unittest.TestCase):
         thread.join(2)
         self.assertNotIn("bytes", live.frames["p"])
         self.assertIn("error", live.frames["p"])
+        self.assertNotIn("p", live.results)
 
     def test_automatic_overlay_uses_inspected_frame_and_falls_back_when_scene_changes(self):
         import tkinter as tk

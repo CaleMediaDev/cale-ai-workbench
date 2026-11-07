@@ -17,6 +17,8 @@ from PIL import Image, ImageTk
 import ffmpeg_runtime
 from print_farm import AI_LOCK, camera_frame, local_ai
 
+LIVE_FEED_MAX_AGE = 15
+
 PROMPT = """Observe this 3D printer camera image. Identify visible prints, raised debris,
 loose filament, hands, tools, and the overhead print head. Distinguish flat glue haze
 and scratches from raised objects. Never assume an obscured bed is empty. This is
@@ -91,7 +93,7 @@ def scan_due(frame, result, busy, now):
     if (
         not frame.get("bytes")
         or now - frame.get("at", 0) >= 5
-        or now - frame.get("changed_at", 0) >= 15
+        or now - frame.get("changed_at", 0) >= LIVE_FEED_MAX_AGE
     ):
         return False
     if not result:
@@ -111,15 +113,14 @@ class LiveCameras:
         self.stop_event = threading.Event()
         self.visible = threading.Event()
         self.sources, self.workers, self.frames, self.results = {}, {}, {}, {}
-        self.stream_ids, self.processes = set(), {}
-        self.snapshot_urls, self.fallback_until = {}, {}
+        self.processes, self.fallback_until = {}, {}
         self.busy_printers = set()
         self.analyzing = None
         self.analysis_thread = None
 
     def update(self, printers, visible):
         sources = {
-            p["id"]: p.get("camera_stream_url") or p.get("camera_url", "")
+            p["id"]: (p.get("camera_stream_url") or "", p.get("camera_url") or "")
             for p in printers
             if p.get("camera_stream_url") or p.get("camera_url")
         }
@@ -132,16 +133,17 @@ class LiveCameras:
             self.busy_printers = {
                 p["id"] for p in printers if p.get("online") and not p.get("idle")
             }
-            self.snapshot_urls = {p["id"]: p.get("camera_url") for p in printers}
-            self.stream_ids = {p["id"] for p in printers if p.get("camera_stream_url")}
-            for pid, url in sources.items():
-                if self.sources.get(pid) != url:
+            for pid in self.sources.keys() | sources.keys():
+                previous = self.sources.get(pid)
+                if previous == sources.get(pid):
+                    # An unchanged poll keeps the identity. Switching away and
+                    # back to the same address creates a new one.
+                    sources[pid] = previous
+                else:
                     self.frames.pop(pid, None)
                     self.results.pop(pid, None)
                     self.fallback_until.pop(pid, None)
             self.sources = sources
-            self.frames = {k: v for k, v in self.frames.items() if k in sources}
-            self.results = {k: v for k, v in self.results.items() if k in sources}
         if visible:
             self.visible.set()
         else:
@@ -175,7 +177,8 @@ class LiveCameras:
                 self.analyzing == pid,
             )
 
-    def video_frames(self, pid, url):
+    def video_frames(self, pid, source):
+        url, _ = source
         parsed = urllib.parse.urlsplit(url)
         if (
             parsed.scheme not in {"rtsp", "http", "https"}
@@ -222,7 +225,7 @@ class LiveCameras:
         try:
             while not self.stop_event.is_set() and self.visible.is_set():
                 with self.lock:
-                    if self.sources.get(pid) != url:
+                    if self.sources.get(pid) is not source:
                         return
                 chunk = process.stdout.read1(65536)
                 if not chunk:
@@ -250,73 +253,76 @@ class LiveCameras:
                 if self.processes.get(pid) is process:
                     self.processes.pop(pid, None)
 
-    def accept_frame(self, pid, url, raw):
+    def accept_frame(self, pid, source, url, raw):
         now = time.time()
         fingerprint = hashlib.sha256(raw).hexdigest()
         with Image.open(io.BytesIO(raw)) as image:
             preview = image.convert("RGB")
             preview.thumbnail((640, 360))
         with self.lock:
+            if self.sources.get(pid) is not source:
+                return
             previous = self.frames.get(pid, {})
+            resumed = (
+                previous.get("hash") != fingerprint
+                and now - previous.get("changed_at", now) >= LIVE_FEED_MAX_AGE
+            )
+            if previous.get("url") != url or resumed:
+                self.results.pop(pid, None)
+                previous = {}
             changed = (
                 now
                 if previous.get("hash") != fingerprint
                 else previous.get("changed_at", now)
             )
-            if self.sources.get(pid) == url:
-                self.frames[pid] = {
-                    "bytes": raw,
-                    "preview": preview,
-                    "signature": preview.convert("L").resize((32, 18)).tobytes()
-                    if now - previous.get("signature_at", 0) >= 1
-                    else previous.get("signature"),
-                    "signature_at": now
-                    if now - previous.get("signature_at", 0) >= 1
-                    else previous.get("signature_at"),
-                    "at": now,
-                    "changed_at": changed,
-                    "hash": fingerprint,
-                    "url": url,
-                }
+            signature, signature_at = previous.get("signature"), previous.get("signature_at", 0)
+            if not signature or now - signature_at >= 1:
+                signature, signature_at = preview.convert("L").resize((32, 18)).tobytes(), now
+            self.frames[pid] = {
+                "bytes": raw,
+                "preview": preview,
+                "signature": signature,
+                "signature_at": signature_at,
+                "at": now,
+                "changed_at": changed,
+                "hash": fingerprint,
+                "url": url,
+                "feed": previous.get("feed") or object(),
+            }
 
     def camera_loop(self, pid):
         while not self.stop_event.is_set():
             if not self.visible.wait(1):
                 continue
             with self.lock:
-                url = self.sources.get(pid)
-            if not url:
-                return
+                source = self.sources.get(pid)
+                if source is None:
+                    return
+                stream_url, snapshot_url = source
+                video = stream_url and time.time() >= self.fallback_until.get(pid, 0)
             delay = 1
             try:
-                with self.lock:
-                    video = (
-                        pid in self.stream_ids
-                        and time.time() >= self.fallback_until.get(pid, 0)
-                    )
-                    snapshot_url = self.snapshot_urls.get(pid) or url
                 if video:
-                    for raw in self.video_frames(pid, url):
-                        self.accept_frame(pid, url, raw)
+                    for raw in self.video_frames(pid, source):
+                        self.accept_frame(pid, source, stream_url, raw)
                 else:
-                    self.accept_frame(pid, url, self.capture(snapshot_url))
+                    self.accept_frame(pid, source, snapshot_url, self.capture(snapshot_url))
             except Exception:
+                with self.lock:
+                    if self.sources.get(pid) is not source:
+                        continue
+                    self.frames[pid] = {"error": "Camera unavailable · retrying"}
+                    self.results.pop(pid, None)
                 delay = 10
-                fallback = False
-                if video and snapshot_url != url:
+                if video and snapshot_url and snapshot_url != stream_url:
                     try:
-                        self.accept_frame(pid, url, self.capture(snapshot_url))
-                        self.fallback_until[pid] = time.time() + 60
-                        fallback, delay = True, 1
+                        self.accept_frame(pid, source, snapshot_url, self.capture(snapshot_url))
+                        with self.lock:
+                            if self.sources.get(pid) is source:
+                                self.fallback_until[pid] = time.time() + 60
+                        delay = 1
                     except Exception:
                         pass
-                if not fallback:
-                    with self.lock:
-                        if self.sources.get(pid) == url:
-                            self.frames[pid] = {
-                                "error": "Camera unavailable · retrying",
-                                "url": url,
-                            }
             if self.stop_event.wait(delay):
                 return
 
@@ -336,8 +342,8 @@ class LiveCameras:
             url=frame["url"],
         )
         with self.lock:
-            # An edited camera must never show results from its previous address.
-            if not self.stop_event.is_set() and self.sources.get(pid) == frame["url"]:
+            # A switched or disconnected feed invalidates outstanding scans.
+            if not self.stop_event.is_set() and self.frames.get(pid, {}).get("feed") is frame["feed"]:
                 self.results[pid] = answer
         return answer
 
@@ -365,7 +371,7 @@ class LiveCameras:
                     self.analyze(pid, frame)
                 except Exception:
                     with self.lock:
-                        if self.sources.get(pid) == frame["url"]:
+                        if self.frames.get(pid, {}).get("feed") is frame["feed"]:
                             self.results[pid] = {
                                 "state": "unavailable",
                                 "reason": "Local AI unavailable · retrying",
@@ -444,8 +450,8 @@ class CameraTile(ttk.Frame):
         now = time.time()
         live_ok = (
             bool(frame.get("bytes"))
-            and now - frame.get("at", 0) < 15
-            and now - frame.get("changed_at", 0) < 15
+            and now - frame.get("at", 0) < LIVE_FEED_MAX_AGE
+            and now - frame.get("changed_at", 0) < LIVE_FEED_MAX_AGE
         )
         analysis_age = now - result.get("captured_at", 0)
         overlay = (
