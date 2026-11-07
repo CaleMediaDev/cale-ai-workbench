@@ -329,10 +329,17 @@ def process_file(project: dict) -> Path:
 
 
 def read_state(project: dict) -> dict:
-    try:
-        state = json.loads(state_file(project).read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        state = {"status": "new", "messages": [], "turns": 0, "failures": 0}
+    for attempt in range(5):
+        try:
+            state = json.loads(state_file(project).read_text(encoding="utf-8"))
+            break
+        except PermissionError:
+            if os.name != "nt" or attempt == 4:
+                raise
+            time.sleep(0.01 * (attempt + 1))
+        except (OSError, ValueError):
+            state = {"status": "new", "messages": [], "turns": 0, "failures": 0}
+            break
     try:
         identity = json.loads(process_file(project).read_text(encoding="utf-8"))
         state.update(pid=int(identity["pid"]), process_created=float(identity["process_created"]))
@@ -344,9 +351,21 @@ def read_state(project: dict) -> dict:
 def save_state(project: dict, state: dict) -> None:
     target = state_file(project)
     target.parent.mkdir(parents=True, exist_ok=True)
-    temporary = target.with_suffix(".tmp")
-    temporary.write_text(json.dumps(state, ensure_ascii=False), encoding="utf-8")
-    os.replace(temporary, target)
+    descriptor, name = tempfile.mkstemp(prefix=".native-checkpoint-", suffix=".tmp", dir=target.parent)
+    temporary = Path(name)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+            json.dump(state, stream, ensure_ascii=False)
+        for attempt in range(5):
+            try:
+                os.replace(temporary, target)
+                break
+            except PermissionError:
+                if os.name != "nt" or attempt == 4:
+                    raise
+                time.sleep(0.01 * (attempt + 1))
+    finally:
+        temporary.unlink(missing_ok=True)
 
 
 def project_path(folder: Path, name: str) -> Path:
@@ -6316,6 +6335,8 @@ def worker_main(project_id: str) -> int:
         return 0
     except Exception as exc:
         state = read_state(project)
+        if state.get("status") in {"paused", "stopped", "done"}:
+            return 0
         state.update(status="error", error=f"{type(exc).__name__}: {exc}",
                      failures=int(state.get("failures", 0)) + 1)
         save_state(project, state)

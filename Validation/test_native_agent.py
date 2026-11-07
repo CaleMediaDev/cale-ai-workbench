@@ -34,6 +34,109 @@ def queue_step(title, command, phase="Core"):
     return {"phase": phase, "title": title, "check_command": command}
 
 
+def test_concurrent_checkpoint_saves_publish_complete_independent_files(tmp_path):
+    import threading
+    from concurrent.futures import ThreadPoolExecutor
+
+    item = project(tmp_path / "concurrent-checkpoint")
+    barrier = threading.Barrier(2)
+    read_barrier = threading.Barrier(2)
+    ready = threading.local()
+    prepared = []
+    replace = native_agent.os.replace
+    states = [{"status": "continue", "messages": [], "current": value * 16000} for value in ("A", "B")]
+
+    def publish(source, target):
+        if not getattr(ready, "prepared", False):
+            barrier.wait(timeout=5)
+            prepared.append(json.loads(Path(source).read_text(encoding="utf-8")))
+            read_barrier.wait(timeout=5)
+            ready.prepared = True
+        replace(source, target)
+
+    with patch.object(native_agent.os, "replace", side_effect=publish):
+        with ThreadPoolExecutor(max_workers=2) as workers:
+            pending = [workers.submit(native_agent.save_state, item, state) for state in states]
+            for future in pending:
+                future.result(timeout=10)
+    assert native_agent.read_state(item) in states
+    assert {state["current"] for state in prepared} == {state["current"] for state in states}
+    assert not list(native_agent.state_file(item).parent.glob("*.tmp"))
+
+
+def test_checkpoint_read_retries_contention_without_losing_history(tmp_path):
+    item = project(tmp_path / "busy-checkpoint")
+    previous = {"status": "continue", "messages": [{"role": "user", "content": "Keep this history."}], "turns": 8}
+    native_agent.save_state(item, previous)
+    read_text = Path.read_text
+    attempts = []
+
+    def read(path, *args, **kwargs):
+        if path == native_agent.state_file(item):
+            attempts.append(path)
+            if len(attempts) == 1:
+                raise PermissionError("Checkpoint is being replaced")
+        return read_text(path, *args, **kwargs)
+
+    with patch.object(Path, "read_text", new=read), patch.object(native_agent.time, "sleep"):
+        if os.name == "nt":
+            assert native_agent.read_state(item) == previous
+            assert len(attempts) == 2
+        else:
+            with pytest.raises(PermissionError):
+                native_agent.read_state(item)
+
+
+def test_persistent_checkpoint_denial_never_becomes_a_new_task(tmp_path):
+    item = project(tmp_path / "denied-checkpoint")
+    with patch.object(Path, "read_text", side_effect=PermissionError("Access denied")) as read, \
+            patch.object(native_agent.time, "sleep"):
+        with pytest.raises(PermissionError, match="Access denied"):
+            native_agent.read_state(item)
+    assert read.call_count == (5 if os.name == "nt" else 1)
+
+
+def test_failed_checkpoint_publication_keeps_prior_state_and_cleans_temporary_file(tmp_path):
+    item = project(tmp_path / "locked-checkpoint")
+    previous = {"status": "continue", "messages": [], "current": "Saved progress"}
+    native_agent.save_state(item, previous)
+    with patch.object(native_agent.os, "replace", side_effect=PermissionError("Checkpoint unavailable")) as replace, \
+            patch.object(native_agent.time, "sleep"):
+        with pytest.raises(PermissionError, match="Checkpoint unavailable"):
+            native_agent.save_state(item, {**previous, "current": "Unsaved progress"})
+    assert replace.call_count == (5 if os.name == "nt" else 1)
+    assert native_agent.read_state(item) == previous
+    assert not list(native_agent.state_file(item).parent.glob("*.tmp"))
+
+
+@pytest.mark.parametrize("status", ["paused", "stopped", "done"])
+def test_worker_error_keeps_a_newer_control_checkpoint(tmp_path, status):
+    item = project(tmp_path / "controlled-worker")
+    checkpoint = {"status": status, "messages": [{"role": "user", "content": "Keep the saved progress."}],
+                  "current": "A newer task state", "turns": 8}
+
+    def interrupted(_project):
+        native_agent.save_state(item, checkpoint)
+        raise OSError("The old operation failed during shutdown")
+
+    with patch.object(long_tasks, "projects", return_value=[item]), \
+            patch.object(native_agent, "run_slice", side_effect=interrupted):
+        assert native_agent.worker_main(item["id"]) == 0
+    assert native_agent.read_state(item) == checkpoint
+
+
+def test_worker_error_still_records_a_running_tasks_actual_failure(tmp_path):
+    item = project(tmp_path / "failed-worker")
+    previous = {"status": "running", "messages": [], "failures": 1, "turns": 8}
+    native_agent.save_state(item, previous)
+    with patch.object(long_tasks, "projects", return_value=[item]), \
+            patch.object(native_agent, "run_slice", side_effect=OSError("Actual operation failed")):
+        assert native_agent.worker_main(item["id"]) == 1
+    retained = native_agent.read_state(item)
+    assert retained["status"] == "error" and retained["failures"] == 2 and retained["turns"] == 8
+    assert retained["error"] == "OSError: Actual operation failed"
+
+
 def test_step_action_schema_rejects_mixed_completion_and_revision_before_dispatch():
     from jsonschema import ValidationError, validate
     schema = next(t["function"]["parameters"] for t in native_agent.TOOLS
