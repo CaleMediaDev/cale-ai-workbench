@@ -4190,7 +4190,8 @@ def test_third_identical_failed_tool_call_is_not_executed_again(monkeypatch):
         assert str(state["messages"]).count("Do not retry it unchanged") == 1
 
 
-def test_instruction_during_tool_call_follows_complete_tool_batch():
+@pytest.mark.parametrize("during_dispatch", [True, False], ids=["tool-in-flight", "host-preflight"])
+def test_instruction_during_tool_call_skips_remaining_stale_batch(during_dispatch):
     with tempfile.TemporaryDirectory() as temporary:
         item = project(Path(temporary) / "page")
         folder = Path(item["folder"])
@@ -4200,27 +4201,44 @@ def test_instruction_during_tool_call_follows_complete_tool_batch():
                                        "browser_verified": True})
         responses = iter([
             {"choices": [{"message": {"role": "assistant", "tool_calls": [{
-                "id": "list-1", "function": {"name": "list_files", "arguments": "{}"}}]}}]},
+                "id": "list-1", "function": {"name": "list_files", "arguments": "{}"}}, {
+                "id": "command-2", "function": {"name": "run_command",
+                                               "arguments": '{"command":"echo stale"}'}}]}}]},
             {"choices": [{"message": {"role": "assistant", "content": "Finished"}}]},
         ])
         seen = []
+        executed = []
         original = native_agent.execute_tool
+        step_context = native_agent.step_check_context
 
         def tool_with_note(root, name, arguments):
+            assert during_dispatch and name == "list_files", "An obsolete tool reached dispatch"
+            executed.append(name)
             (notes / "USER-REQUESTS.md").write_text("Use blue")
             return original(root, name, arguments)
+
+        def check_context(root, name, arguments):
+            if not during_dispatch:
+                (notes / "USER-REQUESTS.md").write_text("Use blue")
+            return step_context(root, name, arguments)
 
         def complete(payload):
             seen.append(copy.deepcopy(payload))
             return next(responses)
 
         with (patch.object(native_agent, "execute_tool", side_effect=tool_with_note),
+              patch.object(native_agent, "step_check_context", side_effect=check_context),
               patch.object(native_agent, "MAX_TURNS_PER_SLICE", 2)):
             state = native_agent.run_slice(item, complete=complete)
         assert state["status"] == "continue"
         assert state["verify_passed"] is False
         assert state["browser_verified"] is False
-        assert [entry["role"] for entry in seen[1]["messages"][-3:]] == ["assistant", "tool", "user"]
+        assert executed == (["list_files"] if during_dispatch else [])
+        batch = seen[1]["messages"][-4:]
+        assert [entry["role"] for entry in batch] == ["assistant", "tool", "tool", "user"]
+        assert [entry["tool_call_id"] for entry in batch[1:3]] == ["list-1", "command-2"]
+        assert ("Skipped without executing" in batch[1]["content"]) is not during_dispatch
+        assert "Skipped without executing" in batch[2]["content"]
         assert "Use blue" in str(seen[1]["messages"])
 
 

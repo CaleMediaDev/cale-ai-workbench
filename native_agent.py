@@ -6030,11 +6030,15 @@ def _run_slice(project: dict, complete=None) -> dict:
             return state
         read_cycle_notice = False
         step_boundary = False
+        superseded_at = None
         for call_index,item in enumerate(calls):
             state["premature_finishes"] = 0
             latest = read_state(project)
             if latest.get("status") in ("paused", "stopped", "done"):
                 return latest
+            if user_request_stamp(folder) != request_before:
+                superseded_at = call_index
+                break
             function = item.get("function") or {}
             args = {}
             signature = ""
@@ -6107,6 +6111,9 @@ def _run_slice(project: dict, complete=None) -> dict:
                               "Inspect the earlier error or change the method or arguments.")
                 else:
                     step_check = step_check_context(folder, function.get("name", ""), args)
+                    if user_request_stamp(folder) != request_before:
+                        superseded_at = call_index
+                        break
                     if function.get("name") == "task_steps" and args.get("_initial_plan") is True:
                         def initial_plan_commit_allowed():
                             import long_tasks
@@ -6176,11 +6183,9 @@ def _run_slice(project: dict, complete=None) -> dict:
 
             task_context.record_action(folder, function.get("name", ""), result, args,
                                        request_hash=planned_request_hash)
-            if (request.get("_native_plan_basis") is not None
-                    or function.get("name") == "check_webapp" and "_active_browser_revision" in args):
-                latest = read_state(project)
-                if latest.get("status") in {"paused", "stopped", "done"}:
-                    return latest  # Do not overwrite a control change observed by the commit guard.
+            latest = read_state(project)
+            if latest.get("status") in {"paused", "stopped", "done"}:
+                return latest  # Preserve Pause or Stop while a tool was in flight.
             outcome = task_context.action_outcome(function.get("name", ""), result)
             if function.get("name") == "create_game_starter" and outcome == "Completed":
                 created = json.loads(result)
@@ -6313,7 +6318,26 @@ def _run_slice(project: dict, complete=None) -> dict:
                 state["current"] = (f"Phase: {active['phase']} · {queue['done']}/{queue['total']} steps checked · "
                                     + active["title"] if active else
                                     f"Phase checked: {queue['done']}/{queue['total']} steps; checking the full request")
+            if user_request_stamp(folder) != request_before:
+                invalidate_checks(state)
             save_state(project, state)
+        current_request_stamp = user_request_stamp(folder)
+        if superseded_at is not None or current_request_stamp != request_before:
+            if superseded_at is not None:
+                for item in calls[superseded_at:]:
+                    messages.append({
+                        "role": "tool", "tool_call_id": item.get("id", ""),
+                        "name": (item.get("function") or {}).get("name", ""),
+                        "content": "Skipped without executing because the user changed the instructions.",
+                    })
+            invalidate_checks(state)
+            known_request_stamp = current_request_stamp
+            messages.append({"role": "user", "content":
+                             "A new user instruction arrived during this step. "
+                             "Read .local-ai/USER-REQUESTS.md before your next action."})
+            state.update(messages=messages, current="Reading the new instruction before continuing")
+            save_state(project, state)
+            continue
         if read_cycle_notice:
             # Keep all tool replies together before inserting guidance; a
             # user message between replies breaks provider tool-call formats.
@@ -6333,9 +6357,10 @@ def _run_slice(project: dict, complete=None) -> dict:
             state["messages"] = messages
             state["failure_nudged"] = True
             save_state(project, state)
-        if user_request_stamp(folder) != request_before:
+        current_request_stamp = user_request_stamp(folder)
+        if current_request_stamp != request_before:
             invalidate_checks(state)
-            known_request_stamp = user_request_stamp(folder)
+            known_request_stamp = current_request_stamp
             messages.append({"role": "user", "content":
                              "A new user instruction arrived during this step. "
                              "Read .local-ai/USER-REQUESTS.md before your next action."})
