@@ -634,6 +634,46 @@ class Production(unittest.TestCase):
         self.service.monitor_beds([self.printer], self.store)
         self.assertEqual(self.service.bed_check_states(), {})
 
+    def test_finished_monitor_deadline_precedes_older_idle_scan(self):
+        idle = {**self.printer, "id": "idle", "online": True, "camera_url": "http://idle"}
+        finished = {**self.printer, "online": True, "camera_url": "http://finished", "unload_required": True}
+        self.service._automatic_bed_checks = {
+            (idle["id"], farm.bed_camera_key(idle), False): 80,
+            (finished["id"], farm.bed_camera_key(finished), True): 90,
+        }
+        with patch("print_farm.time.monotonic", return_value=110):
+            self.service._printers_checked_at = 110
+            self.service.monitor_beds([idle, finished], self.store)
+        self.assertEqual(self.service.bed_check_states(), {"p": "queued"})
+
+    def test_broker_token_outage_keeps_printers_and_saved_queue_observable(self):
+        self.printer.update(online=True, camera_url="http://camera")
+        self.proposal["reason"] = "Saved file match"
+        self.store.decision(self.key, self.proposal)
+        self.client.orders.side_effect = RuntimeError("Reconnect your eBay account")
+        with (patch.object(self.service, "account_client", return_value=self.client),
+              patch.object(self.service, "scan_printers", return_value=[self.printer]),
+              patch.object(self.service, "dispatch") as dispatch):
+            self.service.cycle(self.store)
+            self.service.monitor_beds([self.printer], self.store)
+        self.assertIn("showing saved orders", self.service.snapshot["status"])
+        self.assertEqual(self.service.bed_check_states(), {"p": "queued"})
+        dispatch.assert_not_called()
+
+    def test_account_read_failure_preserves_queue_and_bed_monitoring(self):
+        self.printer.update(online=True, camera_url="http://camera")
+        self.proposal["reason"] = "Saved file match"
+        self.store.decision(self.key, self.proposal)
+        with (patch.object(self.service, "account_client", side_effect=ValueError("Unreadable account")),
+              patch.object(self.service, "scan_printers", return_value=[self.printer]),
+              patch.object(self.service, "dispatch") as dispatch):
+            self.service.cycle(self.store)
+            self.service.monitor_beds([self.printer], self.store)
+        self.assertFalse(self.service.snapshot["connected"])
+        self.assertTrue(self.service.snapshot["orders"])
+        self.assertEqual(self.service.bed_check_states(), {"p": "queued"})
+        dispatch.assert_not_called()
+
     def test_manual_bed_check_is_read_only_and_coalesces_requests(self):
         self.printer.update(online=True, camera_url="http://camera")
         self.settings["printers"] = [dict(self.printer)]

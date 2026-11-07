@@ -5368,6 +5368,8 @@ def test_function_notes_recheck_controls_and_concurrent_edits_before_replace(tmp
         original = native_agent.tempfile.mkstemp
         def interrupted(*args, **kwargs):
             result = original(*args, **kwargs)
+            if kwargs.get("prefix") != ".cale-notes-":
+                return result
             if mode == "pause":
                 native_agent.save_state(item, {**state, "status": "paused"})
             elif mode == "instruction":

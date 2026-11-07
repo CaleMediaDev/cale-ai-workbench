@@ -461,6 +461,7 @@ class Service:
         elif not skipped:
             future = concurrent.futures.Future()
             self._bed_check_run = ManualBedCheck(source, bool(printer.get("unload_required")), future)
+            self._automatic_bed_checks[(printer_id, source, bool(printer.get("unload_required")))] = time.monotonic()
             with self._bed_checks_lock:
                 self._bed_checks[printer_id] = "checking"
             worker = threading.Thread(
@@ -522,7 +523,9 @@ class Service:
             interval = 15 if printer.get("unload_required") else 30
             last = self._automatic_bed_checks.get(key)
             if last is None or now - last >= interval:
-                due.append((printer, key, last))
+                due.append((printer, key, None if last is None else last + interval))
+        current_keys = {(p["id"], bed_camera_key(p), bool(p.get("unload_required"))) for p in printers}
+        self._automatic_bed_checks = {key: value for key, value in self._automatic_bed_checks.items() if key in current_keys}
         if due:
             printer, key, _ = min(due, key=lambda item: (
                 item[2] if item[2] is not None else -1, not bool(item[0].get("unload_required"))))
@@ -1104,21 +1107,27 @@ class Service:
         )
         ledger.mkdir(exist_ok=True, parents=True)
         self.reconcile(store, ledger)
-        client = self.account_client(settings)
-        if client is None:
+        account_unavailable = False
+        try:
+            client = self.account_client(settings)
+        except (OSError, ValueError, RuntimeError):
+            client, account_unavailable = None, True
+            self.ebay_poll_failed = True
+        if client is None and not account_unavailable:
             self.snapshot.update(
                 status="Connect your eBay account to import sales",
                 connected=False,
                 orders=[],
             )
             return
-        try:
-            self.import_sales(store, client, settings)
-        except (IntakeError, OSError, ValueError):
-            # Keep showing the local queue and reconciled jobs while order
-            # intake is unavailable. The next successful poll releases it.
-            self.ebay_poll_failed = True
-        self.snapshot["connected"] = True
+        if client is not None:
+            try:
+                self.import_sales(store, client, settings)
+            except (IntakeError, OSError, ValueError, RuntimeError):
+                # Keep showing the local queue and reconciled jobs while order
+                # intake is unavailable. The next successful poll releases it.
+                self.ebay_poll_failed = True
+        self.snapshot["connected"] = client is not None
         candidates = self.catalog(settings, printers) if not self.ebay_poll_failed else []
         rows = []
         for saved in store.db.execute(

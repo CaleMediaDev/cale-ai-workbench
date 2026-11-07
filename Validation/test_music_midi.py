@@ -48,6 +48,7 @@ def test_failed_publication_preserves_replacement_symlink_to_owned_inode(tmp_pat
     destination = target / "guitar.mid"
     original_link = music_midi.os.link
     staged_midi = []
+    replacement_targets = []
 
     def render(args, **kwargs):
         staging = Path(args[-1])
@@ -60,6 +61,7 @@ def test_failed_publication_preserves_replacement_symlink_to_owned_inode(tmp_pat
         if output.name == "z-extra.txt":
             destination.unlink()
             destination.symlink_to(staged_midi[0])
+            replacement_targets.append(destination.readlink())
             raise OSError("publication failed")
         return original_link(staged, output)
 
@@ -71,7 +73,7 @@ def test_failed_publication_preserves_replacement_symlink_to_owned_inode(tmp_pat
             music_midi.transcribe_to_midi(str(source), str(target))
 
     assert destination.is_symlink()
-    assert destination.readlink() == staged_midi[0]
+    assert destination.readlink() == replacement_targets[0]
     assert not staged_midi[0].exists()
     assert list(target.iterdir()) == [destination]
     assert source.read_bytes() == b"original audio"

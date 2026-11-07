@@ -486,7 +486,7 @@ def test_relative_symlinks_do_not_count_as_stems(tmp_path):
         for name in ("song_(Vocals).wav", "song_(Instrumental).wav"):
             link = staging / name
             # Valid in staging, but dangling if moved one directory upward.
-            link.symlink_to("../../song.mp3")
+            link.symlink_to(Path("..") / ".." / "song.mp3")
             assert link.is_file()
             assert link.stat().st_size > 0
         return SimpleNamespace(returncode=0)

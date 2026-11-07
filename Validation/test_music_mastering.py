@@ -496,6 +496,7 @@ def test_mastering_rejects_dangling_output_symlink(tmp_path):
         output.symlink_to(target)
     except (OSError, NotImplementedError):
         pytest.skip("Creating symlinks is unavailable on this system")
+    original_target = output.readlink()
 
     with patch.object(music_mastering, "install") as install:
         with pytest.raises(ValueError, match="new output"):
@@ -503,7 +504,7 @@ def test_mastering_rejects_dangling_output_symlink(tmp_path):
         install.assert_not_called()
 
     assert output.is_symlink()
-    assert output.readlink() == target
+    assert output.readlink() == original_target
     assert not target.exists()
     assert source.read_bytes() == b"source"
     assert reference.read_bytes() == b"reference"

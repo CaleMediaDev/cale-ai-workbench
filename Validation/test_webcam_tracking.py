@@ -79,6 +79,57 @@ def test_focus_area_applies_without_claiming_a_detection(tmp_path):
     assert "focus_box" not in json.loads(view.config.read_text())
 
 
+@pytest.mark.parametrize("enrollment_request", ["invalid", ["Cale"], {"name": "New", "alongside": "Cale", "until": "tomorrow"}])
+def test_invalid_enrollment_request_does_not_stop_live_detection(tmp_path, enrollment_request):
+    pytest.importorskip("cv2")
+    tracker = SceneTracker.__new__(SceneTracker)
+    tracker.root, tracker.cache, tracker.saved = tmp_path, {}, JsonCache()
+    tracker.detector = SimpleNamespace(detect=lambda frame: [])
+    tracker.memory = SimpleNamespace(known=lambda: {})
+    tracker.tracks, tracker.auto = Tracks(), AutoEnrollment()
+    write_json(tmp_path/"Media/webcam-tracking.json", {"learn_other": enrollment_request})
+    result = tracker.process(np.zeros((30, 30, 3), np.uint8), [], None)
+    assert result["items"] == []
+
+
+def test_selected_webcam_frame_survives_the_full_teaching_window(tmp_path, monkeypatch):
+    pytest.importorskip("cv2")
+    tracker = SceneTracker.__new__(SceneTracker)
+    tracker.root, tracker.cache, tracker.saved = tmp_path, {}, JsonCache()
+    tracker.detector = SimpleNamespace(detect=lambda frame: [])
+    tracker.memory = SimpleNamespace(known=lambda: {})
+    tracker.tracks, tracker.auto = Tracks(), AutoEnrollment()
+    now = [100.]
+    monkeypatch.setattr("webcam_tracking.time.monotonic", lambda: now[0])
+    first = tracker.process(np.zeros((30, 30, 3), np.uint8), [], None)
+    for _ in range(49):
+        now[0] += .36
+        tracker.process(np.zeros((30, 30, 3), np.uint8), [], None)
+    assert first["frame_id"] in tracker.cache
+
+
+def test_webcam_controls_remain_visible_at_minimum_window_size(tmp_path):
+    import tkinter as tk
+    parent = tk.Tk()
+    parent.withdraw()
+    view = TrackingView(parent, tmp_path, lambda: 1, lambda: False)
+    try:
+        view.open()
+        view.dialog.geometry("780x650")
+        view.dialog.update()
+        bottom = view.dialog.winfo_rooty() + view.dialog.winfo_height()
+        def children(widget):
+            for child in widget.winfo_children():
+                yield child
+                yield from children(child)
+        buttons = [w for w in children(view.dialog) if w.winfo_class() == "TButton"]
+        assert buttons and all(w.winfo_ismapped() and w.winfo_rooty()+w.winfo_height() <= bottom for w in buttons), [
+            (w.cget("text"), w.winfo_ismapped(), w.winfo_rooty(), w.winfo_height(), bottom) for w in buttons]
+    finally:
+        view.close()
+        parent.destroy()
+
+
 def test_restoring_panel_requires_existing_camera_permission(tmp_path, monkeypatch):
     config = tmp_path / "Media/webcam-tracking.json"
     config.parent.mkdir()

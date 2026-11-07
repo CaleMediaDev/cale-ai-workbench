@@ -354,7 +354,12 @@ class SceneTracker:
         config_path = self.root/"Media/webcam-tracking.json"
         config = dict(self.saved.get(config_path))
         request = config.get("learn_other", {})
-        enrollment = self.auto.observe(named_faces, request, known_people, time.time()) if isinstance(request, dict) else None
+        if (not isinstance(request, dict)
+                or not all(isinstance(request.get(key), str) and request[key].strip() for key in ("name", "alongside"))
+                or type(request.get("until")) not in (int, float)
+                or not math.isfinite(request["until"])):
+            request = {}
+        enrollment = self.auto.observe(named_faces, request, known_people, time.time())
         learning = ""
         if enrollment:
             from face_identity import enroll
@@ -393,11 +398,11 @@ class SceneTracker:
         token = uuid.uuid4().hex
         self.cache = {key: value for key, value in self.cache.items() if now-value["at"] < 20}
         self.cache[token] = {"at": now, "items": private, "frame": frame}
-        while len(self.cache) > 32:
+        # Recognition is paced at most once per .35 seconds. Keep enough slots
+        # for the full 20-second teaching window, not just the last ~11 seconds.
+        while len(self.cache) > 64:
             self.cache.pop(next(iter(self.cache)))
-        h, w = frame.shape[:2]
-        preview = cv2.resize(frame, (min(960, w), max(1, round(h*min(960, w)/w))))
-        ok, raw = cv2.imencode(".jpg", preview, [cv2.IMWRITE_JPEG_QUALITY, 85])
+        ok, raw = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
         return {"frame_id": token, "at": time.time(), "items": items,
                 "image": base64.b64encode(raw.tobytes()).decode("ascii") if ok else "",
                 "learning": learning,

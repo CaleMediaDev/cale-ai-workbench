@@ -77,6 +77,8 @@ class TrackingView:
         body.pack(fill="both", expand=True)
         ttk.Label(body, text="Webcam AI", font=("Segoe UI", 22, "bold")).pack(anchor="w")
         ttk.Label(body, text="Live people & objects · Click a box, or Select area for a missed object").pack(anchor="w", pady=(4, 10))
+        controls = ttk.Frame(body)
+        controls.pack(side="bottom", fill="x")
         self.canvas = tk.Canvas(body, background="#101923", highlightthickness=0, height=540)
         self.canvas.pack(fill="both", expand=True)
         self.canvas.bind("<Button-1>", self.press)
@@ -84,23 +86,28 @@ class TrackingView:
         self.canvas.bind("<ButtonRelease-1>", self.finish_area)
         self.canvas.bind("<Configure>", lambda _: self.draw())
         self.status = tk.StringVar(value="Preparing local people and object detection…")
-        ttk.Label(body, textvariable=self.status, wraplength=1020).pack(anchor="w", pady=(8, 4))
+        status_label = ttk.Label(controls, textvariable=self.status, wraplength=720)
+        status_label.pack(anchor="w", pady=(8, 4))
         self.people = tk.StringVar(value="Known people: loading…")
-        ttk.Label(body, textvariable=self.people).pack(anchor="w", pady=(0, 8))
-        scan_actions = ttk.Frame(body)
+        people_label = ttk.Label(controls, textvariable=self.people, wraplength=720)
+        people_label.pack(anchor="w", pady=(0, 8))
+        scan_actions = ttk.Frame(controls)
         scan_actions.pack(fill="x", pady=(0, 6))
         ttk.Button(scan_actions, text="Select area", command=self.begin_area).pack(side="left", padx=(0, 8))
         ttk.Button(scan_actions, text="Look closer", command=self.focus_area).pack(side="left", padx=(0, 8))
         ttk.Button(scan_actions, text="Scan whole view", command=self.whole_view).pack(side="left", padx=(0, 8))
-        actions = ttk.Frame(body)
+        actions = ttk.Frame(controls)
         actions.pack(fill="x")
         for name in config.get("quick_names", [])[:4]:
             ttk.Button(actions, text="Learn " + name, command=lambda n=name: self.learn_person(n)).pack(side="left", padx=(0, 8))
         ttk.Button(actions, text="Name selected", command=self.learn_selected).pack(side="left", padx=(0, 8))
         ttk.Button(actions, text="Resume live", command=self.resume).pack(side="left", padx=(0, 8))
         ttk.Button(actions, text="Saved names", command=self.manage).pack(side="right")
-        ttk.Label(body, text="Names come from taught face samples, never a seat. Unknown faces stay unknown. "
-                  "Object names need visible detail; teaching another angle adds an example.", wraplength=1020).pack(anchor="w", pady=(12, 0))
+        footer = ttk.Label(controls, text="Names come from taught face samples, never a seat. Unknown faces stay unknown. "
+                  "Object names need visible detail; teaching another angle adds an example.", wraplength=720)
+        footer.pack(anchor="w", pady=(12, 0))
+        controls.bind("<Configure>", lambda event: [label.configure(wraplength=max(120, event.width))
+                       for label in (status_label, people_label, footer)])
         dialog.protocol("WM_DELETE_WINDOW", self.close)
         self.session_generation = self.generation()
         self.poll()
@@ -202,6 +209,7 @@ class TrackingView:
         self.selected = None
         self.area_mode, self.region_start = False, None
         self.notice_until = 0
+        self.canvas.delete("area-drag")
 
     def begin_area(self):
         if not self.result:
