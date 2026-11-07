@@ -2464,12 +2464,14 @@ def compact_messages(messages: list, folder: Path, context_limit: int | None = N
 
 
 def fresh_messages(messages: list, folder: Path, state: dict | None = None,
-                   project: dict | None = None, *, omit_completion_advice=False) -> list:
+                   project: dict | None = None, *, omit_completion_advice=False,
+                   expected_request=None, expected_queue=None) -> list:
     """Rebuild each model call from the durable checkpoint and recent exchanges."""
     import task_context
 
-    checkpoint = task_context.snapshot(folder)
-    queue = task_context.step_status(folder)
+    checkpoint, queue = task_context.checkpoint_view(folder, expected_request=expected_request)
+    if expected_queue is not None and queue != expected_queue:
+        raise task_context.CheckpointChanged("Task queue changed while building the checkpoint")
     active = queue["active"]
     if active and active["check_tool"] in {"check_python_function", "check_javascript_function", "check_webapp"}:
         try:
@@ -5719,7 +5721,7 @@ def _run_slice(project: dict, complete=None) -> dict:
         if plan_declared_function_step(project, state, messages, call):
             continue
         planned_request_hash = task_context.request_identity(folder)
-        planned_queue = task_context.step_status(folder)
+        planned_queue = task_context.step_status(folder, request_hash=planned_request_hash)
         planned_step = planned_queue["active"]
         if planned_queue['total'] > 0 and planned_queue['remaining'] == 0 and not planned_step:
             saved_feedback = automatic_saved_browser_feedback(project, state, planned_queue, planned_request_hash)
@@ -5756,8 +5758,13 @@ def _run_slice(project: dict, complete=None) -> dict:
                     {**project, 'brief': instruction_frame['brief']}, rules_override=instruction_frame['rules'])}
             except (OSError, ValueError, TypeError, KeyError, RecursionError):
                 return _post_queue_instruction_defer(project, state, 'instructions_unavailable')
-        messages = fresh_messages(messages, folder, state, project,
-                                  omit_completion_advice=whole_goal_work)
+        try:
+            messages = fresh_messages(
+                messages, folder, state, project, omit_completion_advice=whole_goal_work,
+                expected_request=planned_request_hash, expected_queue=planned_queue,
+            )
+        except task_context.CheckpointChanged:
+            return _post_queue_instruction_defer(project, state, "checkpoint_changed")
         if needs_initial_plan and planning_basis(project) != plan_basis:
             continue  # Rebuild the prompt and its identity together, without inference or mutation.
         frontier = post_queue_frontier(project, state, planned_queue, planned_request_hash,
@@ -5863,6 +5870,11 @@ def _run_slice(project: dict, complete=None) -> dict:
              'check': planned_step.get('check_arguments') if planned_step else None})
         validated_whole_request = instruction_frame['request'] if whole_goal_work else None
         try:
+            if task_context.request_identity(folder) != planned_request_hash:
+                return _post_queue_instruction_defer(project, state, "instructions_changed")
+        except OSError:
+            return _post_queue_instruction_defer(project, state, "instructions_unavailable")
+        try:
             response = call(request)
         except ToolArgumentError as error:
             # The router exhausted its schema correction without executing any
@@ -5906,7 +5918,11 @@ def _run_slice(project: dict, complete=None) -> dict:
             except (OSError, ValueError, TypeError, KeyError, RecursionError):
                 return _post_queue_instruction_defer(project, state, 'instructions_unavailable')
         current_request_stamp = user_request_stamp(folder)
-        if current_request_stamp != request_before:
+        try:
+            request_changed = task_context.request_identity(folder) != planned_request_hash
+        except OSError:
+            return _post_queue_instruction_defer(project, state, "instructions_unavailable")
+        if current_request_stamp != request_before or request_changed:
             # The response was planned against the older brief. Do not run
             # its tool calls after a user has changed the task.
             invalidate_checks(state)

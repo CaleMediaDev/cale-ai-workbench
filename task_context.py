@@ -312,8 +312,17 @@ def document_path(folder: str | Path, name: str) -> Path:
     return standard
 
 
+class CheckpointChanged(OSError):
+    """The saved queue or instructions changed while preparing a model turn."""
+
+
 def snapshot(folder: str | Path) -> str:
-    """Refresh changed source documents and return a concise DB-backed briefing."""
+    """Return the text of the current DB-backed briefing."""
+    return checkpoint_view(folder)[0]
+
+
+def checkpoint_view(folder: str | Path, *, expected_request: str | None = None) -> tuple[str, dict]:
+    """Build the briefing and active queue from the same saved request bytes."""
     root = Path(folder)
     with project_memory.connection(root) as conn:
         _schema(conn)
@@ -369,10 +378,16 @@ def snapshot(folder: str | Path) -> str:
             documents[name] = excerpt
             steps[name] = next_step
             stamps[name] = stamp
+        request_hash = hashes["USER-REQUESTS.md"]
+        if expected_request is not None and request_hash != expected_request:
+            raise CheckpointChanged("Task instructions changed while building the checkpoint")
+        if not conn.in_transaction:
+            conn.execute("BEGIN")
+        queue = _step_status(conn, request_hash)
         events = conn.execute("SELECT tool,outcome,subject FROM task_events ORDER BY id DESC LIMIT 5").fetchall()
         checks = conn.execute("""SELECT checker,path,details,repeats FROM task_check_results
             WHERE passed=0 AND request_hash=? ORDER BY updated DESC LIMIT 128""",
-            (hashes["USER-REQUESTS.md"],)).fetchall()
+            (request_hash,)).fetchall()
     # A newer explicit progress note can supersede an older unchecked plan
     # item. A subsequently edited plan takes priority again.
     # Cache refresh times describe parsing, not document freshness. Equal
@@ -380,7 +395,6 @@ def snapshot(folder: str | Path) -> str:
     progress_is_newer = stamps["PROGRESS.md"][0] >= stamps["PLAN.md"][0]
     next_step = ((steps["PROGRESS.md"] or steps["PLAN.md"])
                  if progress_is_newer else (steps["PLAN.md"] or steps["PROGRESS.md"]))
-    queue = step_status(root)
     if queue["active"]:
         active = queue["active"]
         next_step = f"Phase {active['phase']}, SQLite step {active['id']}: {active['title']}"
@@ -452,7 +466,7 @@ def snapshot(folder: str | Path) -> str:
         # The active acceptance must survive before large prose excerpts when
         # the model's context budget shortens the durable checkpoint.
         lines = lines[:4] + lines[queue_start:] + lines[4:queue_start]
-    return "\n".join(lines)
+    return "\n".join(lines), queue
 
 
 def _step_status(conn, request_hash: str) -> dict:
@@ -476,11 +490,11 @@ def _step_status(conn, request_hash: str) -> dict:
             "recent_completed": [dict(row) for row in recent]}
 
 
-def step_status(folder: str | Path) -> dict:
+def step_status(folder: str | Path, *, request_hash: str | None = None) -> dict:
     """Resume the current user request's queue; older instructions stay historical."""
     with project_memory.connection(folder) as conn:
         _schema(conn)
-        return _step_status(conn, request_identity(folder))
+        return _step_status(conn, request_identity(folder) if request_hash is None else request_hash)
 
 
 def historical_step_status(folder: str | Path) -> dict:

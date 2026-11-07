@@ -3645,6 +3645,34 @@ def test_task_checkpoint_refreshes_after_restart_and_does_not_lose_new_user_mess
         assert any(entry.get("content") == "Use a larger font" for entry in fresh)
 
 
+def test_checkpoint_does_not_mix_request_bytes_with_a_different_saved_queue(tmp_path, monkeypatch):
+    item = project(tmp_path / "page")
+    folder = Path(item["folder"])
+    request = folder / ".local-ai/USER-REQUESTS.md"
+    for wording, step in (("Previous requirement", "Previous step"), ("Revised requirement", "Revised step")):
+        request.write_text(wording, encoding="utf-8")
+        task_context.plan_steps(folder, [queue_step(step, "echo checked")])
+    request.write_text("Previous requirement", encoding="utf-8")
+    original = task_context._document_state
+    reads = 0
+
+    def state(path):
+        nonlocal reads
+        stamp = original(path)
+        if path == request:
+            reads += 1
+            if reads == 2:
+                request.write_text("Revised requirement", encoding="utf-8")
+        return stamp
+
+    monkeypatch.setattr(task_context, "_document_state", state)
+    checkpoint = task_context.snapshot(folder)
+    assert "Previous requirement" in checkpoint and "Previous step" in checkpoint
+    assert "Revised step" not in checkpoint
+    checkpoint = task_context.snapshot(folder)
+    assert "Revised requirement" in checkpoint and "Revised step" in checkpoint
+
+
 def test_failed_checker_details_survive_event_trimming_and_fresh_context(tmp_path):
     item = project(tmp_path / "page")
     folder = Path(item["folder"])
@@ -3990,18 +4018,26 @@ def test_inflight_user_instruction_prevents_early_completion():
         assert len(seen) == 2
 
 
-def test_new_instruction_during_model_call_discards_stale_tool_plan():
+@pytest.mark.parametrize("preserve_stamp", [False, True])
+def test_new_instruction_during_model_call_discards_stale_tool_plan(preserve_stamp):
     with tempfile.TemporaryDirectory() as temporary:
         item = project(Path(temporary) / "page")
         folder = Path(item["folder"])
         notes = folder / ".local-ai"
-        (notes / "USER-REQUESTS.md").write_text("", encoding="utf-8")
+        request = notes / "USER-REQUESTS.md"
+        revision = "Do not create old.txt"
+        request.write_text(" " * len(revision) if preserve_stamp else "", encoding="utf-8")
         (notes / "verify.ps1").write_text("exit 0", encoding="utf-8")
         native_agent.save_state(item, {"status": "continue", "verify_passed": True,
                                        "browser_verified": True})
 
         def complete(_payload):
-            (notes / "USER-REQUESTS.md").write_text("Do not create old.txt", encoding="utf-8")
+            stamp = request.stat()
+            request.write_text(revision, encoding="utf-8")
+            if preserve_stamp:
+                os.utime(request, ns=(stamp.st_atime_ns, stamp.st_mtime_ns))
+                assert request.stat().st_mtime_ns == stamp.st_mtime_ns
+                assert request.stat().st_size == stamp.st_size
             return {"choices": [{"message": {"role": "assistant", "tool_calls": [{
                 "id": "stale-write", "function": {"name": "write_file", "arguments":
                     '{"path":"old.txt","content":"stale plan"}'}}]}}]}
