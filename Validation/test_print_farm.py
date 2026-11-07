@@ -339,6 +339,16 @@ class Decisions(unittest.TestCase):
         )
         infer.assert_not_called()
 
+    def test_hidden_bed_is_distinct_from_occupied(self):
+        frames = iter([b"a", b"b"])
+        watcher = farm.BedWatcher(
+            capture=lambda _: next(frames),
+            infer=lambda *args, **kwargs: {**clear(), "bed_fully_visible": False},
+            sleep=lambda _: None,
+        )
+        result = watcher.check({"id": "p", "camera_url": "http://camera"}, "vision")
+        self.assertEqual(result["state"], "out_of_view")
+
     def test_removal_changes_occupied_to_clear_with_new_ticket(self):
         frames = iter([b"a", b"b", b"c", b"d"])
         results = iter(
@@ -486,6 +496,23 @@ class Production(unittest.TestCase):
         self.printer["idle"] = True
         self.dispatch()
         self.machine.start_order.assert_called_once()
+
+    def test_manual_bed_check_is_read_only_and_coalesces_requests(self):
+        self.printer.update(online=True, camera_url="http://camera")
+        for _ in range(2):
+            self.service.request_bed_check(self.printer["id"])
+        self.service.inspect_requested_bed([self.printer], self.settings, self.store)
+        self.service.inspect_requested_bed([self.printer], self.settings, self.store)
+        self.service.beds.check.assert_called_once()
+        self.assertEqual(self.printer["bed"]["state"], "clear")
+        self.assertNotIn("ticket_id", self.printer["bed"])
+        self.assertIsNone(self.store.db.execute("SELECT 1 FROM jobs").fetchone())
+        self.machine.start_order.assert_not_called()
+
+        self.printer["idle"] = False
+        self.service.request_bed_check(self.printer["id"])
+        self.service.inspect_requested_bed([self.printer], self.settings, self.store)
+        self.service.beds.check.assert_called_once()
 
     def test_ebay_outage_keeps_saved_progress_visible_and_dispatch_waits_for_recovery(self):
         self.proposal["reason"] = "Saved file match"

@@ -239,9 +239,15 @@ class BedWatcher:
             )
             if not fresh():
                 raise Hold("Vision response was too slow; a fresh bed check is required")
-            clear = valid_clear(answer)
+            state = "unknown"
+            if valid_clear(answer):
+                state = "clear"
+            elif answer.get("bed_fully_visible") is False:
+                state = "out_of_view"
+            elif answer.get("object_present") is True or answer.get("person_or_hand") is True:
+                state = "blocked"
             result = {
-                "state": "clear" if clear else "blocked",
+                "state": state,
                 "reason": str(answer.get("reason", "Bed not clearly empty"))[:300],
                 "checked_at": self.clock(),
                 "captured_at": captured,
@@ -337,6 +343,8 @@ class Service:
         self.root.mkdir(parents=True, exist_ok=True)
         self.settings_path = self.root / "settings.json"
         self.commands = queue.Queue()
+        self._bed_checks = {}
+        self._bed_checks_lock = threading.Lock()
         self.wake = threading.Event()
         self.stop_event = threading.Event()
         self._cycle_lock = threading.Lock()
@@ -377,6 +385,35 @@ class Service:
             ("approve", self.settings().get("account_scope", "unconnected"), key, token)
         )
         self.wake.set()
+
+    def request_bed_check(self, printer_id):
+        with self._bed_checks_lock:
+            self._bed_checks.setdefault(printer_id, None)
+        self.wake.set()
+
+    def inspect_requested_bed(self, printers, settings, store):
+        if self._update_draining.is_set():
+            return
+        with self._bed_checks_lock:
+            printer_id = next(iter(self._bed_checks), None)
+            if printer_id is None:
+                return
+            del self._bed_checks[printer_id]
+        printer = next((item for item in printers if item["id"] == printer_id), None)
+        if not printer or not printer.get("online") or not printer.get("idle"):
+            return
+        if store.db.execute(
+            "SELECT 1 FROM jobs WHERE printer_id=? AND status IN "
+            "('dispatching','printing','submission_uncertain') LIMIT 1",
+            (printer_id,),
+        ).fetchone():
+            return
+        bed = self.beds.check(printer, settings.get("vision_model", "cale-vision:latest"))
+        # Manual inspection is for the display. Dispatch always obtains its
+        # own clearance and never consumes a result from this button.
+        bed = {key: value for key, value in bed.items() if key != "ticket_id"}
+        self.beds.last[printer_id] = bed
+        printer["bed"] = bed
 
     def start(self):
         if not self.thread or not self.thread.is_alive():
@@ -932,6 +969,7 @@ class Service:
         )
         ledger.mkdir(exist_ok=True, parents=True)
         self.reconcile(store, ledger)
+        self.inspect_requested_bed(printers, settings, store)
         client = self.account_client(settings)
         if client is None:
             self.snapshot.update(

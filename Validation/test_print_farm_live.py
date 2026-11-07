@@ -73,6 +73,7 @@ class LiveObservationTests(unittest.TestCase):
             snapshot={"printers": [], "orders": []},
             start=Mock(),
             stop=Mock(),
+            request_bed_check=Mock(),
         )
         try:
             page = Controls(parent, window, Path("."), service=service)
@@ -85,6 +86,13 @@ class LiveObservationTests(unittest.TestCase):
             }
             page.render(data)
             tile = page.camera_tiles["0"]
+            card = page.printer_cards["0"]
+            self.assertTrue(card.check_bed.instate(["disabled"]))
+            data["printers"][0].update(camera_url="http://camera", bed={"state": "out_of_view"})
+            page.render(data)
+            self.assertIn("Bed out of view", card.bed.cget("text"))
+            card.check_bed.invoke()
+            service.request_bed_check.assert_called_once_with("0")
             tile.overlay.set(True)
             self.assertEqual(page.printer_cards["0"].percent.cget("text"), "—")
             data["printers"][0].update(detail="Printing / busy", progress="78.4", idle=False,
@@ -93,7 +101,7 @@ class LiveObservationTests(unittest.TestCase):
             page.render(data)
             self.assertIs(tile, page.camera_tiles["0"])
             self.assertTrue(tile.overlay.get())
-            card = page.printer_cards["0"]
+            self.assertTrue(card.check_bed.instate(["disabled"]))
             self.assertEqual(card.percent.cget("text"), "78%")
             self.assertIn("PRINTING", card.status.cget("text"))
             self.assertIn("clear", card.bed.cget("text"))

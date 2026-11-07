@@ -36,7 +36,7 @@ class PrinterCard(tk.Frame):
         "stale": ("Signal delayed", "#ffc879"),
     }
 
-    def __init__(self, parent, live, printer_id, settings):
+    def __init__(self, parent, live, printer_id, settings, check_bed):
         super().__init__(parent, bg=self.SURFACE, highlightthickness=1,
                          highlightbackground="#2a3d58")
         self.last_state = None
@@ -94,9 +94,13 @@ class PrinterCard(tk.Frame):
         self.camera = CameraTile(body, live, printer_id, width=640, height=185)
         self.camera.canvas.configure(width=240)
         self.camera.pack(fill="x")
-        self.bed = tk.Label(body, bg="#16263c", fg=self.MUTED, anchor="w",
+        bed_row = tk.Frame(body, bg=self.SURFACE)
+        bed_row.pack(fill="x", pady=(8, 0))
+        self.bed = tk.Label(bed_row, bg="#16263c", fg=self.MUTED, anchor="w",
                             font=("Segoe UI", 9, "bold"), padx=8, pady=4)
-        self.bed.pack(fill="x", pady=(8, 0))
+        self.bed.pack(side="left", fill="x", expand=True)
+        self.check_bed = ttk.Button(bed_row, text="◎ Check bed", command=check_bed, state="disabled")
+        self.check_bed.pack(side="right", padx=(4, 0))
 
     def draw_meter(self, _event=None):
         self.meter.delete("segments")
@@ -157,12 +161,14 @@ class PrinterCard(tk.Frame):
         bed_label, bed_color = {
             "clear": ("✓  Build plate clear", "#78e6ab"),
             "blocked": ("!  Build plate occupied", "#ffc879"),
+            "out_of_view": ("◇  Bed out of view", "#ffc879"),
             "unknown": ("◇  Build plate unverified", self.MUTED),
         }.get(bed_state, ("◇  Build plate · check pending", self.MUTED))
         name = printer.get("hostname") or printer["id"]
         color = str(printer.get("color") or "").strip()
         readings = (eta, *temperatures)
-        shown = (state, progress, bed_label, name, color, readings)
+        can_check = state in {"ready", "complete"} and bool(printer.get("idle") and printer.get("camera_url"))
+        shown = (state, progress, bed_label, name, color, readings, can_check)
         if self.last_state == shown:
             return
         self.last_state = shown
@@ -181,6 +187,7 @@ class PrinterCard(tk.Frame):
         self.icon.itemconfigure("printer", fill=filament)
         self.material.configure(text=(color.upper() + " FILAMENT") if color else "LOCAL PRINTER")
         self.bed.configure(text=bed_label, fg=bed_color)
+        self.check_bed.configure(state="normal" if can_check else "disabled")
         for label, value in zip(self.metrics, readings):
             label.configure(text=value)
         self.draw_meter()
@@ -473,8 +480,11 @@ class Controls:
         for printer in printers:
             pid = printer["id"]
             if pid not in self.printer_cards:
-                card = PrinterCard(self.printers_frame, self.live, pid,
-                                   lambda key=pid: self.add_printer(self.printer_data.get(key)))
+                card = PrinterCard(
+                    self.printers_frame, self.live, pid,
+                    lambda key=pid: self.add_printer(self.printer_data.get(key)),
+                    lambda key=pid: self.service.request_bed_check(key),
+                )
                 self.printer_cards[pid] = card
                 self.camera_tiles[pid] = card.camera
             self.printer_cards[pid].render(printer, telemetry_stale=telemetry_stale)
