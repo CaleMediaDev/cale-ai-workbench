@@ -317,6 +317,7 @@ class Service:
         self.wake = threading.Event()
         self.stop_event = threading.Event()
         self._cycle_lock = threading.Lock()
+        self._update_draining = threading.Event()
         self._update_reserved = False
         self._printers_checked_at = None
         self._unsettled_jobs = None
@@ -364,6 +365,14 @@ class Service:
         self.stop_event.set()
         self.wake.set()
 
+    def set_update_drain(self, enabled):
+        """Keep reconciling active jobs while holding new dispatches."""
+        if enabled:
+            self._update_draining.set()
+        elif self._update_draining.is_set():
+            self._update_draining.clear()
+            self.wake.set()
+
     def update_restart_blocker(self, *, reserve=False):
         """Wait for active prints and freeze dispatch before closing the desktop."""
         if not self._cycle_lock.acquire(blocking=False):
@@ -388,6 +397,7 @@ class Service:
     def cancel_update_restart(self):
         with self._cycle_lock:
             self._update_reserved = False
+        self.set_update_drain(False)
         self.wake.set()
 
     def run(self):
@@ -929,7 +939,7 @@ class Service:
                     status="held",
                     reason="An earlier attempt needs inspection; it will not be retried automatically",
                 )
-            elif approved and settings.get("enabled"):
+            elif approved and settings.get("enabled") and not self._update_draining.is_set():
                 unit = next((i for i, s in enumerate(states) if s is None), None)
                 if unit is not None:
                     result = self.dispatch(
@@ -1029,6 +1039,9 @@ class Service:
     def dispatch(
         self, store, key, row, unit, proposal, printers, client, settings, ledger
     ):
+        update_hold = {"status": "queued", "reason": "Waiting for the Workbench update"}
+        if self._update_draining.is_set():
+            return update_hold
         routes = list(proposal["recipes"])
         source = routes[0]
         for p in printers:
@@ -1085,6 +1098,8 @@ class Service:
             printer["bed"] = bed
             if bed["state"] != "clear":
                 continue
+            if self._update_draining.is_set():
+                return update_hold
             # A pause or changed approval during inference must win before any start.
             latest = self.settings()
             decision = store.db.execute(
@@ -1127,6 +1142,10 @@ class Service:
                     "status": "held",
                     "reason": "A previous print attempt exists for this unit",
                 }
+            # Once reserved, let the existing dispatch finish and reconcile
+            # normally. The desktop cannot restart during this cycle.
+            if self._update_draining.is_set():
+                return update_hold
             if not store.reserve(jid, key, unit, recipe):
                 return {"status": "held", "reason": "This unit is already reserved"}
             try:

@@ -8207,7 +8207,7 @@ def gui():
                     version_text = ".".join(map(str, candidate[1]))
                     assistant_reply(
                         f"Update v{version_text} is ready. I'll install it automatically "
-                        "after pausing active tasks. They will continue after the update."
+                        "when the Print Farm is idle. Active AI tasks can continue after the restart."
                     )
         except queue.Empty:
             pass
@@ -8217,8 +8217,20 @@ def gui():
         if not updating and time.monotonic() - window.update_checked_at >= update_interval:
             window.update_checked_at = time.monotonic()
             threading.Thread(target=check_updates, daemon=True).start()
-        update_due = (pending_update and not updating
-                      and (manual_update_requested or time.monotonic() - update_ready_at >= 30))
+        update_due = (
+            pending_update
+            and not updating
+            and (manual_update_requested or time.monotonic() - update_ready_at >= 30)
+            and not update_dialog_open(
+                window.winfo_children(),
+                (preview_window, usage_window, readiness_popup[0]),
+                persisted_panel=donation_controls.popup,
+                connection_events=(chat_connection_pending, cloud_connection_pending),
+                connection_process=getattr(window, "github_login_process", None),
+            )
+            and not setup_blocks_tasks(read_task_status(STATE / "install-progress.json"))
+        )
+        print_farm_service.set_update_drain(bool(update_due))
         print_blocker = print_farm_service.update_restart_blocker() if update_due else ""
         if print_blocker:
             status.set("Update queued. " + print_blocker)
@@ -8233,18 +8245,7 @@ def gui():
                         self_update.retire_update_paused_workers()
             except (OSError, ValueError) as exc:
                 status.set("Could not pause tasks for update: " + str(exc)[:120])
-        if (
-            update_due
-            and not print_blocker
-            and not self_update.active_tasks()
-            and not update_dialog_open(
-                window.winfo_children(),
-                (preview_window, usage_window, readiness_popup[0]),
-                persisted_panel=donation_controls.popup,
-                connection_events=(chat_connection_pending, cloud_connection_pending),
-                connection_process=getattr(window, "github_login_process", None),
-            )
-        ):
+        if update_due and not print_blocker and not self_update.active_tasks():
             setup_state = read_task_status(STATE / "install-progress.json")
             # A new print can start after the first status check. Reserve
             # the restart under the same lock that protects farm dispatch.

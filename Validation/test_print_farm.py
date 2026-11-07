@@ -286,6 +286,29 @@ class Production(unittest.TestCase):
         self.dispatch()
         self.machine.start_order.assert_called_once()
 
+    def test_pending_update_holds_new_jobs_and_releases_them_when_canceled(self):
+        self.service.set_update_drain(True)
+        self.assertEqual(self.dispatch()["status"], "queued")
+        self.service.beds.check.assert_not_called()
+        self.machine.start_order.assert_not_called()
+        self.assertIsNone(self.store.db.execute("SELECT 1 FROM jobs").fetchone())
+
+        self.service.set_update_drain(False)
+        self.assertEqual(self.dispatch()["status"], "printing")
+        self.machine.start_order.assert_called_once()
+
+    def test_update_during_preflight_keeps_job_queued_without_reserving_it(self):
+        def lookup(_order_id):
+            if self.client.order.call_count == 2:
+                self.service.set_update_drain(True)
+            return api_order(self.item)
+
+        self.client.order.side_effect = lookup
+        self.assertEqual(self.dispatch()["status"], "queued")
+        self.service.beds.check.assert_called_once()
+        self.machine.start_order.assert_not_called()
+        self.assertIsNone(self.store.db.execute("SELECT 1 FROM jobs").fetchone())
+
     def test_low_confidence_needs_ok(self):
         self.proposal["confidence"] = 0.5
         self.store.decision(self.key, self.proposal)
