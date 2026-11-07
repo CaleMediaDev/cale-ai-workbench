@@ -370,12 +370,12 @@ def read_state(project: dict) -> dict:
     return state
 
 
-def _read_worker_identity(project: dict, state: dict) -> None:
+def _read_worker_identity(project: dict, state: dict) -> dict | None:
     for attempt in range(5):
         try:
             identity = json.loads(process_file(project).read_text(encoding="utf-8"))
             state.update(pid=int(identity["pid"]), process_created=float(identity["process_created"]))
-            break
+            return identity
         except PermissionError:
             if os.name != "nt" or attempt == 4:
                 raise
@@ -6473,6 +6473,7 @@ def worker_main(project_id: str) -> int:
     if project is None:
         return 2
     launch = os.environ.pop(_WORKER_LAUNCH_ENV, None)
+    owner = None
     if launch is not None:
         import psutil
 
@@ -6489,11 +6490,10 @@ def worker_main(project_id: str) -> int:
             # alive as the Python worker's parent and shares its command line.
             if process is not None and process != current and process != current.parent():
                 return 0
+            owner = {"pid": current.pid, "process_created": current.create_time()}
             if process != current:
                 # Recover a missing PID or replace the redirector with the actual worker.
-                _save_worker_json(process_file(project), {
-                    "pid": current.pid, "process_created": current.create_time(),
-                })
+                _save_worker_json(process_file(project), owner)
     try:
         result = run_slice(project)
         import task_context
@@ -6503,6 +6503,15 @@ def worker_main(project_id: str) -> int:
             task_context.defer_instruction_read(project)
         else:
             task_context.clear_instruction_wait(project)
+        if owner and result.get("status") == "continue" and result.get("post_queue_instruction_defer"):
+            with _worker_launch_lock(project):
+                latest = read_state(project)
+                identity = _read_worker_identity(project, {})
+                # A deferral is a clean exit for this launch. Leave the latest
+                # checkpoint intact, including any control that superseded it.
+                if (latest.get("status") in {"starting", "running"} and latest.get("launch") == launch
+                        and identity and all(identity.get(key) == value for key, value in owner.items())):
+                    _save_worker_json(process_file(project), {**owner, "deferred_launch": launch})
         return 0
     except CheckpointCorrupt:
         return 1
@@ -6571,13 +6580,17 @@ def start_worker(project: dict) -> dict:
             return state
 
         previous_status = state.get("status")
-        if previous_status == "starting":
+        deferred = False
+        if previous_status in {"starting", "running"} and state.get("launch"):
+            identity = _read_worker_identity(project, state)
+            deferred = bool(identity and identity.get("deferred_launch") == state["launch"])
+        if previous_status == "starting" and not deferred:
             # An orphaned child can still be importing and about to register
             # its identity. Give that launch time to finish before replacing it.
             age = time.time() - float(state.get("launch_started", 0))
             if 0 <= age < _WORKER_START_GRACE_SECONDS:
                 return state
-        if previous_status in {"starting", "running"}:
+        if previous_status in {"starting", "running"} and not deferred:
             # A native crash can skip worker_main's exception handler. Count
             # it separately so a valid model response cannot erase the crash
             # budget before the worker reaches a clean slice boundary.
@@ -7221,9 +7234,8 @@ def _post_queue_frame_identity(frame):
 def _post_queue_instruction_defer(project, state, reason):
     """Return a fresh transient result, never publish a stale checkpoint.
 
-    Public save_state has no compare-and-swap writer contract. worker_main
-    ignores this return value; no deferred reason is claimed durable here.
-    A fresh supervisor slice will read the preserved latest checkpoint.
+    The worker records its clean deferral beside the process identity. A fresh
+    supervisor slice reads the preserved latest checkpoint.
     """
     latest = read_state(project)
     if latest.get('status') in {'paused', 'stopped', 'done'}:

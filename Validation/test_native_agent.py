@@ -3118,6 +3118,56 @@ def test_native_worker_early_exit_recovers_from_checkpoint_then_stops_crash_loop
     assert resumed["messages"][-1]["content"] == "Use the alternate method."
 
 
+def test_native_worker_clean_instruction_deferrals_do_not_exhaust_crash_recovery(tmp_path, monkeypatch):
+    monkeypatch.setattr(long_tasks, "STATE", tmp_path / "registry")
+    long_tasks.add_project("Page", str(tmp_path / "page"), "Make a page")
+    item = long_tasks.projects()[0]
+    script = tmp_path / "native_agent.py"
+    source = str(Path(native_agent.__file__).resolve().parent)
+    script.write_text(
+        "import sys\n"
+        f"sys.path.insert(0, {source!r})\n"
+        "import long_tasks, native_agent\n"
+        "native_agent.__file__ = __file__\n"
+        f"item = {item!r}\n"
+        "long_tasks.projects = lambda: [item]\n"
+        "def work(project):\n"
+        "    state = native_agent.read_state(project)\n"
+        "    state.update(status='running', turns=state.get('turns', 0)+1)\n"
+        "    native_agent.save_state(project, state)\n"
+        "    return native_agent._post_queue_instruction_defer(project, state, 'automatic_acceptance_superseded')\n"
+        "native_agent.run_slice = work\n"
+        "raise SystemExit(native_agent.worker_main(sys.argv[2]))\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(native_agent, "__file__", str(script))
+    monkeypatch.setattr(long_tasks, "environment", lambda: os.environ.copy())
+    popen = subprocess.Popen
+    children = []
+
+    def launch(*args, **kwargs):
+        child = popen(*args, **kwargs)
+        children.append(child)
+        return child
+
+    monkeypatch.setattr(native_agent.subprocess, "Popen", launch)
+    for expected in range(1, 5):
+        long_tasks.tick()
+        assert len(children) == expected
+        child = children[-1]
+        try:
+            assert child.wait(timeout=15) == 0
+        finally:
+            if child.poll() is None:
+                child.kill()
+                child.wait(timeout=5)
+        saved = json.loads(native_agent.state_file(item).read_bytes())
+        assert saved["status"] == "running" and saved["turns"] == expected
+        assert "post_queue_instruction_defer" not in saved
+    assert not saved.get("worker_interruptions")
+    assert long_tasks.projects()[0]["status"] == "working"
+
+
 def test_native_worker_start_grace_waits_for_late_registration(tmp_path, monkeypatch):
     item = {**project(tmp_path / "registering"), "status": "working", "detail": ""}
     previous = {"status": "starting", "launch": "prior", "launch_started": time.time()}
