@@ -127,11 +127,11 @@ class K1:
                 return value[response]
         raise Hold("Printer did not answer the read request")
 
-    def inspect(self):
+    def inspect(self, *, include_files=True):
         ws, status = self.open()
         checked_at = time.time()
         try:
-            files = self.query(ws, "reqGcodeFile", "retGcodeFileInfo2", status)
+            files = self.query(ws, "reqGcodeFile", "retGcodeFileInfo2", status) if include_files else []
             history = self.query(ws, "reqHistory", "historyList", status)
             return {
                 "printer_id": self.id,

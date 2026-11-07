@@ -65,6 +65,64 @@ def clear():
 
 
 class Decisions(unittest.TestCase):
+    def test_history_poll_skips_file_inventory_and_closes_connection(self):
+        from print_farm_transport import K1, PRINTERS
+
+        with patch.dict(PRINTERS, {"p": ("192.0.2.1", "fixture", "black")}, clear=True):
+            printer = K1("p")
+        socket = Mock()
+        state = {"state": 2}
+        history = [{"id": 1}]
+        with (patch.object(printer, "open", return_value=(socket, state)),
+              patch.object(printer, "query", return_value=history) as query):
+            snapshot = printer.inspect(include_files=False)
+        query.assert_called_once_with(socket, "reqHistory", "historyList", state)
+        self.assertEqual(snapshot["history"], history)
+        socket.close.assert_called_once_with()
+
+    def test_healthy_printer_reconciles_while_another_history_read_times_out(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            service = farm.Service(root)
+            store = farm.Store(root / "queue.sqlite")
+            saved = threading.Event()
+            fast_committed_before_timeout = []
+            now = time.time()
+            for printer_id in ("slow", "fast"):
+                store.reserve(printer_id, printer_id, 0, {"printer_id": printer_id})
+                farm.persist(root / (printer_id + ".json"), {
+                    "status": "submission_uncertain", "path": "/" + printer_id + ".gcode",
+                    "submitted_at": now,
+                })
+            original = farm.persist
+
+            def save_result(path, data):
+                original(path, data)
+                if path.stem == "fast":
+                    saved.set()
+
+            def history(printer_id):
+                if printer_id == "slow":
+                    fast_committed_before_timeout.append(saved.wait(timeout=3))
+                    raise TimeoutError("Fixture printer did not answer")
+                return {
+                    "status": {"state": 2},
+                    "history": [{"id": 8, "filename": "/fast.gcode", "starttime": now, "printfinish": 1}],
+                }
+
+            def printer(printer_id):
+                return Mock(inspect=Mock(side_effect=lambda **_: history(printer_id)))
+
+            try:
+                with (patch.object(farm, "K1", side_effect=printer),
+                      patch.object(farm, "persist", side_effect=save_result)):
+                    service.reconcile(store, root)
+                self.assertEqual(fast_committed_before_timeout, [True])
+                statuses = dict(store.db.execute("SELECT id,status FROM jobs").fetchall())
+                self.assertEqual(statuses, {"slow": "dispatching", "fast": "completed"})
+            finally:
+                store.db.close()
+
     def test_status_sharing_violation_does_not_stop_print_service(self):
         with tempfile.TemporaryDirectory() as temporary:
             service = farm.Service(temporary)

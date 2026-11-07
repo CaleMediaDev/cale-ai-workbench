@@ -838,6 +838,7 @@ class Service:
         return None
 
     def reconcile(self, store, ledger):
+        pending = {}
         for job in store.db.execute(
             "SELECT * FROM jobs WHERE status IN ('dispatching','printing','submission_uncertain')"
         ).fetchall():
@@ -855,12 +856,41 @@ class Service:
                     "Interrupted reservation; inspect printer history before any retry",
                 )
                 continue
-            try:
-                record = observe(record, K1(job["printer_id"]))
-                persist(path, record)
-                store.outcome(job["id"], record["status"], record.get("reason", ""))
-            except Exception:
-                continue
+            if record["status"] in ("submission_uncertain", "printing"):
+                pending.setdefault(job["printer_id"], []).append((path, record))
+            else:
+                # The ledger may already have a terminal result from the last
+                # cycle, even if its SQLite update did not finish.
+                try:
+                    store.outcome(job["id"], record["status"], record.get("reason", ""))
+                except sqlite3.Error:
+                    continue
+
+        if not pending:
+            return
+
+        def inspect_history(printer_id):
+            return K1(printer_id).inspect(include_files=False)
+
+        # Share one read per printer. Persist each available result promptly
+        # and keep all disk and database writes on the service thread.
+        with concurrent.futures.ThreadPoolExecutor(max_workers=min(4, len(pending))) as pool:
+            observations = {
+                pool.submit(inspect_history, printer_id): records
+                for printer_id, records in pending.items()
+            }
+            for future in concurrent.futures.as_completed(observations):
+                try:
+                    snapshot = future.result()
+                except Exception:
+                    continue
+                for path, record in observations[future]:
+                    try:
+                        record = observe(record, snapshot)
+                        persist(path, record)
+                        store.outcome(path.stem, record["status"], record.get("reason", ""))
+                    except Exception:
+                        continue
 
     def cycle(self, store):
         settings = self.settings()

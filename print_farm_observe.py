@@ -8,10 +8,9 @@ from pathlib import Path
 from print_farm_transport import Hold, persist, ready_state
 
 
-def observe(record, client):
+def observe(record, snap):
     if record.get("status") not in ("submission_uncertain", "printing"):
         return record
-    snap = client.inspect()
     status = snap["status"]
     newer = [
         h
