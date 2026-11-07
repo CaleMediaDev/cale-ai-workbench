@@ -22,6 +22,7 @@ import time
 import urllib.parse
 import urllib.request
 import uuid
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -212,7 +213,7 @@ class BedWatcher:
         self.capture, self.infer, self.clock, self.sleep = capture, infer, clock, sleep
         self.last = {}
 
-    def check(self, printer, model):
+    def check(self, printer, model, *, remember=True):
         pid = printer["id"]
         result = {
             "state": "unknown",
@@ -274,7 +275,8 @@ class BedWatcher:
                 else "Camera / local vision unavailable (" + type(exc).__name__ + ")"
             )
         result["camera_source"] = bed_camera_key(printer)
-        self.last[pid] = result
+        if remember:
+            self.last[pid] = result
         return result
 
 
@@ -350,6 +352,14 @@ class Store:
             )
 
 
+@dataclass
+class ManualBedCheck:
+    source: str
+    unload_required: bool
+    future: concurrent.futures.Future
+    skipped: str | None = None
+
+
 class Service:
     def __init__(self, app_root):
         self.root = Path(app_root) / "PrintFarm"
@@ -358,6 +368,7 @@ class Service:
         self.commands = queue.Queue()
         self._bed_checks = {}
         self._bed_checks_lock = threading.Lock()
+        self._bed_check_run = None
         self.wake = threading.Event()
         self.stop_event = threading.Event()
         self._cycle_lock = threading.Lock()
@@ -408,8 +419,8 @@ class Service:
         with self._bed_checks_lock:
             return self._bed_checks.copy()
 
-    def inspect_requested_bed(self, printers, settings, store):
-        if self._update_draining.is_set() or (
+    def inspect_requested_bed(self, printers, store):
+        if (
             self._printers_checked_at is not None
             and time.monotonic() - self._printers_checked_at > PRINTER_TELEMETRY_MAX_AGE
         ):
@@ -418,40 +429,85 @@ class Service:
             printer_id = next(iter(self._bed_checks), None)
             if printer_id is None:
                 return
-            self._bed_checks[printer_id] = "checking"
-        try:
-            printer = next((item for item in printers if item["id"] == printer_id), None)
-            if printer is None:
-                return
-            source = bed_camera_key(printer)
-
-            def camera_matches():
-                configured = configured_printer(self.settings(), printer_id)
-                return configured is not None and bed_camera_key(configured) == source
-
-            if not camera_matches():
-                bed = {"state": "skipped_camera_changed"}
-            elif not printer.get("online"):
-                bed = {"state": "skipped_offline"}
-            elif not printer.get("idle") or store.db.execute(
+        run = self._bed_check_run
+        if run is None and self._update_draining.is_set():
+            return
+        settings = self.settings()
+        printer = next((item for item in printers if item["id"] == printer_id), None)
+        configured = configured_printer(settings, printer_id)
+        source = bed_camera_key(printer) if printer is not None else None
+        skipped = None
+        if (
+            configured is None or bed_camera_key(configured) != source
+            or (run and run.source != source)
+        ):
+            skipped = "skipped_camera_changed"
+        elif not printer.get("online"):
+            skipped = "skipped_offline"
+        elif (
+            not printer.get("idle")
+            or (run and run.unload_required != bool(printer.get("unload_required")))
+            or store.db.execute(
                 "SELECT 1 FROM jobs WHERE printer_id=? AND status IN "
                 "('dispatching','printing','submission_uncertain') LIMIT 1",
                 (printer_id,),
-            ).fetchone():
-                bed = {"state": "skipped_busy"}
-            else:
-                bed = self.beds.check(printer, settings.get("vision_model", "cale-vision:latest"))
-                # Manual checks are for display. Dispatch always gets its own
-                # clearance and never consumes a result from this button.
-                bed = {key: value for key, value in bed.items() if key != "ticket_id"}
-                if not camera_matches():
-                    bed = {"state": "skipped_camera_changed"}
-            bed["camera_source"] = source
-            self.beds.last[printer_id] = bed
-            printer["bed"] = bed
-        finally:
+            ).fetchone()
+        ):
+            skipped = "skipped_busy"
+
+        if run is not None:
+            run.skipped = run.skipped or skipped
+            if not run.future.done():
+                return
+            skipped = run.skipped
+        elif not skipped:
+            future = concurrent.futures.Future()
+            self._bed_check_run = ManualBedCheck(source, bool(printer.get("unload_required")), future)
             with self._bed_checks_lock:
-                del self._bed_checks[printer_id]
+                self._bed_checks[printer_id] = "checking"
+            worker = threading.Thread(
+                target=self._capture_manual_bed,
+                args=(dict(printer), settings.get("vision_model", "cale-vision:latest"), future),
+                name="Cale Bed Inspection",
+                daemon=True,
+            )
+            try:
+                worker.start()
+            except RuntimeError as exc:
+                future.set_exception(exc)
+            return
+
+        if printer is not None:
+            if skipped:
+                bed = {"state": skipped}
+            else:
+                try:
+                    bed = run.future.result()
+                except Exception as exc:
+                    bed = {"state": "unknown", "checked_at": time.time(),
+                           "reason": f"Camera check unavailable ({type(exc).__name__})"}
+                # The manual observation is display-only.
+                bed = {key: value for key, value in bed.items() if key != "ticket_id"}
+            previous = self.beds.last.get(printer_id, {})
+            if (
+                skipped or previous.get("camera_source") != source
+                or bed.get("captured_at", bed.get("checked_at", 0))
+                >= previous.get("captured_at", previous.get("checked_at", 0))
+            ):
+                bed["camera_source"] = source
+                self.beds.last[printer_id] = bed
+                printer["bed"] = bed
+        self._bed_check_run = None
+        with self._bed_checks_lock:
+            del self._bed_checks[printer_id]
+
+    def _capture_manual_bed(self, printer, model, future):
+        try:
+            future.set_result(self.beds.check(printer, model, remember=False))
+        except Exception as exc:
+            future.set_exception(exc)
+        finally:
+            self.wake.set()
 
     def start(self):
         if not self.thread or not self.thread.is_alive():
@@ -544,6 +600,7 @@ class Service:
                                 if scope == store_scope:
                                     store.approve(key, token)
                             self.cycle(store)
+                            self.inspect_requested_bed(self.snapshot["printers"], store)
                         except Exception as exc:
                             self.snapshot = {
                                 **self.snapshot,
@@ -1017,7 +1074,6 @@ class Service:
         )
         ledger.mkdir(exist_ok=True, parents=True)
         self.reconcile(store, ledger)
-        self.inspect_requested_bed(printers, settings, store)
         client = self.account_client(settings)
         if client is None:
             self.snapshot.update(

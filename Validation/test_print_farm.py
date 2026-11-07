@@ -285,6 +285,45 @@ class Decisions(unittest.TestCase):
             finally:
                 store.db.close()
 
+    def test_service_publishes_new_telemetry_while_manual_vision_waits(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            service = farm.Service(temporary)
+            printer = {"id": "p", "hostname": "fixture", "camera_url": "http://camera",
+                       "online": True, "idle": True}
+            service.configure({"printers": [printer]})
+            started, release, updated = threading.Event(), threading.Event(), threading.Event()
+            original = farm.persist
+
+            def scan(_settings):
+                return [{**printer, "bed_c": 40 if started.is_set() else 35}]
+
+            def inspect(*args, **kwargs):
+                started.set()
+                release.wait(5)
+                return {"state": "blocked"}
+
+            def save(path, data, **kwargs):
+                original(path, data, **kwargs)
+                if path.name == "status.json" and data["printers"][0]["bed_c"] == 40:
+                    updated.set()
+
+            service.request_bed_check("p")
+            with (patch.object(service, "scan_printers", side_effect=scan),
+                  patch.object(service, "account_client", return_value=None),
+                  patch.object(service.beds, "check", side_effect=inspect),
+                  patch.object(farm, "persist", side_effect=save)):
+                service.start()
+                try:
+                    self.assertTrue(started.wait(2))
+                    service.wake.set()
+                    self.assertTrue(updated.wait(2), "fleet status stalled behind manual vision")
+                    self.assertEqual(service.bed_check_states(), {"p": "checking"})
+                finally:
+                    release.set()
+                    service.stop()
+                    service.thread.join(5)
+            self.assertFalse(service.thread.is_alive())
+
     def test_update_waits_for_a_busy_printer_across_failed_polls(self):
         with tempfile.TemporaryDirectory() as temporary:
             service = farm.Service(temporary)
@@ -572,7 +611,8 @@ class Production(unittest.TestCase):
         self.settings["printers"] = [dict(self.printer)]
         self.service.configure(self.settings)
 
-        def inspect(printer, _model):
+        def inspect(printer, _model, *, remember):
+            self.assertFalse(remember)
             self.assertEqual(self.service.bed_check_states(), {"p": "checking"})
             self.service.request_bed_check(printer["id"])
             return {"state": "clear", "ticket_id": "fixture"}
@@ -581,8 +621,9 @@ class Production(unittest.TestCase):
         for _ in range(2):
             self.service.request_bed_check(self.printer["id"])
         self.assertEqual(self.service.bed_check_states(), {"p": "queued"})
-        self.service.inspect_requested_bed([self.printer], self.settings, self.store)
-        self.service.inspect_requested_bed([self.printer], self.settings, self.store)
+        self.service.inspect_requested_bed([self.printer], self.store)
+        self.service._bed_check_run.future.result(timeout=2)
+        self.service.inspect_requested_bed([self.printer], self.store)
         self.service.beds.check.assert_called_once()
         self.assertEqual(self.printer["bed"]["state"], "clear")
         self.assertNotIn("ticket_id", self.printer["bed"])
@@ -592,7 +633,7 @@ class Production(unittest.TestCase):
 
         self.printer["idle"] = False
         self.service.request_bed_check(self.printer["id"])
-        self.service.inspect_requested_bed([self.printer], self.settings, self.store)
+        self.service.inspect_requested_bed([self.printer], self.store)
         self.service.beds.check.assert_called_once()
         self.assertEqual(self.printer["bed"]["state"], "skipped_busy")
 
@@ -602,19 +643,44 @@ class Production(unittest.TestCase):
         self.service.configure(self.settings)
         self.service.request_bed_check("p")
         self.service._printers_checked_at = time.monotonic() - farm.PRINTER_TELEMETRY_MAX_AGE - 1
-        self.service.inspect_requested_bed([self.printer], self.settings, self.store)
+        self.service.inspect_requested_bed([self.printer], self.store)
         self.assertEqual(self.service.bed_check_states(), {"p": "queued"})
         self.service.beds.check.assert_not_called()
 
-        def inspect(*_):
+        def inspect(*args, **kwargs):
             self.service.configure({"printers": [{**self.printer, "camera_url": "http://new-camera"}]})
             return {"state": "clear", "ticket_id": "fixture"}
 
         self.service._printers_checked_at = time.monotonic()
         self.service.beds.check.side_effect = inspect
-        self.service.inspect_requested_bed([self.printer], self.settings, self.store)
+        self.service.inspect_requested_bed([self.printer], self.store)
+        self.service._bed_check_run.future.result(timeout=2)
+        self.service.inspect_requested_bed([self.printer], self.store)
         self.assertEqual(self.printer["bed"]["state"], "skipped_camera_changed")
         self.assertEqual(self.service.bed_check_states(), {})
+
+    def test_manual_check_does_not_publish_after_an_intervening_print(self):
+        self.printer.update(online=True, camera_url="http://camera")
+        self.service.configure({"printers": [dict(self.printer)]})
+        release = threading.Event()
+
+        def inspect(*args, **kwargs):
+            release.wait(5)
+            return {"state": "clear", "ticket_id": "fixture"}
+
+        self.service.beds.check.side_effect = inspect
+        self.service.request_bed_check("p")
+        self.service.inspect_requested_bed([self.printer], self.store)
+        run = self.service._bed_check_run
+        try:
+            self.printer["idle"] = False
+            self.service.inspect_requested_bed([self.printer], self.store)
+            self.printer["idle"] = True
+        finally:
+            release.set()
+            run.future.result(timeout=2)
+        self.service.inspect_requested_bed([self.printer], self.store)
+        self.assertEqual(self.printer["bed"]["state"], "skipped_busy")
 
     def test_camera_change_after_reservation_prevents_submission(self):
         send = Mock()
