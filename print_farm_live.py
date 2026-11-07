@@ -24,9 +24,13 @@ and scratches from raised objects. Never assume an obscured bed is empty. This i
 an observation, not permission to start a printer. Return concise JSON:
 {"state":"clear|occupied|obstructed|uncertain", "confidence":0.0,
 "reason":"one short sentence", "objects":[{"label":"short object name",
+"kind":"obstacle|printer|surface",
 "box":[left,top,right,bottom]}]}. Boxes use image coordinates normalized to 0..1000.
 Only include boxes for objects actually visible; at most six. A print head alone
 is not an object on the bed, but can obstruct the view. A hand means occupied.
+Use kind=printer for the head, gantry and frame; kind=obstacle for a raised
+print, debris, tool or hand; kind=surface for flat glue haze and scratches.
+Do not draw boxes for normal surface texture.
 Look for raised edges and shadows along the visible plate, especially a dark
 print blending into a dark plate near the bottom of the frame. Report visible
 objects even when the rest of the plate is cut off.
@@ -55,6 +59,11 @@ def observation(answer):
     for item in objects[:6] if isinstance(objects, list) else []:
         if not isinstance(item, dict):
             continue
+        kind = item.get("kind", "unknown")
+        if kind == "surface":
+            continue  # Flat haze and wear must not get obstacle boxes.
+        if kind not in ("obstacle", "printer"):
+            kind = "unknown"
         box = item.get("box")
         if (
             not isinstance(box, list)
@@ -69,11 +78,19 @@ def observation(answer):
             continue
         if box[0] >= box[2] or box[1] >= box[3]:
             continue
-        boxes.append({"label": str(item.get("label", "Object"))[:50], "box": box})
+        boxes.append({"label": str(item.get("label", "Object"))[:50], "box": box, "kind": kind})
+    reason = str(answer.get("reason", "No reliable observation"))[:180]
+    obstacle = any(item["kind"] == "obstacle" for item in boxes)
+    if state == "occupied" and not obstacle:
+        state = "uncertain"
+        reason = "Possible object; its location on the plate was not verified."
+    elif state == "clear" and obstacle:
+        state = "uncertain"
+        reason = "Conflicting surface and object detections; waiting for another scan."
     return {
         "state": state,
         "confidence": score,
-        "reason": str(answer.get("reason", "No reliable observation"))[:180],
+        "reason": reason,
         "objects": boxes,
     }
 
@@ -553,15 +570,16 @@ class CameraTile(ttk.Frame):
                             offset + x2 * picture.width / 1000,
                             y2 * picture.height / 1000,
                         )
+                        color = "#ffc65c" if item.get("kind") == "obstacle" else "#9cadc4"
                         self.canvas.create_rectangle(
-                            *coords, outline="#ffc65c", width=2, tags="detection"
+                            *coords, outline=color, width=2, tags="detection"
                         )
                         self.canvas.create_text(
                             coords[0] + 3,
                             max(10, coords[1] + 10),
                             anchor="w",
                             text=item["label"],
-                            fill="#ffc65c",
+                            fill=color,
                             font=("Segoe UI", 10, "bold"),
                             tags="detection",
                         )

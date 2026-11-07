@@ -100,14 +100,68 @@ def can_auto(proposal):
     )
 
 
+def product_key(row):
+    """Feedback is for one listing/variant, not every similarly named item."""
+    return digest({
+        key: sorted(row.get(key, []), key=lambda item: json.dumps(item, sort_keys=True))
+        if key == "aspects" else row.get(key, "")
+        for key in ("item_id", "variation_id", "sku", "title", "aspects")
+    })
+
+
 def valid_clear(result):
     return (
-        result.get("bed_fully_visible") is True
-        and result.get("bed_clear") is True
-        and result.get("person_or_hand") is False
-        and result.get("object_present") is False
+        result.get("visibility") == "full"
+        and result.get("surface") == "empty"
         and confidence(result.get("confidence", 0)) >= 0.95
     )
+
+
+BED_PROMPT = """Inspect BOTH sequential images of this 3D printer. Judge the usable
+build plate, not the whole enclosure. Return JSON with exactly these fields:
+visibility: "full", "partial", or "uncertain";
+surface: "empty", "print", "debris", "tool", "hand", or "uncertain";
+visibility_detail: short visible evidence for visibility (name the hidden plate
+area and what hides it if partial); surface_detail: short visible evidence for
+the surface classification; confidence: number 0..1.
+Use full only when the entire usable plate can be inspected in BOTH images.
+Machine walls, gantry, overhead print head and frame are printer hardware, NEVER
+a print, debris or tool on the plate. Hardware may make visibility partial.
+Flat glue haze, adhesive streaks, scratches and wear are normal surface texture,
+NEVER raised objects or hidden areas. A print/debris/tool requires visible raised
+edges or volume resting ON the plate; describe that evidence in surface_detail.
+A hand near the plate means hand. Use empty only if no raised objects or hands
+are visible in either image. Partial visibility can coexist with empty visible
+surface, but it cannot authorize printing. Darkness, blur or ambiguous evidence
+means uncertain. Keep each detail under 120 characters. Do not infer removal
+from printer status or infer that an unseen area is empty."""
+
+
+def bed_decision(answer):
+    """Derive the verdict and its explanation from separate, typed judgments."""
+    visibility, surface = answer.get("visibility"), answer.get("surface")
+    score = confidence(answer.get("confidence", 0))
+    if visibility not in ("full", "partial", "uncertain") or surface not in (
+        "empty", "print", "debris", "tool", "hand", "uncertain"
+    ):
+        return "unknown", "Vision returned an incomplete bed assessment.", score
+    details = {}
+    for field in ("surface_detail", "visibility_detail"):
+        value = answer.get(field)
+        if not isinstance(value, str) or not value.strip():
+            return "unknown", "Vision did not provide the evidence for its bed assessment.", score
+        details[field] = value.strip()[:180]
+    if surface in ("print", "debris", "tool", "hand"):
+        names = {"print": "Print on plate", "debris": "Raised debris on plate",
+                 "tool": "Tool on plate", "hand": "Hand near plate"}
+        return "blocked", names[surface] + ": " + details["surface_detail"], score
+    if visibility == "partial":
+        return "out_of_view", "Part of plate hidden: " + details["visibility_detail"], score
+    if valid_clear(answer):
+        return "clear", "Whole plate visible; no raised objects or hands detected.", score
+    return "unknown", "Bed not verified: " + (
+        details["visibility_detail"] if visibility == "uncertain" else details["surface_detail"]
+    ), score
 
 
 class InferenceGate:
@@ -242,26 +296,21 @@ class BedWatcher:
             if hashlib.sha256(first).digest() == hashlib.sha256(second).digest():
                 raise Hold("Camera frames are identical; waiting for a live view")
             answer = self.infer(
-                "Inspect BOTH sequential images of this 3D printer. Is the entire usable build plate visible and free of raised objects in BOTH images? A finished print, raised debris, loose filament, tool, hand, person, substantially obstructed plate, darkness or uncertainty means NOT clear. Flat adhesive/glue haze, scratches and wear on the plate are normal surface texture, not leftover prints; do not classify those flat marks as objects or as blocked visibility. Do not confuse the overhead print head or printer frame with an object on the plate. Return JSON: bed_fully_visible:boolean, bed_clear:boolean, object_present:boolean, person_or_hand:boolean, confidence:number 0..1, reason:string. Never assume a substantially occluded part of the bed is empty. Keep reason under 180 characters and explain the deciding issue first. If bed_fully_visible is false, identify which part of the plate is hidden and what hides it; do not substitute a description of surface haze for the visibility reason.",
+                BED_PROMPT,
                 [first, second],
                 model=model,
             )
             if not fresh():
                 raise Hold("Vision response was too slow; a fresh bed check is required")
-            state = "unknown"
-            reason = str(answer.get("reason", "Bed not clearly empty"))[:300]
-            if answer.get("object_present") is True or answer.get("person_or_hand") is True:
-                state = "blocked"
-            elif answer.get("bed_fully_visible") is False:
-                state = "out_of_view"
-            elif valid_clear(answer):
-                state = "clear"
+            state, reason, score = bed_decision(answer)
             result = {
                 "state": state,
                 "reason": reason,
                 "checked_at": self.clock(),
                 "captured_at": captured,
-                "confidence": confidence(answer.get("confidence", 0)),
+                "confidence": score,
+                "evidence": {key: answer.get(key) for key in
+                             ("visibility", "surface", "visibility_detail", "surface_detail")},
                 "ticket_id": uuid.uuid4().hex,
                 "image_hash": hashlib.sha256(second).hexdigest(),
             }
@@ -285,12 +334,17 @@ class Store:
             CREATE TABLE IF NOT EXISTS orders (id TEXT PRIMARY KEY, payload TEXT NOT NULL, decision TEXT, approved_token TEXT);
             CREATE TABLE IF NOT EXISTS jobs (id TEXT PRIMARY KEY, line_key TEXT, unit INTEGER, printer_id TEXT, recipe TEXT, status TEXT, reason TEXT, updated REAL);
             CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
+            CREATE TABLE IF NOT EXISTS match_feedback (
+                product_key TEXT, content_sha256 TEXT, material TEXT, color TEXT,
+                runs_per_sale INTEGER, score INTEGER NOT NULL CHECK(score IN (0,1)),
+                updated REAL NOT NULL,
+                PRIMARY KEY(product_key,content_sha256,material,color,runs_per_sale));
         """)
 
     def ingest(self, row):
         key = row["order_id"] + "/" + row["line_id"]
         prior = self.db.execute(
-            "SELECT payload FROM orders WHERE id=?", (key,)
+            "SELECT payload,decision FROM orders WHERE id=?", (key,)
         ).fetchone()
         changed = prior and json.loads(prior[0]) != row
         with self.db:
@@ -299,9 +353,19 @@ class Store:
                 (key, json.dumps(row)),
             )
             if changed:
+                previous = json.loads(prior[0])
+                retained = None
+                if (prior[1] and product_key(previous) == product_key(row)
+                        and previous["quantity"] == row["quantity"]):
+                    # Shipping/payment metadata must not erase the file that
+                    # produced a completed print. Any old approval still expires.
+                    decision = json.loads(prior[1])
+                    decision.pop("token", None)
+                    decision["token"] = digest([row, decision])
+                    retained = json.dumps(decision)
                 self.db.execute(
-                    "UPDATE orders SET decision=NULL,approved_token=NULL WHERE id=?",
-                    (key,),
+                    "UPDATE orders SET decision=?,approved_token=NULL WHERE id=?",
+                    (retained, key),
                 )
         return key
 
@@ -318,9 +382,64 @@ class Store:
             ).fetchone()
             if not row or not row[0] or json.loads(row[0]).get("token") != token:
                 raise Hold("The order or file changed. Review the new match.")
+            if json.loads(row[0]).get("user_feedback") == 0:
+                raise Hold("This file match was rejected. Use thumbs up to change your rating.")
             self.db.execute(
                 "UPDATE orders SET approved_token=? WHERE id=?", (token, key)
             )
+
+    def apply_match_feedback(self, row, proposal):
+        scores = []
+        for recipe in proposal["recipes"]:
+            record = self.db.execute(
+                "SELECT score FROM match_feedback WHERE product_key=? AND content_sha256=? "
+                "AND material=? AND color=? AND runs_per_sale=?",
+                (product_key(row), recipe.get("content_sha256", ""), recipe.get("material", ""),
+                 recipe.get("color", ""), proposal["runs_per_sale"]),
+            ).fetchone()
+            scores.append(record[0] if record else None)
+        score = 0 if 0 in scores else 1 if scores and all(s == 1 for s in scores) else None
+        if score is None:
+            return proposal
+        updated = {**proposal, "ai_confidence": proposal.get("ai_confidence", proposal["confidence"]),
+                   "confidence": float(score), "user_feedback": score,
+                   "reason": "You confirmed this file match (100%)." if score else
+                             "You rejected this file match (0%). Waiting for a different file or a new thumbs up."}
+        updated.pop("token", None)
+        updated["token"] = digest([row, updated])
+        return updated
+
+    def rate_match(self, key, token, score, *, completed=False):
+        if type(score) is not int or score not in (0, 1):
+            raise Hold("Choose thumbs up or thumbs down")
+        with self.db:
+            saved = self.db.execute("SELECT * FROM orders WHERE id=?", (key,)).fetchone()
+            proposal = json.loads(saved["decision"]) if saved and saved["decision"] else None
+            if not proposal or proposal.get("token") != token:
+                raise Hold("The order or file changed. Review the new match.")
+            if self.db.execute("SELECT 1 FROM jobs WHERE line_key=? AND status IN "
+                               "('dispatching','printing','submission_uncertain')", (key,)).fetchone():
+                raise Hold("Wait for this print to finish before rating its file match.")
+            if not completed and (can_auto(proposal) or saved["approved_token"] == token):
+                raise Hold("This match is no longer waiting for approval. Refresh its status.")
+            row = json.loads(saved["payload"])
+            for recipe in proposal["recipes"]:
+                content = recipe.get("content_sha256", "")
+                if not re.fullmatch(r"[a-f0-9]{64}", content):
+                    raise Hold("The file must be verified before saving feedback.")
+                self.db.execute(
+                    "INSERT INTO match_feedback VALUES(?,?,?,?,?,?,?) ON CONFLICT "
+                    "DO UPDATE SET score=excluded.score,updated=excluded.updated",
+                    (product_key(row), content, recipe.get("material", ""), recipe.get("color", ""),
+                     proposal["runs_per_sale"], score, time.time()),
+                )
+            # A deliberate thumbs up also acknowledges an imported historical order.
+            if score:
+                proposal = {**proposal, "historical": False}
+            updated = self.apply_match_feedback(row, proposal)
+            self.db.execute("UPDATE orders SET decision=?,approved_token=NULL WHERE id=?",
+                            (json.dumps(updated), key))
+        return updated
 
     def reserve(self, jid, key, unit, recipe):
         with self.db:
@@ -407,6 +526,34 @@ class Service:
             ("approve", self.settings().get("account_scope", "unconnected"), key, token)
         )
         self.wake.set()
+
+    def rate_match(self, key, token, score):
+        self.commands.put(("thumbs_up" if score == 1 else "thumbs_down",
+                           self.settings().get("account_scope", "unconnected"), key, token))
+        self.wake.set()
+
+    def process_commands(self, store, store_scope):
+        while not self.commands.empty():
+            action, scope, key, token = self.commands.get_nowait()
+            if scope != store_scope:
+                continue
+            if action == "approve":
+                store.approve(key, token)
+            elif action in ("thumbs_up", "thumbs_down"):
+                saved = store.db.execute("SELECT payload,decision FROM orders WHERE id=?", (key,)).fetchone()
+                if not saved or not saved["decision"]:
+                    raise Hold("This file match is no longer available.")
+                row, proposal = json.loads(saved["payload"]), json.loads(saved["decision"])
+                completed = all(state == "completed" for state in self.order_states(store, row, proposal, self.settings()))
+                store.rate_match(key, token, 1 if action == "thumbs_up" else 0, completed=completed)
+
+    def order_states(self, store, row, proposal, settings):
+        states = []
+        for unit in range(row["quantity"] * proposal["runs_per_sale"]):
+            jid = job_id(row, unit)
+            job = store.db.execute("SELECT status FROM jobs WHERE id=?", (jid,)).fetchone()
+            states.append(job[0] if job else self.prior_status(jid, settings))
+        return states
 
     def request_bed_check(self, printer_id):
         with self._bed_checks_lock:
@@ -626,10 +773,7 @@ class Service:
                                 store_scope = current_scope
                                 self.last_poll = 0
                                 self.proposal_retry.clear()
-                            while not self.commands.empty():
-                                _, scope, key, token = self.commands.get_nowait()
-                                if scope == store_scope:
-                                    store.approve(key, token)
+                            self.process_commands(store, store_scope)
                             self.cycle(store)
                             self.inspect_requested_bed(self.snapshot["printers"], store)
                             self.monitor_beds(self.snapshot["printers"], store)
@@ -1145,10 +1289,11 @@ class Service:
                 "variation_id": row["variation_id"],
             }
             reason = hold_reason(row, dummy, stamp(row["created"]))
-            if reason:
-                continue  # Fulfilled/cancelled/unpaid sales never enter the print queue.
             proposal = json.loads(saved["decision"]) if saved["decision"] else None
-            if proposal and not self.ebay_poll_failed and not all(
+            finished = proposal and all(s == "completed" for s in self.order_states(store, row, proposal, settings))
+            if reason and not finished:
+                continue  # Completed history stays rateable, but never re-enters dispatch.
+            if proposal and not finished and not self.ebay_poll_failed and not all(
                 any(
                     c["id"] == r["id"]
                     and c["file_fingerprint"] == r["file_fingerprint"]
@@ -1167,6 +1312,11 @@ class Service:
                     reason = str(exc)
                 except Exception:
                     reason = "Local AI could not match the file yet"
+            if proposal:
+                rated = store.apply_match_feedback(row, proposal)
+                if rated != proposal:
+                    store.decision(saved["id"], rated)
+                    proposal = rated
             view = {
                 "key": saved["id"],
                 "title": row["title"],
@@ -1180,13 +1330,7 @@ class Service:
                 rows.append(view)
                 continue
             total = row["quantity"] * proposal["runs_per_sale"]
-            states = []
-            for unit in range(total):
-                jid = job_id(row, unit)
-                job = store.db.execute(
-                    "SELECT status FROM jobs WHERE id=?", (jid,)
-                ).fetchone()
-                states.append(job[0] if job else self.prior_status(jid, settings))
+            states = self.order_states(store, row, proposal, settings)
             view.update(
                 total=total,
                 completed=states.count("completed"),

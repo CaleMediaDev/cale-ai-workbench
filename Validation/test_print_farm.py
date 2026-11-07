@@ -84,10 +84,10 @@ def api_order(item):
 
 def clear():
     return {
-        "bed_fully_visible": True,
-        "bed_clear": True,
-        "person_or_hand": False,
-        "object_present": False,
+        "visibility": "full",
+        "surface": "empty",
+        "visibility_detail": "All plate edges visible",
+        "surface_detail": "Flat surface without raised objects",
         "confidence": 0.99,
         "reason": "Empty plate",
     }
@@ -432,10 +432,10 @@ class Decisions(unittest.TestCase):
     def test_clear_is_independent_of_file_match(self):
         self.assertTrue(farm.valid_clear(clear()))
         for field, value in [
-            ("bed_clear", False),
-            ("bed_fully_visible", False),
-            ("person_or_hand", True),
-            ("object_present", True),
+            ("surface", "uncertain"),
+            ("visibility", "partial"),
+            ("surface", "hand"),
+            ("surface", "print"),
             ("confidence", 0.94),
         ]:
             self.assertFalse(farm.valid_clear({**clear(), field: value}))
@@ -457,16 +457,41 @@ class Decisions(unittest.TestCase):
         frames = iter([b"a", b"b"])
         watcher = farm.BedWatcher(
             capture=lambda _: next(frames),
-            infer=lambda *args, **kwargs: {**clear(), "bed_fully_visible": False},
+            infer=lambda *args, **kwargs: {**clear(), "visibility": "partial"},
             sleep=lambda _: None,
         )
         result = watcher.check({"id": "p", "camera_url": "http://camera"}, "vision")
         self.assertEqual(result["state"], "out_of_view")
 
+    def test_bed_judgments_separate_hardware_haze_and_actual_obstacles(self):
+        for visibility in ("full", "partial", "uncertain"):
+            for surface in ("empty", "print", "debris", "tool", "hand", "uncertain"):
+                with self.subTest(visibility=visibility, surface=surface):
+                    answer = {**clear(), "visibility": visibility, "surface": surface,
+                              "visibility_detail": "Rear plate hidden by gantry",
+                              "surface_detail": "Surface evidence"}
+                    state, reason, _ = farm.bed_decision(answer)
+                    if surface in ("print", "debris", "tool", "hand"):
+                        self.assertEqual(state, "blocked")
+                        self.assertIn("Surface evidence", reason)
+                    elif visibility == "partial":
+                        self.assertEqual(state, "out_of_view")
+                        self.assertIn("Rear plate hidden", reason)
+                    elif visibility == "full" and surface == "empty":
+                        self.assertEqual(state, "clear")
+                    else:
+                        self.assertEqual(state, "unknown")
+        haze = {**clear(), "surface_detail": "Flat glue haze, no raised edges"}
+        self.assertEqual(farm.bed_decision(haze)[0], "clear")
+        self.assertEqual(farm.bed_decision({**haze, "visibility": "partial"})[0], "out_of_view")
+        for invalid in ({}, {**clear(), "surface": "printer"}, {**clear(), "surface_detail": ""},
+                        {**clear(), "visibility": True}, {**clear(), "confidence": 0.94}):
+            self.assertEqual(farm.bed_decision(invalid)[0], "unknown")
+
     def test_finished_bed_check_recognizes_removal_without_firmware_reset(self):
         watcher = farm.BedWatcher(
             capture=Mock(side_effect=[b"a", b"b", b"c", b"d"]),
-            infer=Mock(side_effect=[{**clear(), "bed_fully_visible": False, "object_present": True}, clear()]),
+            infer=Mock(side_effect=[{**clear(), "visibility": "partial", "surface": "print"}, clear()]),
             sleep=lambda _: None,
         )
         printer = {"id": "p", "camera_url": "http://camera", "unload_required": True}
@@ -477,7 +502,7 @@ class Decisions(unittest.TestCase):
     def test_removal_changes_occupied_to_clear_with_new_ticket(self):
         frames = iter([b"a", b"b", b"c", b"d"])
         results = iter(
-            [{**clear(), "object_present": True, "bed_clear": False}, clear()]
+            [{**clear(), "surface": "print"}, clear()]
         )
         watcher = farm.BedWatcher(
             capture=lambda _: next(frames),
@@ -865,6 +890,125 @@ class Production(unittest.TestCase):
         self.store.approve(self.key, "t")
         self.assertEqual(self.dispatch()["status"], "printing")
 
+    def test_thumbs_up_sets_100_and_dispatch_still_requires_clear_bed(self):
+        self.proposal.update(confidence=0.49, historical=True)
+        self.store.decision(self.key, self.proposal)
+        self.service.rate_match(self.key, "t", 1)
+        self.service.process_commands(self.store, "account-a")
+        self.proposal = json.loads(self.store.db.execute("SELECT decision FROM orders").fetchone()[0])
+        self.assertEqual(self.proposal["confidence"], 1.0)
+        self.assertFalse(self.proposal["historical"])
+        self.service.beds.check.side_effect = lambda *a, **k: {"state": "blocked"}
+        self.dispatch()
+        self.machine.start_order.assert_not_called()
+        self.service.beds.check.side_effect = lambda *a, **k: {
+            "state": "clear", "captured_at": time.time(), "ticket_id": "a" * 32}
+        self.assertEqual(self.dispatch()["status"], "printing")
+        self.machine.start_order.assert_called_once()
+
+    def test_thumbs_down_is_durable_exact_file_feedback_and_does_not_dispatch(self):
+        self.proposal["confidence"] = 0.49
+        self.store.decision(self.key, self.proposal)
+        rated = self.store.rate_match(self.key, "t", 0)
+        self.assertEqual(rated["confidence"], 0)
+        self.proposal = rated
+        self.dispatch()
+        self.machine.start_order.assert_not_called()
+        with self.assertRaises(farm.Hold):
+            self.store.approve(self.key, rated["token"])
+        path = self.root / "queue.sqlite"
+        self.store.db.close()
+        self.store = farm.Store(path)
+        future = {**self.item, "order_id": "new-sale", "quantity": 1}
+        high = {**rated, "confidence": 0.99}
+        self.assertEqual(self.store.apply_match_feedback(future, high)["confidence"], 0)
+        for different in ({**future, "variation_id": "other"}, {**future, "title": "Different version"}):
+            self.assertIs(self.store.apply_match_feedback(different, high), high)
+        changed = {**high, "recipes": [{**self.recipe, "content_sha256": "b" * 64}]}
+        self.assertIs(self.store.apply_match_feedback(future, changed), changed)
+        other_account = farm.Store(self.service.root / "other.sqlite")
+        try:
+            self.assertIs(other_account.apply_match_feedback(future, high), high)
+        finally:
+            other_account.db.close()
+
+    def test_completed_feedback_can_be_changed_without_reprinting(self):
+        for unit in range(self.item["quantity"]):
+            jid = farm.job_id(self.item, unit)
+            self.store.reserve(jid, self.key, unit, self.recipe)
+            self.store.outcome(jid, "completed")
+        for score in (1, 0, 1):
+            self.service.rate_match(self.key, self.proposal["token"], score)
+            self.service.process_commands(self.store, "account-a")
+            self.proposal = json.loads(self.store.db.execute("SELECT decision FROM orders").fetchone()[0])
+            self.assertEqual(self.proposal["confidence"], float(score))
+            self.assertEqual(self.service.order_states(self.store, self.item, self.proposal, {}), ["completed", "completed"])
+        self.machine.start_order.assert_not_called()
+
+    def test_completed_shipped_print_keeps_rating_controls_when_file_is_unavailable(self):
+        self.proposal["reason"] = "Matched file"
+        self.store.decision(self.key, self.proposal)
+        for unit in range(self.item["quantity"]):
+            jid = farm.job_id(self.item, unit)
+            self.store.reserve(jid, self.key, unit, self.recipe)
+            self.store.outcome(jid, "completed")
+        shipped = {**self.item, "fulfillment": "FULFILLED", "order_fulfillment": "FULFILLED"}
+        self.store.ingest(shipped)
+        self.client.orders.return_value = []
+        with (patch.object(self.service, "account_client", return_value=self.client),
+              patch.object(self.service, "scan_printers", return_value=[self.printer]),
+              patch.object(self.service, "catalog", return_value=[]),
+              patch.object(self.service, "dispatch") as dispatch,
+              patch.object(self.service, "propose") as propose):
+            self.service.cycle(self.store)
+            view = self.service.snapshot["orders"][0]
+            self.assertEqual(view["status"], "completed")
+            self.assertEqual(view["filename"], self.recipe["name"])
+            self.service.rate_match(self.key, view["token"], 1)
+            self.service.process_commands(self.store, "account-a")
+            self.service.cycle(self.store)
+            self.assertEqual(self.service.snapshot["orders"][0]["confidence"], 1)
+            propose.assert_not_called()
+            dispatch.assert_not_called()
+
+    def test_feedback_applies_to_future_sale_before_dispatch(self):
+        self.proposal["confidence"] = 0.49
+        self.proposal["reason"] = "Uncertain file"
+        self.store.decision(self.key, self.proposal)
+        self.store.rate_match(self.key, "t", 0)
+        future = {**self.item, "order_id": "future-sale"}
+        future_key = self.store.ingest(future)
+        high = {**self.proposal, "confidence": 0.99, "token": "future-token"}
+        self.store.decision(future_key, high)
+        self.client.orders.return_value = []
+        with (patch.object(self.service, "account_client", return_value=self.client),
+              patch.object(self.service, "scan_printers", return_value=[self.printer]),
+              patch.object(self.service, "catalog", return_value=[self.recipe]),
+              patch.object(self.service, "dispatch", return_value={"status": "queued"}) as dispatch):
+            self.service.cycle(self.store)
+            view = next(r for r in self.service.snapshot["orders"] if r["key"] == future_key)
+            self.assertEqual((view["confidence"], view["status"]), (0, "approval"))
+            dispatch.assert_not_called()
+            self.service.rate_match(future_key, view["token"], 1)
+            self.service.process_commands(self.store, "account-a")
+            self.service.cycle(self.store)
+            future_dispatches = [c for c in dispatch.call_args_list if c.args[1] == future_key]
+            self.assertEqual(len(future_dispatches), 1)
+            self.assertEqual(future_dispatches[0].args[4]["confidence"], 1)
+
+    def test_stale_account_stale_match_and_active_job_reject_feedback(self):
+        self.proposal["confidence"] = 0.49
+        self.store.decision(self.key, self.proposal)
+        self.service.commands.put(("thumbs_up", "different-account", self.key, "t"))
+        self.service.process_commands(self.store, "account-a")
+        self.assertEqual(self.store.db.execute("SELECT count(*) FROM match_feedback").fetchone()[0], 0)
+        with self.assertRaises(farm.Hold):
+            self.store.rate_match(self.key, "stale", 1)
+        self.store.reserve(farm.job_id(self.item, 0), self.key, 0, self.recipe)
+        with self.assertRaises(farm.Hold):
+            self.store.rate_match(self.key, "t", 1, completed=True)
+        self.assertEqual(self.store.db.execute("SELECT count(*) FROM match_feedback").fetchone()[0], 0)
+
     def test_order_change_invalidates_ok(self):
         self.store.approve(self.key, "t")
         self.store.ingest({**self.item, "quantity": 3})
@@ -992,6 +1136,7 @@ class Page(unittest.TestCase):
             start=Mock(),
             stop=Mock(),
             approve=Mock(),
+            rate_match=Mock(),
             bed_check_states=lambda: {},
         )
         try:
@@ -1028,12 +1173,28 @@ class Page(unittest.TestCase):
             buttons = [
                 w
                 for w in widgets(parent)
-                if w.winfo_class() == "TButton" and str(w.cget("text")) == "OK"
+                if w.winfo_class() == "TButton" and str(w.cget("text")) == "👍 OK"
             ]
             self.assertEqual(len(buttons), 1)
             buttons[0].invoke()
-            service.approve.assert_called_once_with("line", "exact")
+            service.rate_match.assert_called_once_with("line", "exact", 1)
             self.assertIn("disabled", buttons[0].state())
+            service.rate_match.reset_mock()
+            controls.render({"orders": [
+                {"key": "done", "order_id": "done", "title": "Finished bracket", "quantity": 1,
+                 "status": "completed", "token": "done-token", "confidence": 1,
+                 "filename": "bracket.gcode", "proposal": {"user_feedback": 1}},
+                {"key": "pending", "order_id": "pending", "title": "Uncertain stand", "quantity": 1,
+                 "status": "approval", "token": "pending-token", "confidence": 0.4,
+                 "filename": "stand.gcode", "proposal": {}},
+            ]})
+            down = [w for w in widgets(parent) if w.winfo_class() == "TButton"
+                    and str(w.cget("text")) == "👎 Wrong file"]
+            self.assertEqual(len(down), 2)
+            down[0].invoke()
+            down[1].invoke()
+            self.assertEqual([c.args for c in service.rate_match.call_args_list],
+                             [("done", "done-token", 0), ("pending", "pending-token", 0)])
             controls.toggle_printing()
             self.assertTrue(settings["enabled"])
             controls.toggle_printing()

@@ -177,7 +177,7 @@ class PrinterCard(tk.Frame):
             state, progress = "ready", None
         self.camera.unload_required = state == "complete"
         if state == "complete" and bed_state in {None, "unchecked", "expired"}:
-            bed_state = "unload_required"
+            bed_state = "recheck_finished"
         bed_label, bed_color = {
             "clear": ("✓  Build plate clear", "#78e6ab"),
             "blocked": ("!  Build plate occupied", "#ffc879"),
@@ -185,6 +185,7 @@ class PrinterCard(tk.Frame):
             "unknown": ("◇  Build plate unverified", self.MUTED),
             "expired": ("◇  Bed check expired", self.MUTED),
             "unload_required": ("!  Unload finished print", "#ffc879"),
+            "recheck_finished": ("◇  Rechecking finished bed", self.MUTED),
             "queued": ("◇  Check queued", self.MUTED),
             "checking": ("◎  Checking bed…", "#50eaff"),
             "skipped_busy": ("◇  Skipped · printer busy", self.MUTED),
@@ -192,7 +193,7 @@ class PrinterCard(tk.Frame):
             "skipped_camera_changed": ("◇  Camera changed", self.MUTED),
         }.get(bed_check or bed_state, ("◇  Bed check pending", self.MUTED))
         bed_note = ""
-        if not bed_check and bed_state in {"blocked", "out_of_view", "unknown", "unload_required"}:
+        if not bed_check and bed_state in {"blocked", "out_of_view", "unknown", "unload_required", "recheck_finished"}:
             note = (printer.get("bed") or {}).get("reason")
             if isinstance(note, str) and note != "Checked before the next print":
                 bed_note = note
@@ -200,6 +201,8 @@ class PrinterCard(tk.Frame):
                 bed_note = "Waiting: the camera cannot verify the whole plate. Flat glue haze alone does not block printing." + ("\n" + bed_note if bed_note else "")
             if bed_state == "unload_required":
                 bed_note = "Cale automatically watches for removal. Keep the whole plate visible."
+            if bed_state == "recheck_finished":
+                bed_note = "Waiting for a fresh camera check. The printer's finished status does not mean a part is still on the plate."
         name = printer.get("hostname") or printer["id"]
         color = str(printer.get("color") or "").strip()
         readings = (eta, *temperatures)
@@ -573,18 +576,24 @@ class Controls:
             ttk.Label(
                 head, text=row["title"], wraplength=850, font=("Segoe UI", 12, "bold")
             ).pack(side="left", fill="x", expand=True)
-            if row["status"] == "approval":
-                button = ttk.Button(head, text="OK")
-
-                def approve(r=row, b=button):
-                    self.service.approve(r["key"], r["token"])
-                    b.configure(state="disabled", text="Queued")
-                    self.status.set(
-                        "File approved. Starting when a compatible printer has a clear bed."
-                    )
-
-                button.configure(command=approve)
-                button.pack(side="right", padx=10, ipadx=18, ipady=6)
+            if row["status"] in {"approval", "completed"} and row.get("token"):
+                feedback = ttk.Frame(head)
+                feedback.pack(side="right", padx=(10, 0))
+                rating = (row.get("proposal") or {}).get("user_feedback")
+                up = ttk.Button(feedback, text="👍 100%" if rating == 1 else
+                                "👍 OK" if row["status"] == "approval" else "👍 Correct file")
+                down = ttk.Button(feedback, text="👎 0%" if rating == 0 else "👎 Wrong file")
+                def rate(score, r=row, buttons=(up, down)):
+                    self.service.rate_match(r["key"], r["token"], score)
+                    for button in buttons:
+                        button.configure(state="disabled")
+                    self.status.set("Saving 100% match. Waiting for a compatible printer with a verified clear bed."
+                                    if score and r["status"] == "approval" else
+                                    "Saving 100% file match." if score else "Saving 0% match. This file will not start automatically.")
+                up.configure(command=lambda callback=rate: callback(1))
+                down.configure(command=lambda callback=rate: callback(0))
+                up.pack(side="left", padx=3, ipady=4)
+                down.pack(side="left", padx=3, ipady=4)
             ttk.Label(
                 card,
                 text=f"Order {row['order_id']} · {row['quantity']} purchased · {row.get('completed', 0)}/{row.get('total', '?')} prints complete",

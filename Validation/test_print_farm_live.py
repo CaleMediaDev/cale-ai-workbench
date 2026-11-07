@@ -137,6 +137,10 @@ class LiveObservationTests(unittest.TestCase):
             self.assertIn("Build plate clear", card.bed.cget("text"))
             self.assertIn("STANDBY", card.status.cget("text"))
             self.assertFalse(card.camera.unload_required)
+            data["printers"][0]["bed"]["captured_at"] = time.time() - 31
+            page.render(data)
+            self.assertIn("Rechecking finished bed", card.bed.cget("text"))
+            self.assertNotIn("Unload", card.bed.cget("text"))
             data["printers"][0].update(detail="Offline", online=False, progress=78)
             page.render(data)
             self.assertEqual(card.percent.cget("text"), "—")
@@ -302,6 +306,19 @@ class LiveObservationTests(unittest.TestCase):
         )
         self.assertEqual(result["state"], "uncertain")
         self.assertEqual([v["label"] for v in result["objects"]], ["part"])
+
+    def test_surface_texture_is_not_drawn_as_an_obstacle(self):
+        result = observation({"state": "clear", "confidence": 0.95, "objects": [
+            {"label": "glue haze", "kind": "surface", "box": [0, 0, 900, 900]},
+            {"label": "print head", "kind": "printer", "box": [0, 0, 100, 100]},
+            {"label": "part", "kind": "obstacle", "box": [100, 100, 200, 200]},
+        ]})
+        self.assertEqual([item["kind"] for item in result["objects"]], ["printer", "obstacle"])
+        self.assertEqual(result["state"], "uncertain")
+        hardware = observation({"state": "occupied", "confidence": 0.95, "objects": [
+            {"label": "print head", "kind": "printer", "box": [0, 0, 100, 100]},
+        ]})
+        self.assertEqual(hardware["state"], "uncertain")
 
     def test_result_stays_bound_to_exact_analyzed_frame(self):
         raw = picture("red")
