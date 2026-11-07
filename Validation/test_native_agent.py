@@ -2960,7 +2960,8 @@ def test_html_game_cannot_finish_with_static_hud_or_input_only_claims(tmp_path):
     (folder/".local-ai/PLAN.md").write_text("- [x] Built\n")
     assert native_agent.game_browser_required(item)
     state={"verify_passed": True, "browser_verified": True, "browser_checked_path": "game.html",
-           "browser_checked_hash": hashlib.sha256(page.read_bytes()).hexdigest()}
+           "browser_checked_hash": hashlib.sha256(page.read_bytes()).hexdigest(),
+           "browser_checked_source_sha256": native_agent.browser_source_digest(folder)}
     assert "Run check_webapp" in native_agent.completion_issue(folder,item,state)
     state["browser_interactions"]=[{"case":1,"targets":["text:score"],"actions":["keys"]}]
     assert "at least two" in native_agent.completion_issue(folder,item,state)
@@ -2990,6 +2991,7 @@ def test_nested_html_game_requires_interaction_evidence_on_the_requested_page(tm
     demo.write_bytes(page.read_bytes())
     state = {"verify_passed": True, "browser_verified": True, "browser_checked_path": "site/demo.html",
              "browser_checked_hash": hashlib.sha256(demo.read_bytes()).hexdigest(),
+             "browser_checked_source_sha256": native_agent.browser_source_digest(folder),
              "browser_interactions": [{"case": 1, "targets": ["text:score"], "actions": ["keys"]},
                                       {"case": 2, "targets": ["text:position"], "actions": ["keys"]}]}
     assert "site/arcade.html" in native_agent.completion_issue(folder, item, state)
@@ -2998,6 +3000,55 @@ def test_nested_html_game_requires_interaction_evidence_on_the_requested_page(tm
     page.unlink()
     assert native_agent.game_browser_required(item)
     assert "missing" in native_agent.completion_issue(folder, item, state)
+
+
+def test_game_completion_rechecks_evidence_after_external_javascript_changes(tmp_path):
+    import webapp_check
+
+    item = project(tmp_path / "script-game")
+    item["brief"] = "Build a browser arcade game in index.html."
+    folder = Path(item["folder"])
+    (folder / "index.html").write_text(
+        '<button id="fire">Fire</button><button id="move">Move</button>'
+        '<p id="score">0</p><p id="position">left</p><script src="game.js"></script>', encoding="utf-8")
+    script = folder / "game.js"
+    script.write_text(
+        "fire.onclick = () => {score.textContent = '1'};"
+        "move.onclick = () => {position.textContent = 'right'};", encoding="utf-8")
+    prepare_existing_html_gate_fixture(folder, "index.html")
+    (folder / ".local-ai/verify.ps1").write_text("exit 0", encoding="utf-8")
+    (folder / ".local-ai/PLAN.md").write_text("- [x] Built\n", encoding="utf-8")
+    arguments = {"path": "index.html", "cases": [
+        {"click": ["fire"], "expect": {"score": "1"}},
+        {"click": ["move"], "expect": {"position": "right"}},
+    ]}
+    result = native_agent.execute_tool(folder, "check_webapp", arguments)
+    evidence = native_agent.browser_check_evidence(folder, arguments, result)
+    assert evidence.get("browser_verified"), result
+    state = {"verify_passed": True, **evidence}
+    assert native_agent.completion_issue(folder, item, state) == ""
+
+    original = script.read_bytes()
+    stamp = script.stat()
+    script.write_bytes(original.replace(b"'1'", b"'9'"))
+    os.utime(script, ns=(stamp.st_atime_ns, stamp.st_mtime_ns))
+    assert "Run check_webapp" in native_agent.completion_issue(folder, item, state)
+    script.write_bytes(original)
+    assert native_agent.completion_issue(folder, item, state) == ""
+
+    check = webapp_check.check
+
+    def edit_during_check(*args, **kwargs):
+        measured = check(*args, **kwargs)
+        assert measured["passed"]
+        script.write_bytes(original.replace(b"'1'", b"'9'"))
+        return measured
+
+    with patch.object(webapp_check, "check", side_effect=edit_during_check):
+        result = native_agent.execute_tool(folder, "check_webapp", arguments)
+    changed_evidence = native_agent.browser_check_evidence(folder, arguments, result)
+    assert not changed_evidence.get("browser_checked_source_sha256")
+    assert "Run check_webapp" in native_agent.completion_issue(folder, item, {"verify_passed": True, **changed_evidence})
 
 
 def test_browser_evidence_requires_measured_changes_matching_current_page(tmp_path):

@@ -803,8 +803,15 @@ def execute_tool(folder: Path, name: str, arguments: dict, *, before_step_commit
             if isinstance(report,dict):
                 permit=project_memory._issue_host_check_permit(folder,name,receipt_arguments,report,before,
                     checker_file=__file__,basis_before=basis,loaded_checker_sha256=_LOADED_CHECKER_SHA256)
-                project_memory.record_host_check_receipt(folder,name,receipt_arguments,report,before,
+                receipt = project_memory.record_host_check_receipt(folder,name,receipt_arguments,report,before,
                     checker_file=__file__,basis_before=basis,loaded_checker_sha256=_LOADED_CHECKER_SHA256,execution_permit=permit)
+                if (name == "check_webapp" and receipt and before["scope"] in _BROWSER_SOURCE_SCOPES
+                        and report.get("dependency_scope") == "project_local_dependencies"):
+                    # The receipt already compared source before and after the
+                    # real browser check. Keep its digest with the interaction.
+                    import webapp_check
+                    report["browser_source_sha256"] = before["sha256"]
+                    result = webapp_check.serialize_result(report, MAX_TOOL_OUTPUT)
         except (OSError,ValueError,TypeError,RuntimeError,project_memory.sqlite3.Error):pass
     return result
 
@@ -3710,9 +3717,15 @@ def focused_browser_check(project: dict, state: dict, request_hash: str):
         return None
     source = page.read_text(encoding="utf-8-sig", errors="replace")
     page_hash = hashlib.sha256(page.read_bytes()).hexdigest()
-    if state.get("browser_verified") and page_hash == state.get("browser_checked_hash"):
+    game = game_browser_required(project)
+    source_hash = browser_source_digest(Path(project["folder"])) if game else ""
+    if (state.get("browser_verified") and page_hash == state.get("browser_checked_hash")
+            and (not game or source_hash and source_hash == state.get("browser_checked_source_sha256"))):
         return None
-    key = hashlib.sha256(("json-check-v2\0" + request_hash + "\0" + page.name + "\0" + page_hash).encode()).hexdigest()
+    key_parts = ["json-check-v2", request_hash, page.name, page_hash]
+    if game:
+        key_parts.append(source_hash)
+    key = hashlib.sha256("\0".join(key_parts).encode()).hexdigest()
     if key == state.get("focused_browser_key"):
         return None
     attempts = state.get("focused_argument_failures") or {}
@@ -3845,6 +3858,20 @@ def browser_check_required(project: dict | None) -> bool:
                 and re.search(r"(?i)\b(?:inputs?|buttons?|forms?|click|calculat\w*|update)\b", brief))
 
 
+_BROWSER_SOURCE_SCOPES = {"full_project_source", "application_source"}
+
+
+def browser_source_digest(folder: Path) -> str:
+    """Reuse the bounded source manifest used by browser receipts."""
+    import project_memory
+
+    try:
+        source = project_memory.verification_source_state(folder)
+    except (OSError, ValueError, RuntimeError):
+        return ""
+    return source["sha256"] if source["scope"] in _BROWSER_SOURCE_SCOPES else ""
+
+
 def browser_check_evidence(folder: Path, arguments: dict, result: str) -> dict:
     """Accept only a passing interaction check for the page bytes checked now."""
     try:
@@ -3906,8 +3933,10 @@ def browser_check_evidence(folder: Path, arguments: dict, result: str) -> dict:
         current_hash = hashlib.sha256(page.read_bytes()).hexdigest()
         if verdict.get("page_sha256") != current_hash:
             return {}
+        source_hash = verdict.get("browser_source_sha256", "")
         return {"browser_verified": True, "browser_checked_path": arguments["path"],
-                "browser_checked_hash": current_hash, "browser_interactions": accepted}
+                "browser_checked_hash": current_hash, "browser_interactions": accepted,
+                "browser_checked_source_sha256": source_hash if isinstance(source_hash, str) else ""}
     except (ValueError, TypeError, KeyError, AttributeError, OSError):
         return {}
 
@@ -4060,6 +4089,7 @@ def invalidate_checks(state: dict) -> None:
     state["verify_passed"] = False
     state["browser_verified"] = False
     state.pop("browser_interactions", None)
+    state.pop("browser_checked_source_sha256", None)
     state.pop("focused_browser_key", None)
     state.pop("repair_focus_turns", None)
     state.pop("focused_argument_failures", None)
@@ -4730,6 +4760,9 @@ def completion_issue(folder: Path, project: dict | None = None,
                     "expected visible results or exported live state, invalid states, and mobile fit. "
                     "Fix failures and rerun it after the last page edit.")
         if game_required:
+            source_hash = state.get("browser_checked_source_sha256")
+            if not source_hash or source_hash != browser_source_digest(folder):
+                return "Run check_webapp again to verify gameplay against the current project files."
             interactions = state.get("browser_interactions") or []
             tested_cases = {item.get("case") for item in interactions if isinstance(item, dict)}
             targets = {target.partition(":")[2] for item in interactions if isinstance(item, dict)
