@@ -119,7 +119,9 @@ class ObjectDetector:
             person = max(people, key=lambda item: item["box"][2]*item["box"][3])
             x, y, w, h = person["box"]
             left, top = max(0, x-.04), max(0, y-.04)
-            box = [left, top, min(1, x+w+.04)-left, min(1, y+h+.04)-top]
+            right_crop = min(1.0, x+w+.04)
+            bottom_crop = min(1.0, y+h+.04)
+            box = [left, top, right_crop-left, bottom_crop-top]
             held = {"spoon", "fork", "knife", "cup", "bowl", "bottle", "cell phone", "remote", "book", "scissors"}
             found += [item for item in self.detect_region(frame, box) if item["class"] in held]
         return self.merge(found)
