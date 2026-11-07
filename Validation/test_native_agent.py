@@ -4869,6 +4869,58 @@ def test_native_review_publishes_exact_verified_snapshot(tmp_path, edit_after_ch
             assert native_agent.apply_request(reviewed, "accept", "") == "Accepted"
 
 
+def test_native_finished_review_avoids_full_hashes_until_edit_or_expiry(tmp_path):
+    with (patch.object(long_tasks, "STATE", tmp_path / "registry"),
+          patch.dict(long_tasks.REVIEW_FILE_STATE, clear=True)):
+        folder = tmp_path / "page"
+        task_id = long_tasks.add_project("Page", str(folder), "Make a page")
+        output = folder / "index.html"
+        output.write_text("approved", encoding="utf-8")
+        long_tasks.update(task_id, status="ready_for_review", fingerprint=long_tasks.fingerprint(folder))
+        item = long_tasks.projects()[0]
+        native_agent.save_state(item, {"status": "done", "messages": []})
+
+        with (patch.object(long_tasks, "fingerprint", wraps=long_tasks.fingerprint) as digest,
+              patch.object(long_tasks.time, "monotonic", side_effect=[10, 11, 12, 610, 611])):
+            for _ in range(4):
+                long_tasks.tick()
+            assert digest.call_count == 2
+            assert long_tasks.projects()[0]["status"] == "ready_for_review"
+            output.write_text("changed and longer", encoding="utf-8")
+            long_tasks.tick()
+            assert digest.call_count == 3
+        assert long_tasks.projects()[0]["status"] == "working"
+        assert native_agent.read_state(item)["status"] == "continue"
+        assert task_id not in long_tasks.REVIEW_FILE_STATE
+
+
+def test_native_accept_checks_content_even_when_review_metadata_matches(tmp_path):
+    with (patch.object(long_tasks, "STATE", tmp_path / "registry"),
+          patch.dict(long_tasks.REVIEW_FILE_STATE, clear=True)):
+        folder = tmp_path / "page"
+        task_id = long_tasks.add_project("Page", str(folder), "Make a page")
+        output = folder / "index.html"
+        output.write_text("approved", encoding="utf-8")
+        long_tasks.update(task_id, status="ready_for_review", fingerprint=long_tasks.fingerprint(folder))
+        item = long_tasks.projects()[0]
+        native_agent.save_state(item, {"status": "done", "messages": []})
+        metadata = long_tasks.review_file_metadata(folder)
+        original = output.stat()
+        with patch.object(long_tasks, "review_file_metadata", return_value=metadata):
+            long_tasks.advance_project(item)
+            output.write_text("replaced", encoding="utf-8")
+            os.utime(output, ns=(original.st_atime_ns, original.st_mtime_ns))
+            long_tasks.advance_project(item)
+            assert long_tasks.projects()[0]["status"] == "ready_for_review"
+            with pytest.raises(ValueError, match="changed after verification"):
+                native_agent.apply_request(item, "accept", "")
+            output.write_text("approved", encoding="utf-8")
+            assert native_agent.apply_request(item, "accept", "") == "Accepted"
+            assert task_id in long_tasks.REVIEW_FILE_STATE
+            long_tasks.tick()
+            assert task_id not in long_tasks.REVIEW_FILE_STATE
+
+
 def test_bad_checkpoint_is_not_overwritten_by_independent_verification(tmp_path):
     with patch.object(long_tasks, "STATE", tmp_path / "registry"):
         task_id = long_tasks.add_project("Page", str(tmp_path / "page"), "Make a page")

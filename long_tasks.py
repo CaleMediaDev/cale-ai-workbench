@@ -1710,7 +1710,7 @@ def fingerprint(folder, *, include_verifier=True):
     return ("content-v2:" if include_verifier else "source-v1:") + digest.hexdigest()
 
 
-REVIEW_FILE_STATE = {}  # project id -> (accepted fingerprint, file metadata, full-check time)
+REVIEW_FILE_STATE = {}  # project id -> (verified fingerprint, file metadata, full-check time)
 
 
 def review_file_metadata(folder):
@@ -1751,9 +1751,11 @@ def review_files_changed(p):
     if (previous and previous[0] == p["fingerprint"] and previous[1] == metadata
             and now - previous[2] < 600):
         return False
-    changed = fingerprint(folder) != p["fingerprint"]
+    if fingerprint(folder) != p["fingerprint"]:
+        REVIEW_FILE_STATE.pop(p["id"], None)
+        return True
     REVIEW_FILE_STATE[p["id"]] = (p["fingerprint"], metadata, now)
-    return changed
+    return False
 
 
 def recheck_changed_media(p, kind):
@@ -2999,7 +3001,12 @@ def tick():
             "SELECT task_id,status,card,retry_at FROM task_retry_state"
         )}
     now = time.time()
-    for p in projects():
+    tasks = projects()
+    if REVIEW_FILE_STATE:
+        reviewing = {p["id"] for p in tasks if p["status"] == "ready_for_review"}
+        for pid in REVIEW_FILE_STATE.keys() - reviewing:
+            REVIEW_FILE_STATE.pop(pid, None)
+    for p in tasks:
         retry_state = task_retry_waits(p, now, retry_rows.get(p["id"]))
         if retry_state is True:
             continue
@@ -3327,7 +3334,7 @@ def advance_project(p):
         import native_agent
 
         if p["status"] == "ready_for_review":
-            if fingerprint(Path(p["folder"])) != p["fingerprint"]:
+            if review_files_changed(p):
                 try:
                     worker = native_agent.read_state(p)
                 except native_agent.CheckpointCorrupt:

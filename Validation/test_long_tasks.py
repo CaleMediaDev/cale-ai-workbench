@@ -2915,6 +2915,17 @@ class LongTaskTests(unittest.TestCase):
         (folder / "new.txt").write_text("new", encoding="utf-8")
         self.assertTrue(task_module.review_files_changed(task))
 
+    def test_ready_review_does_not_cache_a_changed_project_as_current(self):
+        folder = self.base / "project"
+        source = folder / "source.txt"
+        source.write_text("approved", encoding="utf-8")
+        task = {**self.item(), "fingerprint": task_module.fingerprint(folder)}
+        with patch.dict(task_module.REVIEW_FILE_STATE, clear=True):
+            self.assertFalse(task_module.review_files_changed(task))
+            source.write_text("changed", encoding="utf-8")
+            self.assertTrue(task_module.review_files_changed(task))
+            self.assertTrue(task_module.review_files_changed(task))
+
     def test_check_that_edits_project_cannot_pass_as_final(self):
         source = self.base / "project/source.txt"
         source.write_text("before", encoding="utf-8")
