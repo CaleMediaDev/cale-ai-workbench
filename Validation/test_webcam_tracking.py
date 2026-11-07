@@ -132,6 +132,9 @@ def test_distinctive_object_memory_survives_restart_without_images(tmp_path):
     memory.learn("Cale's notebook", "book", signature)
     reopened = ObjectMemory(tmp_path)
     assert reopened.identify("book", signature) == "Cale's notebook"
+    # Test with a signature that might be invalid (e.g., missing descriptors)
+    invalid_signature = {"points": [[0, 0]], "descriptors": []}
+    assert reopened.identify("book", invalid_signature) is None
     other = memory.signature(rng.integers(0, 255, frame.shape, dtype=np.uint8), [0, 0, 1, 1])
     assert reopened.identify("book", other) is None
     assert reopened.identify("cup", signature) is None

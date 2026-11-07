@@ -199,6 +199,8 @@ class ObjectMemory:
                 if example.get("class") != category:
                     continue
                 try:
+                    if not example.get("descriptors") or not signature.get("descriptors"):
+                        continue
                     pairs = cv.BFMatcher(cv.NORM_HAMMING).knnMatch(
                         np.asarray(example["descriptors"], dtype=np.uint8),
                         np.asarray(signature["descriptors"], dtype=np.uint8), k=2)
@@ -209,7 +211,7 @@ class ObjectMemory:
                     target = np.float32([signature["points"][m.trainIdx] for m in good])
                     _, mask = cv.findHomography(source, target, cv.RANSAC, 4)
                     count = int(mask.sum()) if mask is not None else 0
-                    if count >= 10 and count/len(good) >= .65:
+                    if count >= 10 and len(good) > 0 and count/len(good) >= .65:
                         best = max(best, count)
                 except (cv.error, ValueError, KeyError, IndexError, TypeError):
                     continue
