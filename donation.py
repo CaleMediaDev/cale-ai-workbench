@@ -142,6 +142,9 @@ def connection(root: Path):
     conn.execute("CREATE TABLE IF NOT EXISTS leaderboard_scan (id INTEGER PRIMARY KEY, token TEXT, anchor TEXT)")
     conn.execute("CREATE TABLE IF NOT EXISTS leaderboard_pending (number INTEGER PRIMARY KEY, author INTEGER NOT NULL, login TEXT NOT NULL, merged TEXT NOT NULL)")
     conn.execute("CREATE TABLE IF NOT EXISTS cooldowns(resource TEXT PRIMARY KEY, until REAL NOT NULL)")
+    conn.execute("""CREATE TABLE IF NOT EXISTS inference_failures (
+        resource TEXT PRIMARY KEY, kind TEXT NOT NULL, status INTEGER,
+        probe TEXT NOT NULL DEFAULT '', probe_started REAL NOT NULL DEFAULT 0)""")
     conn.execute("CREATE TABLE IF NOT EXISTS github_diagnostic(id INTEGER PRIMARY KEY CHECK(id=1), stage TEXT NOT NULL, status INTEGER, kind TEXT NOT NULL, until REAL NOT NULL)")
     conn.execute("""CREATE TABLE IF NOT EXISTS publication_outbox (
         run TEXT PRIMARY KEY, resource TEXT NOT NULL, account TEXT NOT NULL,
@@ -343,6 +346,91 @@ def inference_retry_seconds(error):
         except (ValueError, TypeError, AttributeError):
             return 300
     return 300 if re.search(r"usage_limit|rate_limit|quota", str(error), re.I) else 60
+
+
+def _inference_wait(conn, resource, now):
+    cooldown = conn.execute("SELECT until FROM cooldowns WHERE resource=?", (resource,)).fetchone()
+    probe = conn.execute("SELECT probe_started FROM inference_failures WHERE resource=? AND probe<>''",
+                         (resource,)).fetchone()
+    return max(0, cooldown[0] - now if cooldown else 0,
+               probe[0] + RESERVATION_SECONDS - now if probe else 0)
+
+
+def inference_wait(root, resource):
+    with closing(connection(root)) as conn:
+        return _inference_wait(conn, resource, time.time())
+
+
+def admit_inference(root, resource, run_id):
+    """Check again at the call boundary and let one lane test a recovering source."""
+    with closing(connection(root)) as conn, conn:
+        conn.execute("BEGIN IMMEDIATE")
+        now = time.time()
+        wait = _inference_wait(conn, resource, now)
+        if wait:
+            return wait, False
+        probe = conn.execute("UPDATE inference_failures SET probe=?,probe_started=? WHERE resource=?",
+                             (run_id, now, resource))
+        return 0, bool(probe.rowcount)
+
+
+def record_inference_failure(root, resource, error):
+    """Store fixed categories only. Provider exception text can contain credentials."""
+    status = error.code if isinstance(error, HTTPError) and type(error.code) is int and 400 <= error.code <= 599 else None
+    seconds = inference_retry_seconds(error)
+    if status == 429 or (status is None and seconds == 300):
+        kind = "limit"
+    elif status in (401, 403):
+        kind = "access"
+    elif isinstance(error, (OSError, URLError)) and status is None:
+        kind = "connection"
+    else:
+        kind = "request"
+    with closing(connection(root)) as conn, conn:
+        conn.execute("INSERT INTO cooldowns VALUES(?,?) ON CONFLICT(resource) DO UPDATE SET until=MAX(until,excluded.until)",
+                     (resource, time.time() + seconds))
+        conn.execute("""INSERT INTO inference_failures(resource,kind,status) VALUES(?,?,?)
+            ON CONFLICT(resource) DO UPDATE SET kind=excluded.kind,status=excluded.status""", (resource, kind, status))
+    return seconds
+
+
+def release_inference_probe(root, resource, run_id, recovered):
+    with closing(connection(root)) as conn, conn:
+        if recovered:
+            # A failure from a lane already in flight can land during the probe.
+            conn.execute("""DELETE FROM inference_failures WHERE resource=? AND probe=?
+                AND probe_started >= (SELECT until FROM cooldowns WHERE resource=?)""",
+                         (resource, run_id, resource))
+        conn.execute("UPDATE inference_failures SET probe='',probe_started=0 WHERE resource=? AND probe=?",
+                     (resource, run_id))
+
+
+def inference_failure_rows(root):
+    """Load bounded diagnostic state on a worker, without creating a ledger."""
+    path = root / "LongTasks/donations.db"
+    try:
+        with closing(sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True, timeout=.01)) as conn:
+            return conn.execute("""SELECT f.resource,f.kind,f.status,c.until,f.probe_started FROM inference_failures f
+                JOIN cooldowns c ON c.resource=f.resource WHERE f.resource IN (?,?,?) ORDER BY f.resource""",
+                                SOURCES).fetchall()
+    except (OSError, sqlite3.Error):
+        return None
+
+
+def inference_failure_messages(rows):
+    now = time.time()
+    names = {"chatgpt": "ChatGPT", "free_cloud": "Free cloud", "local": "Local AI"}
+    reasons = {"limit": "usage limit", "access": "access denied", "connection": "connection failed", "request": "request failed"}
+    messages = []
+    for resource, kind, status, until, probe_started in rows:
+        if until <= now and probe_started + RESERVATION_SECONDS <= now:
+            continue
+        reason = reasons.get(kind, "request failed")
+        if type(status) is int and 400 <= status <= 599:
+            reason += f" (HTTP {status})"
+        remaining = f"retry in {math.ceil(until - now)}s" if until > now else "checking recovery"
+        messages.append(f"{names[resource]} {reason} · {remaining}")
+    return messages
 
 
 def leaderboard(root: Path = ROOT) -> dict:
@@ -2199,15 +2287,28 @@ class Service:
             message = "Contribution database unavailable · " + message
         return message
 
+    def _refresh_inference_diagnostics(self):
+        stamp = time.monotonic_ns()
+        rows = inference_failure_rows(self.root)
+        if rows is None:
+            return
+        with self._events["lock"]:
+            if stamp >= self._events.get("inference_diagnostic_stamp", 0):
+                self._events["inference_diagnostic_stamp"] = stamp
+                self._events["inference_diagnostics"] = tuple(rows)
+
     def status_message(self):
         active = sum(bool(worker.thread and worker.thread.is_alive()) for worker in [self, *self.children])
         with self._events["lock"]:
             diagnostic = dict(self._events.get("github_diagnostic", {}))
             pending_url = self._events.get("pending_proposal_url", "")
+            inference_diagnostics = self._events.get("inference_diagnostics", ())
         message = (self._github_diagnostic_message(diagnostic)
                    if diagnostic.get("until", 0) > time.time() else self.message)
         if valid_proposal_url(pending_url) and "delivery is not confirmed" in message.lower():
             message += " Unconfirmed proposal: " + pending_url
+        if diagnostic.get("until", 0) <= time.time():
+            message = " · ".join([message, *inference_failure_messages(inference_diagnostics)])
         return (f"{active} review{'s' if active != 1 else ''} running · " if active else "") + message
 
     def allowed(self, busy=False) -> bool:
@@ -2270,6 +2371,7 @@ class Service:
         try:
             check_cancel()
             diagnostic = self._publish_github_diagnostic(github_diagnostic(self.root))
+            self._refresh_inference_diagnostics()
             github_wait = max(resource_cooldown(self.root, "github"),
                               diagnostic.get("until", 0) - time.time())
             if github_wait:
@@ -2368,7 +2470,7 @@ class Service:
                          (source != "local" or local_available()) and
                          (source != "chatgpt" or chatgpt_auth.status().get("sharing")) and
                          (source != "free_cloud" or free_fingerprint())]
-            available = [source for source in available if not resource_cooldown(self.root, source)]
+            available = [source for source in available if not inference_wait(self.root, source)]
             if "local" in available:
                 from readiness_checklist import _heavy_gpu_active
                 if _heavy_gpu_active(self.root):
@@ -2458,7 +2560,6 @@ class Service:
                 raise ValueError("Maintainer task exceeds the public-source context budget")
             check_cancel()
             self.message = f"Donating {resource.replace('_', ' ')} AI · reviewing public Cale code…"
-            self._emit_event("reviewing", run_id, resource, job_title=job.get("title", ""))
             payload = {"messages": [
                 {"role": "system", "content":
                  "Review public Cale AI Workbench source for one concrete correctness bug in the assigned area. "
@@ -2488,20 +2589,33 @@ class Service:
                 self.message = (self._github_diagnostic_message(diagnostic)
                                 if diagnostic else "GitHub is cooling down · retrying automatically.")
                 return
+            check_cancel()
+            wait, probing = admit_inference(self.root, resource, run_id)
+            if wait:
+                finish(self.root, run_id, "interrupted")
+                # A successful probe may restore this source before its lease expires.
+                self.next_attempt = time.monotonic() + min(wait, 15)
+                self.message = "Waiting for an AI source to recover · retrying automatically."
+                return
+            recovered = False
             try:
+                if probing:
+                    self._refresh_inference_diagnostics()
+                self._emit_event("reviewing", run_id, resource, job_title=job.get("title", ""))
                 result = complete_donation(payload, resource, consent["intensity"], cancel.is_set, account_usage)
+                recovered = True
             except (InterruptedError, sqlite3.Error):
                 raise  # Cancellation/shared ledger failure is not an AI account failure.
             except Exception as error:
                 # Quota/transport failure belongs only to this explicitly chosen
                 # inference source, not GitHub or other donated resources.
-                seconds = inference_retry_seconds(error)
-                resource_cooldown(self.root, resource, seconds)
+                seconds = record_inference_failure(self.root, resource, error)
+                self._refresh_inference_diagnostics()
                 finish(self.root, run_id, "failed")
                 current = settings(self.root)
                 alternatives = [source for source in permitted_sources(current, self.root)
                     if source != resource and (not self.resource or source == self.resource)
-                    and not resource_cooldown(self.root, source)]
+                    and not inference_wait(self.root, source)]
                 self.next_attempt = (0 if current["enabled"] and alternatives
                     and current["intensity"] in {"medium", "full_blast"} else
                     max(self.next_attempt, time.monotonic() + seconds))
@@ -2509,6 +2623,10 @@ class Service:
                 self.message = (resource.replace("_", " ") + " is temporarily unavailable · "
                     + ("trying another enabled source." if self.next_attempt == 0 else "waiting for its cooldown."))
                 return
+            finally:
+                if probing:
+                    release_inference_probe(self.root, resource, run_id, recovered)
+                    self._refresh_inference_diagnostics()
             check_cancel()
             text = result["choices"][0]["message"].get("content") or ""
             self._emit_event("checking", run_id, resource, job_title=job.get("title", ""))

@@ -9,6 +9,7 @@ import json
 import sqlite3
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import closing
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -837,6 +838,47 @@ def test_account_cooldown_is_shared_by_other_lanes(tmp_path):
     assert donation.resource_cooldown(tmp_path, "chatgpt") > 100
 
 
+def test_full_blast_admits_one_recovery_probe_then_restores_parallelism(tmp_path):
+    from urllib.error import HTTPError
+
+    def admit_six():
+        with ThreadPoolExecutor(max_workers=6) as pool:
+            return list(pool.map(lambda n: donation.admit_inference(tmp_path, "chatgpt", str(n)), range(6)))
+
+    assert admit_six() == [(0, False)] * 6
+    error = HTTPError("https://provider.example/private-key", 429, "private-key", {"Retry-After": "120"}, None)
+    donation.record_inference_failure(tmp_path, "chatgpt", error)
+    messages = donation.inference_failure_messages(donation.inference_failure_rows(tmp_path))
+    assert len(messages) == 1 and messages[0].startswith("ChatGPT usage limit (HTTP 429)")
+    assert "private-key" not in messages[0]
+    assert donation.admit_inference(tmp_path, "local", "local-run") == (0, False)
+    assert all(wait > 0 and not probe for wait, probe in admit_six())
+    with closing(donation.connection(tmp_path)) as conn, conn:
+        conn.execute("UPDATE cooldowns SET until=0 WHERE resource='chatgpt'")
+    admissions = admit_six()
+    assert admissions.count((0, True)) == 1
+    assert sum(wait > 0 for wait, probe in admissions) == 5
+    probe_id = str(admissions.index((0, True)))
+    donation.release_inference_probe(tmp_path, "chatgpt", probe_id, recovered=False)
+    assert donation.admit_inference(tmp_path, "chatgpt", "replacement") == (0, True)
+    donation.release_inference_probe(tmp_path, "chatgpt", "replacement", recovered=True)
+    assert admit_six() == [(0, False)] * 6
+    assert donation.inference_failure_rows(tmp_path) == []
+
+
+def test_successful_probe_cannot_clear_a_new_failure(tmp_path):
+    donation.record_inference_failure(tmp_path, "chatgpt", TimeoutError())
+    with closing(donation.connection(tmp_path)) as conn, conn:
+        conn.execute("UPDATE cooldowns SET until=0 WHERE resource='chatgpt'")
+    assert donation.admit_inference(tmp_path, "chatgpt", "probe") == (0, True)
+    donation.record_inference_failure(tmp_path, "chatgpt", RuntimeError("usage_limit"))
+    donation.release_inference_probe(tmp_path, "chatgpt", "probe", recovered=True)
+    assert donation.inference_wait(tmp_path, "chatgpt") > 290
+    with closing(donation.connection(tmp_path)) as conn, conn:
+        conn.execute("UPDATE cooldowns SET until=0 WHERE resource='chatgpt'")
+    assert donation.admit_inference(tmp_path, "chatgpt", "next-probe") == (0, True)
+
+
 def test_full_blast_can_review_larger_public_pairs_without_expanding_sensitive_paths():
     tree = {"tree": [{"type": "blob", "path": path, "size": size} for path, size in
         [("music_backend.py", 60000), ("Validation/test_music_backend.py", 65000),
@@ -1585,6 +1627,7 @@ def test_quota_exhausted_chatgpt_scheduler_immediately_uses_enabled_local(tmp_pa
          patch.object(donation.threading,'Thread',DonationInlineThread):
         service.tick()
         assert resources==['chatgpt'] and service.next_attempt==0
+        assert "ChatGPT " in service.status_message() and "retry in" in service.status_message()
         service.tick()
     assert resources==['chatgpt','local'] and len(drafts)==1
     assert isinstance(drafts[0][1]['publication'], donation.DurablePublication)
@@ -2502,6 +2545,23 @@ def outbox_expire(root):
     with closing(donation.connection(root)) as connection:
         rows = connection.execute("SELECT until FROM cooldowns UNION ALL SELECT checked+61 FROM publication_outbox").fetchall()
     return max([time.time(), *(row[0] for row in rows)]) + 1
+
+
+def test_inference_cooldown_started_during_source_collection_prevents_new_request(outbox_host, monkeypatch):
+    host = outbox_host
+
+    def public(path, revision):
+        if path != "donation-tasks.json":
+            donation.resource_cooldown(host.root, "local", 120)
+        return host.remote.public(path, revision)
+
+    monkeypatch.setattr(donation, "public_file", public)
+    host.tick()
+    assert not host.calls
+    assert donation.total_tokens(host.root) == 0
+    with closing(donation.connection(host.root)) as conn:
+        assert conn.execute("SELECT status FROM runs").fetchall() == [("interrupted",)]
+        assert conn.execute("SELECT phase,owner FROM publication_outbox").fetchall() == [("discarded", "")]
 
 
 def test_valid_publication_404_restart_resumes_original_run_without_model_regeneration(outbox_host):
