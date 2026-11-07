@@ -3120,15 +3120,25 @@ def test_paused_install_hold_matches_optional_and_base_setup_policy():
 
 def test_paused_install_hold_real_ui_wiring_ignores_stale_waiting_task():
     donation_expr, radio_expr, update_expr = _background_hold_ui_expressions()
+    from unittest.mock import Mock
+
     for setup, expected in [({}, False), ({"status": "complete"}, False),
             ({"status": "failed", "owner": "runtime_features", "attempts": 3}, False),
             ({"status": "working"}, True), ({"status": "error"}, True)]:
-        context = dict(vars(task_module), setup=setup, setup_state=setup,
+        service = Mock()
+        service.update_restart_blocker.return_value = ""
+        context = dict(vars(task_module), setup=setup, setup_state=setup, print_farm_service=service,
                        updating=False, pending_update=None,
                        all_projects=[{"status": "waiting_for_setup"}])
         assert bool(eval(donation_expr, context)) is expected
         assert bool(eval(radio_expr, context)) is expected
         assert bool(eval(update_expr, context)) is (not expected)
+        if expected:
+            service.update_restart_blocker.assert_not_called()
+        else:
+            service.update_restart_blocker.assert_called_once_with(reserve=True)
+            service.update_restart_blocker.return_value = "Print Farm has an active print."
+            assert not eval(update_expr, context)
         for changed in ({"updating": True}, {"pending_update": ("update.zip", (0, 5, 494))}):
             assert eval(donation_expr, {**context, **changed})
             assert eval(radio_expr, {**context, **changed})

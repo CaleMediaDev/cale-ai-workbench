@@ -1,6 +1,7 @@
 import json
 import sys
 import tempfile
+import threading
 import time
 import unittest
 from pathlib import Path
@@ -64,6 +65,56 @@ def clear():
 
 
 class Decisions(unittest.TestCase):
+    def test_update_waits_for_busy_printers_and_unsettled_submissions(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            service = farm.Service(temporary)
+            service.configure({"printers": [{"id": "printer"}]})
+            self.assertIn("fresh printer status", service.update_restart_blocker(reserve=True))
+            service._printers_checked_at = time.monotonic()
+            service._unsettled_jobs = False
+            service.snapshot["printers"] = [{"id": "printer", "online": True, "idle": False}]
+            self.assertIn("active print", service.update_restart_blocker(reserve=True))
+            service.snapshot["printers"][0]["idle"] = True
+            service._unsettled_jobs = True
+            self.assertIn("active print", service.update_restart_blocker(reserve=True))
+            self.assertFalse(service._update_reserved)
+            service._unsettled_jobs = False
+            self.assertEqual(service.update_restart_blocker(reserve=True), "")
+            self.assertTrue(service._update_reserved)
+
+    def test_update_reservation_freezes_real_service_loop_until_canceled(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            service = farm.Service(temporary)
+            first_cycle = threading.Event()
+            release_cycle = threading.Event()
+            second_cycle = threading.Event()
+
+            def cycle(_store):
+                if first_cycle.is_set():
+                    second_cycle.set()
+                else:
+                    first_cycle.set()
+                    self.assertTrue(release_cycle.wait(timeout=5))
+
+            with patch.object(service, "cycle", side_effect=cycle):
+                service.start()
+                try:
+                    self.assertTrue(first_cycle.wait(timeout=5))
+                    self.assertIn("checking jobs", service.update_restart_blocker(reserve=True))
+                    release_cycle.set()
+                    with service._cycle_lock:
+                        pass  # The first service iteration has committed its status.
+                    self.assertEqual(service.update_restart_blocker(reserve=True), "")
+                    service.wake.set()
+                    self.assertFalse(second_cycle.wait(timeout=0.2))
+                    service.cancel_update_restart()
+                    self.assertTrue(second_cycle.wait(timeout=5))
+                finally:
+                    release_cycle.set()
+                    service.stop()
+                    service.thread.join(timeout=5)
+                self.assertFalse(service.thread.is_alive())
+
     def test_finished_printer_is_available_but_paused_is_not(self):
         from print_farm_transport import ready_state
 

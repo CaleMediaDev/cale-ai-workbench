@@ -316,6 +316,10 @@ class Service:
         self.commands = queue.Queue()
         self.wake = threading.Event()
         self.stop_event = threading.Event()
+        self._cycle_lock = threading.Lock()
+        self._update_reserved = False
+        self._printers_checked_at = None
+        self._unsettled_jobs = None
         self.snapshot = {
             "status": "Starting print service",
             "printers": [],
@@ -360,6 +364,32 @@ class Service:
         self.stop_event.set()
         self.wake.set()
 
+    def update_restart_blocker(self, *, reserve=False):
+        """Wait for active prints and freeze dispatch before closing the desktop."""
+        if not self._cycle_lock.acquire(blocking=False):
+            return "Print Farm is checking jobs."
+        try:
+            if self._unsettled_jobs or any(
+                printer.get("online") and not printer.get("idle")
+                for printer in self.snapshot["printers"]
+            ):
+                return "Print Farm has an active print."
+            if self.settings().get("printers") and (
+                self._unsettled_jobs is None or self._printers_checked_at is None
+                or time.monotonic() - self._printers_checked_at > 20
+            ):
+                return "Waiting for fresh printer status."
+            if reserve:
+                self._update_reserved = True
+            return ""
+        finally:
+            self._cycle_lock.release()
+
+    def cancel_update_restart(self):
+        with self._cycle_lock:
+            self._update_reserved = False
+        self.wake.set()
+
     def run(self):
         # Cross-process lock is released by the OS even after a crash or update.
         handle = None
@@ -384,34 +414,47 @@ class Service:
         store_scope = None
         try:
             while not self.stop_event.is_set():
-                try:
-                    current_scope = self.settings().get("account_scope", "unconnected")
-                    if store_scope != current_scope:
-                        if store:
-                            store.db.close()
-                        store = Store(
-                            self.root
-                            / ("queue-" + digest(current_scope)[:20] + ".sqlite")
-                        )
-                        store_scope = current_scope
-                        self.last_poll = 0
-                        self.proposal_retry.clear()
-                    while not self.commands.empty():
-                        _, scope, key, token = self.commands.get_nowait()
-                        if scope == store_scope:
-                            store.approve(key, token)
-                    self.cycle(store)
-                except Exception as exc:
-                    self.snapshot = {
-                        **self.snapshot,
-                        "status": str(exc)
-                        if isinstance(exc, Hold)
-                        else "Print service needs attention ("
-                        + type(exc).__name__
-                        + ")",
-                        "checked_at": time.time(),
-                    }
-                persist(self.root / "status.json", self.snapshot)
+                with self._cycle_lock:
+                    if not self._update_reserved:
+                        try:
+                            current_scope = self.settings().get("account_scope", "unconnected")
+                            if store_scope != current_scope:
+                                if store:
+                                    store.db.close()
+                                store = Store(
+                                    self.root
+                                    / ("queue-" + digest(current_scope)[:20] + ".sqlite")
+                                )
+                                store_scope = current_scope
+                                self.last_poll = 0
+                                self.proposal_retry.clear()
+                            while not self.commands.empty():
+                                _, scope, key, token = self.commands.get_nowait()
+                                if scope == store_scope:
+                                    store.approve(key, token)
+                            self.cycle(store)
+                        except Exception as exc:
+                            self.snapshot = {
+                                **self.snapshot,
+                                "status": str(exc)
+                                if isinstance(exc, Hold)
+                                else "Print service needs attention ("
+                                + type(exc).__name__
+                                + ")",
+                                "checked_at": time.time(),
+                            }
+                        # Read the durable job state even when the order view
+                        # could not refresh or a submission outcome is unknown.
+                        self._unsettled_jobs = None
+                        if store is not None:
+                            try:
+                                self._unsettled_jobs = bool(store.db.execute(
+                                    "SELECT 1 FROM jobs WHERE status IN "
+                                    "('dispatching','printing','submission_uncertain') LIMIT 1"
+                                ).fetchone())
+                            except sqlite3.Error:
+                                pass  # An unreadable queue cannot authorize a restart.
+                        persist(self.root / "status.json", self.snapshot)
                 self.wake.wait(5)
                 self.wake.clear()
         finally:
@@ -784,6 +827,13 @@ class Service:
     def cycle(self, store):
         settings = self.settings()
         printers = self.scan_printers(settings)
+        self.snapshot = {
+            **self.snapshot,
+            "printers": printers,
+            "enabled": settings.get("enabled", False),
+            "checked_at": time.time(),
+        }
+        self._printers_checked_at = time.monotonic()
         ledger = (
             Path(settings["legacy_runtime"]) / "dispatch-ledger"
             if settings.get("legacy_runtime")
@@ -792,12 +842,6 @@ class Service:
         )
         ledger.mkdir(exist_ok=True, parents=True)
         self.reconcile(store, ledger)
-        self.snapshot = {
-            **self.snapshot,
-            "printers": printers,
-            "enabled": settings.get("enabled", False),
-            "checked_at": time.time(),
-        }
         client = self.account_client(settings)
         if client is None:
             self.snapshot.update(

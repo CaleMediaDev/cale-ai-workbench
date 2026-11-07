@@ -5681,8 +5681,10 @@ def gui():
             return
         manual_update_requested = True
         update_button.configure(text="Update queued", state="disabled")
+        blocker = print_farm_service.update_restart_blocker()
         status.set(
-            "Installing the verified update now…" if not self_update.active_tasks()
+            "Update queued. " + blocker if blocker
+            else "Installing the verified update now…" if not self_update.active_tasks()
             else "Update queued. Cale will pause current tasks, install, and restart."
         )
 
@@ -6468,6 +6470,7 @@ def gui():
         music_page, window, radio_service, on_make_song=make_studio_song)
 
     window.print_farm_controls = print_farm_ui.Controls(print_shell, window, ROOT)
+    print_farm_service = window.print_farm_controls.service
 
     # Creation has a dedicated canvas-sized live preview instead of opening a
     # second window over the conversation. It uses the existing preview capture
@@ -8214,9 +8217,12 @@ def gui():
         if not updating and time.monotonic() - window.update_checked_at >= update_interval:
             window.update_checked_at = time.monotonic()
             threading.Thread(target=check_updates, daemon=True).start()
-        if (pending_update and not updating
-                and (manual_update_requested or time.monotonic() - update_ready_at >= 30)
-                and self_update.active_tasks()):
+        update_due = (pending_update and not updating
+                      and (manual_update_requested or time.monotonic() - update_ready_at >= 30))
+        print_blocker = print_farm_service.update_restart_blocker() if update_due else ""
+        if print_blocker:
+            status.set("Update queued. " + print_blocker)
+        if update_due and not print_blocker and self_update.active_tasks():
             try:
                 paused = self_update.pause_projects_for_update(pending_update[1])
                 if paused:
@@ -8228,9 +8234,8 @@ def gui():
             except (OSError, ValueError) as exc:
                 status.set("Could not pause tasks for update: " + str(exc)[:120])
         if (
-            pending_update
-            and not updating
-            and (manual_update_requested or time.monotonic() - update_ready_at >= 30)
+            update_due
+            and not print_blocker
             and not self_update.active_tasks()
             and not update_dialog_open(
                 window.winfo_children(),
@@ -8241,7 +8246,11 @@ def gui():
             )
         ):
             setup_state = read_task_status(STATE / "install-progress.json")
-            if not setup_blocks_tasks(setup_state):
+            # A new print can start after the first status check. Reserve
+            # the restart under the same lock that protects farm dispatch.
+            if not setup_blocks_tasks(setup_state) and not (
+                print_blocker := print_farm_service.update_restart_blocker(reserve=True)
+            ):
                 archive, version = pending_update
                 try:
                     subprocess.Popen(
@@ -8267,10 +8276,13 @@ def gui():
                     window.after(1000, window.destroy)
                     return
                 except OSError as exc:
+                    print_farm_service.cancel_update_restart()
                     status.set("Could not start the update: " + str(exc))
                     pending_update = None
                     manual_update_requested = False
                     update_button.pack_forget()
+            elif print_blocker:
+                status.set("Update queued. " + print_blocker)
         if (time.monotonic() - getattr(window, "monitor_restart_at", 0) > 15
                 and monitor_restart_needed()):
             window.monitor_restart_at = time.monotonic()
