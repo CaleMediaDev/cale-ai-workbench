@@ -259,13 +259,13 @@ class K1:
             or not isinstance(authorization.get("ticket_id"), str)
             or len(authorization["ticket_id"]) != 32
             or not 0 <= now - authorization.get("claimed_at", 0) <= 30
-            or not 0 <= now - authorization.get("confirmed_at", 0) <= 3600
+            or not 0 <= now - authorization.get("confirmed_at", 0) < 30
             or not now
             < authorization.get("expires_at", 0)
-            <= authorization["confirmed_at"] + 3600
+            <= authorization["confirmed_at"] + 30
         ):
             raise Hold("Fresh claimed bed authorization and approved recipe required")
-        deadline = min(authorization["expires_at"], authorization["claimed_at"] + 120)
+        deadline = min(authorization["expires_at"], authorization["confirmed_at"] + 30)
         return self._start_once(
             job_id, recipe, ledger, deadline, "ebay_order", authorization["ticket_id"]
         )

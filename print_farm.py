@@ -1351,10 +1351,15 @@ class Service:
             }
             reason = hold_reason(row, dummy, stamp(row["created"]))
             proposal = json.loads(saved["decision"]) if saved["decision"] else None
-            finished = proposal and all(s == "completed" for s in self.order_states(store, row, proposal, settings))
+            states = self.order_states(store, row, proposal, settings) if proposal else []
+            finished = proposal and all(s == "completed" for s in states)
+            started = any(s is not None for s in states)
             if reason and not finished:
                 continue  # Completed history stays rateable, but never re-enters dispatch.
-            if proposal and not finished and not self.ebay_poll_failed and not all(
+            # An inventory outage must not replace the file for an order that
+            # already has attempts. Remaining units keep that content identity;
+            # dispatch still verifies the actual bytes and printer readiness.
+            if proposal and not started and not self.ebay_poll_failed and not all(
                 any(
                     c["id"] == r["id"]
                     and c["file_fingerprint"] == r["file_fingerprint"]
@@ -1431,6 +1436,10 @@ class Service:
                         ledger,
                     )
                     view.update(result)
+                    if result.get("status") == "queued" and any(
+                        s in ("dispatching", "submission_uncertain", "printing") for s in states
+                    ):
+                        view.update(status="printing", reason="Print in progress. " + result.get("reason", ""))
                 elif any(
                     s in ("dispatching", "submission_uncertain", "printing")
                     for s in states

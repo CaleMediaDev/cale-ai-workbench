@@ -94,6 +94,24 @@ def clear():
 
 
 class Decisions(unittest.TestCase):
+    def test_transport_rejects_stale_bed_ticket_even_with_recent_claim(self):
+        from print_farm_transport import K1, PRINTERS, Hold
+        with patch.dict(PRINTERS, {"p": ("192.0.2.1", "fixture", "black")}, clear=True):
+            printer = K1("p")
+        jid = "00000000-0000-4000-8000-000000000001"
+        recipe = {"automatic_orders_enabled": True, "file_fingerprint": "f"}
+        ticket = {"job_id": jid, "printer_id": "p", "recipe_fingerprint": "f",
+                  "bed_clear": True, "filament_color": "black", "ticket_id": "a" * 32,
+                  "claimed_at": 100, "confirmed_at": 40, "expires_at": 130}
+        with (patch("print_farm_transport.time.time", return_value=100),
+              patch.object(printer, "_start_once") as start):
+            with self.assertRaises(Hold):
+                printer.start_order(jid, recipe, ticket, Path("unused"))
+            start.assert_not_called()
+            ticket.update(confirmed_at=90, expires_at=120)
+            printer.start_order(jid, recipe, ticket, Path("unused"))
+            start.assert_called_once()
+
     def test_product_identity_cannot_be_invented_from_generic_wall_mount_words(self):
         item = {**row(), "title": "PLA 3D PrintedAr15 Wall Mount - Strong Sturdy Made in the USA"}
         proposal = {"confidence": 0.85, "recipes": [{"name": "Mac_mini_wall_mount.STL_PLA_3h3m28s.gcode"}],
@@ -671,6 +689,44 @@ class Production(unittest.TestCase):
         self.printer["idle"] = True
         self.dispatch()
         self.machine.start_order.assert_called_once()
+
+    def test_started_order_keeps_its_match_when_inventory_is_temporarily_missing(self):
+        self.proposal["reason"] = "Original verified match"
+        self.store.decision(self.key, self.proposal)
+        self.store.reserve(self.store.job_id(self.item, 0), self.key, 0, self.recipe)
+        self.client.orders.return_value = []
+        for state in ("printing", "submission_uncertain", "completed"):
+            with self.subTest(state=state):
+                self.store.outcome(self.store.job_id(self.item, 0), state)
+                with (patch.object(self.service, "account_client", return_value=self.client),
+                      patch.object(self.service, "scan_printers", return_value=[self.printer]),
+                      patch.object(self.service, "reconcile"),
+                      patch.object(self.service, "catalog", return_value=[]),
+                      patch.object(self.service, "propose", side_effect=farm.Hold("Inventory unavailable")) as propose,
+                      patch.object(self.service, "dispatch", return_value={"status": "queued", "reason": "Waiting for an available printer"})):
+                    self.service.cycle(self.store)
+                    view = self.service.snapshot["orders"][0]
+                    self.assertEqual(view["filename"], self.recipe["name"])
+                    self.assertEqual(view["total"], 2)
+                    self.assertEqual(view["completed"], int(state == "completed"))
+                    self.assertEqual(view["status"], "queued" if state == "completed" else "printing")
+                    propose.assert_not_called()
+
+    def test_partly_started_order_stays_printing_while_remaining_unit_waits(self):
+        self.proposal["reason"] = "Verified match"
+        self.store.decision(self.key, self.proposal)
+        self.store.reserve(self.store.job_id(self.item, 0), self.key, 0, self.recipe)
+        self.store.outcome(self.store.job_id(self.item, 0), "printing")
+        self.client.orders.return_value = []
+        with (patch.object(self.service, "account_client", return_value=self.client),
+              patch.object(self.service, "scan_printers", return_value=[self.printer]),
+              patch.object(self.service, "reconcile"),
+              patch.object(self.service, "catalog", return_value=[self.recipe]),
+              patch.object(self.service, "dispatch", return_value={"status": "queued", "reason": "Waiting for clear bed"})):
+            self.service.cycle(self.store)
+        view = self.service.snapshot["orders"][0]
+        self.assertEqual(view["status"], "printing")
+        self.assertIn("Waiting for clear bed", view["reason"])
 
     def test_finished_ebay_printer_waits_for_visible_removal_before_dispatch(self):
         self.printer["unload_required"] = True
