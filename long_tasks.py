@@ -6129,10 +6129,7 @@ def gui():
                     "camera": "camera", "chat": "chat answers",
                 }
                 label = names.get(kind, kind)
-                notice = (
-                    f"I found a repeating problem with {label}: {detail[:180]}. "
-                    "I saved the failure details for diagnosis."
-                )
+                notice = f"I'm having trouble with {label}. I saved the details so we can check it."
                 save_chat("assistant", notice, private=True)
                 show_chat("assistant", notice, speak=False)
         except (OSError, sqlite3.Error):
@@ -6382,12 +6379,11 @@ def gui():
             elif action == "task":
                 setup = read_task_status(STATE / "install-progress.json")
                 waiting = setup_blocks_tasks(setup)
-                pid = add_project("", "", value, waiting_for_setup=waiting)
-                item = next(p for p in projects() if p["id"] == pid)
+                add_project("", "", value, waiting_for_setup=waiting)
                 if waiting:
-                    assistant_reply("I saved your task: " + item["title"] + ". It will start automatically when setup finishes.")
+                    assistant_reply("Got it. I'll pick this up as soon as setup's done.")
                 else:
-                    assistant_reply("I started a task: " + item["title"] + ". I'll show its progress below.")
+                    assistant_reply("I'm on it. You can follow along in My Tasks.")
                 render_cards()
             elif action == "note":
                 selected = chat_assistant.choose_task(raw_value, active)
@@ -6403,7 +6399,7 @@ def gui():
             elif action == "status":
                 assistant_reply(
                     chat_assistant.status_reply(
-                        raw_value, projects()[-5:], lambda task: task_progress(task)[1]
+                        raw_value, projects()[-5:], lambda task: task_progress(task)[0]
                     )
                 )
             else:
@@ -6452,7 +6448,7 @@ def gui():
                 if isinstance(result, dict) and result.get("diagnostic"):
                     report_runtime_issue(result["diagnostic"], result.get("detail", "Unknown error"))
                 elif isinstance(result, dict) and result.get("image"):
-                    assistant_reply("Your image is ready: " + result["image"])
+                    assistant_reply("Your image is ready. I'll open it for you.")
                     try:
                         os.startfile(result["image"])
                     except OSError:
@@ -8075,18 +8071,11 @@ def gui():
             spoken_updates[item["id"]] = current
             if previous is None or previous == current:
                 continue
-            if previous[0] != current[0]:
-                title = item["title"]
-                if current[0] == "ready_for_review":
-                    assistant_reply(f"Finished {title}. Open the task to see what I made.")
-                elif current[0] == "needs_input":
-                    assistant_reply(f"I hit a problem on {title}: {item['detail'][:220]}")
-                elif current[0] == "stopped":
-                    assistant_reply(f"Stopped {title}. Its saved files are still there.")
-                elif current[0] == "working" and previous[0] in (
-                    "queued", "waiting_for_setup", "paused"
-                ):
-                    assistant_reply(f"I'm working on {title} now.")
+            if previous[0] != current[0] and (current[0] in {"ready_for_review", "needs_input", "stopped"}
+                    or current[0] == "working" and previous[0] in {"queued", "waiting_for_setup", "paused"}):
+                assistant_reply(chat_assistant.task_chat_status(item, progress_by_task[item["id"]][0]))
+                last_spoken_at[item["id"]] = now
+                continue  # The chat reply already speaks this update.
             important = item["status"] in (
                 "needs_input",
                 "ready_for_review",
@@ -8095,12 +8084,8 @@ def gui():
             )
             if important or now - last_spoken_at.get(item["id"], 0) > 120:
                 last_spoken_at[item["id"]] = now
-                speak_update(
-                    voice_assistant.progress_line(
-                        item["title"], current[1], next_speech_sequence()
-                    ),
-                    vary=True, required=(item["title"], current[1]),
-                )
+                line = chat_assistant.task_chat_status(item, progress_by_task[item["id"]][0])
+                speak_update(line)
         blocked = [item for item in all_projects if item["status"] == "needs_input"]
         for item in blocked:
             started = stuck_since.setdefault(item["id"], now)

@@ -690,17 +690,21 @@ def test_blank_task_titles_do_not_match_named_followups(blank_title):
 
 def test_status_covers_all_active_tasks_or_one_named_task():
     tasks = [
-        {"id": "a", "title": "Build bakery site"},
-        {"id": "b", "title": "Research suppliers"},
+        {"id": "a", "title": "Build bakery site", "status": "ready_for_review"},
+        {"id": "b", "title": "Research suppliers", "status": "checking",
+         "detail": r"read_file: C:\projects\source-notes.md"},
+        {"id": "c", "title": "Edit index.html", "status": "working"},
     ]
     def progress(task):
-        return "Ready for review" if task["id"] == "a" else "Checking sources"
+        return 100 if task["id"] == "a" else 90
     assert chat_assistant.route("What's the status of Research suppliers?", tasks) == "status"
     all_status = chat_assistant.status_reply("What's the status?", tasks, progress)
-    assert "Build bakery site: Ready for review" in all_status
-    assert "Research suppliers: Checking sources" in all_status
+    assert "Build bakery site: It's ready to check out." in all_status
+    assert "Research suppliers: I'm giving it one last check." in all_status
+    assert "Task 3: I'm on it." in all_status
+    assert all(word not in all_status for word in ("source-notes.md", "read_file", "index.html"))
     one_status = chat_assistant.status_reply("Status of Research suppliers", tasks, progress)
-    assert one_status == "Research suppliers: Checking sources"
+    assert one_status == "I'm giving it one last check."
 
 
 def test_selected_file_paths_are_preserved_as_data_in_task_brief():
