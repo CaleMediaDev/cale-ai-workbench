@@ -4480,6 +4480,63 @@ def test_explicit_retry_of_blocked_native_task_gets_fresh_verification_attempts(
         assert native_agent.read_state(item)["verification_failures"] == 1
 
 
+@pytest.mark.parametrize("action,expected", [
+    ("pause", "paused"), ("stop", "stopped"), ("delete", None), ("note", "working"),
+])
+@pytest.mark.parametrize("passed", [False, True])
+def test_native_check_does_not_publish_results_after_queued_control(tmp_path, action, expected, passed):
+    with patch.object(long_tasks, "STATE", tmp_path / "registry"):
+        task_id = long_tasks.add_project("Page", str(tmp_path / "page"), "Make a page")
+        long_tasks.update(task_id, status="checking")
+        item = long_tasks.projects()[0]
+        state = {"status": "done", "messages": [], "verification_failures": 2}
+        native_agent.save_state(item, state)
+
+        def finish_check(_item):
+            long_tasks.request(task_id, action, "Use the new title." if action == "note" else "")
+            return passed, "Evidence from the old run"
+
+        with patch.object(long_tasks, "verify_project", side_effect=finish_check):
+            long_tasks.advance_project(item)
+        assert long_tasks.projects()[0] == item
+        assert native_agent.read_state(item) == state
+
+        long_tasks.process_requests()
+        current = long_tasks.projects()
+        if expected is None:
+            assert not current
+            assert Path(item["folder"]).is_dir()
+        else:
+            assert current[0]["status"] == expected
+            assert native_agent.read_state(item)["verification_failures"] == (0 if action == "note" else 2)
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Requires Windows Job Objects")
+def test_native_check_interrupts_running_verifier_for_followup(tmp_path):
+    from concurrent.futures import ThreadPoolExecutor
+
+    marker = tmp_path / "verification-started"
+    with patch.object(long_tasks, "STATE", tmp_path / "registry"):
+        task_id = long_tasks.add_project("Page", str(tmp_path / "page"), "Make a page")
+        long_tasks.update(task_id, status="checking")
+        item = long_tasks.projects()[0]
+        script = Path(item["folder"]) / ".local-ai" / "verify.ps1"
+        script.write_text(
+            f'New-Item -ItemType File -Path "{marker}" | Out-Null\nStart-Sleep -Seconds 60\n',
+            encoding="utf-8",
+        )
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            check = pool.submit(long_tasks.verify_project, item, 15)
+            deadline = time.monotonic() + 10
+            while not marker.is_file() and time.monotonic() < deadline and not check.done():
+                time.sleep(0.05)
+            assert marker.is_file(), "Windows verifier did not start"
+            long_tasks.request(task_id, "note", "Verify the new requirements.")
+            passed, evidence = check.result(timeout=5)
+        assert not passed
+        assert "Verification exit code: 125" in evidence
+
+
 def test_ordinary_native_pause_resume_keeps_existing_attempts_and_checks(tmp_path):
     item = {**project(tmp_path / "paused-budget"), "status": "paused"}
     previous = {"status": "paused", "failures": 2, "verification_failures": 2,

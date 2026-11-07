@@ -288,26 +288,30 @@ def database():
 
 
 def update(pid, **values):
-    now = time.time()
     with database() as conn:
         conn.execute("BEGIN IMMEDIATE")
-        if "status" in values:
-            prior = conn.execute(
-                "SELECT status,finished,updated FROM projects WHERE id=?", (pid,)
-            ).fetchone()
-            terminal = {"ready_for_review", "accepted", "stopped"}
-            if values["status"] in terminal:
-                if prior and prior["status"] in terminal:
-                    values["finished"] = prior["finished"] or prior["updated"] or now
-                else:
-                    values["finished"] = now
+        _update_project(conn, pid, values)
+
+
+def _update_project(conn, pid, values):
+    now = time.time()
+    if "status" in values:
+        prior = conn.execute(
+            "SELECT status,finished,updated FROM projects WHERE id=?", (pid,)
+        ).fetchone()
+        terminal = {"ready_for_review", "accepted", "stopped"}
+        if values["status"] in terminal:
+            if prior and prior["status"] in terminal:
+                values["finished"] = prior["finished"] or prior["updated"] or now
             else:
-                values["finished"] = 0
-        values["updated"] = now
-        conn.execute(
-            "UPDATE projects SET " + ",".join(f"{k}=?" for k in values) + " WHERE id=?",
-            [*values.values(), pid],
-        )
+                values["finished"] = now
+        else:
+            values["finished"] = 0
+    values["updated"] = now
+    conn.execute(
+        "UPDATE projects SET " + ",".join(f"{k}=?" for k in values) + " WHERE id=?",
+        [*values.values(), pid],
+    )
 
 
 def projects():
@@ -2250,10 +2254,27 @@ def _verify_saved_browser_project(project, timeout, contract, admit):
     return code == 0, evidence
 
 
+def _native_verification_is_current(conn, project):
+    return conn.execute(
+        """SELECT 1 FROM projects
+           WHERE id=? AND status='checking' AND updated=?
+           AND NOT EXISTS (
+               SELECT 1 FROM requests WHERE project=projects.id AND status='pending'
+               AND action IN ('pause','stop','delete','note','resume')
+           )""",
+        (project["id"], project["updated"]),
+    ).fetchone() is not None
+
+
 def verify_project(p, timeout=1200, *, _saved_browser=None, _host_admit=None):
     """Run project checks in a kill-on-close Windows Job for safe cancellation."""
     if _saved_browser is not None:
         return _verify_saved_browser_project(p, timeout, _saved_browser, _host_admit)
+    native_check = p.get("engine") == "native" and p.get("status") == "checking"
+    if native_check:
+        with database() as conn:
+            if not _native_verification_is_current(conn, p):
+                return False, "Verification superseded by a newer task action."
     folder = Path(p["folder"])
     script = folder / ".local-ai/verify.ps1"
     if not script.is_file() or not script.read_text(encoding="utf-8-sig").strip():
@@ -2323,18 +2344,21 @@ def verify_project(p, timeout=1200, *, _saved_browser=None, _host_admit=None):
             while True:
                 (STATE / "heartbeat.txt").write_text(time.ctime(), encoding="utf-8")
                 with database() as conn:
-                    pause = conn.execute(
-                        "SELECT 1 FROM requests WHERE project=? AND action IN ('pause','stop','delete') AND status='pending' LIMIT 1",
-                        (p["id"],),
-                    ).fetchone()
-                if pause:
+                    interrupted = (
+                        not _native_verification_is_current(conn, p) if native_check
+                        else conn.execute(
+                            "SELECT 1 FROM requests WHERE project=? AND action IN ('pause','stop','delete') AND status='pending' LIMIT 1",
+                            (p["id"],),
+                        ).fetchone()
+                    )
+                if interrupted:
                     win32job.TerminateJobObject(job, 125)
                     process.wait(timeout=15)
                     code = 125
                     break
                 try:
                     code = process.wait(
-                        timeout=min(10, max(0.01, deadline - time.monotonic()))
+                        timeout=min(1 if native_check else 10, max(0.01, deadline - time.monotonic()))
                     )
                     break
                 except subprocess.TimeoutExpired:
@@ -3320,27 +3344,31 @@ def advance_project(p):
             return
         if p["status"] == "checking":
             passed, evidence = verify_project(p)
-            if passed:
+            checked = fingerprint(Path(p["folder"])) if passed else ""
+            with database() as conn:
+                # Serialize publication with the UI's request insert. A queued
+                # action takes precedence over success and over retry accounting.
+                conn.execute("BEGIN IMMEDIATE")
+                if not _native_verification_is_current(conn, p):
+                    return
                 worker = native_agent.read_state(p)
-                if worker.get("verification_failures"):
-                    worker["verification_failures"] = 0
-                    native_agent.save_state(p, worker)
-                update(p["id"], status="ready_for_review", detail=evidence,
-                       fingerprint=fingerprint(Path(p["folder"])))
-            else:
-                worker = native_agent.read_state(p)
-                failures = int(worker.get("verification_failures", 0)) + 1
-                worker["verification_failures"] = failures
-                if failures < 3:
+                failures = 0 if passed else int(worker.get("verification_failures", 0)) + 1
+                if passed:
+                    if worker.get("verification_failures"):
+                        worker["verification_failures"] = 0
+                        native_agent.save_state(p, worker)
+                    values = dict(status="ready_for_review", detail=evidence, fingerprint=checked)
+                elif failures < 3:
+                    worker["verification_failures"] = failures
                     worker["status"] = "continue"
                     worker.setdefault("messages", []).append({
                         "role": "user", "content": "Independent verification failed. Fix the work and rerun checks: " + evidence[:3000],
                     })
                     native_agent.save_state(p, worker)
-                    update(p["id"], status="working", detail="Fixing failed checks: " + evidence[:300])
+                    values = dict(status="working", detail="Fixing failed checks: " + evidence[:300])
                 else:
-                    update(p["id"], status="needs_input",
-                           detail="Three verification attempts failed. " + evidence[:500])
+                    values = dict(status="needs_input", detail="Three verification attempts failed. " + evidence[:500])
+                _update_project(conn, p["id"], values)
             return
         change = native_agent.advance(p)
         if change:
