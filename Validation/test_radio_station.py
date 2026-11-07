@@ -1513,3 +1513,104 @@ def test_music_page_song_picker_and_dj_controls_share_service(tmp_path):
         assert ("dj_control",0,"speed",1.1) in service.calls
         assert all(str(w.cget("state"))=="normal" for w in controls.dj_widgets[0])
     finally:window.destroy()
+
+
+class ManualDeck(Deck):
+    def seek(self, seconds):
+        self.offset, self.started = seconds, self.now()
+
+    def start(self):
+        self.start_gain = self.volume
+        super().start()
+
+
+def test_four_decks_mix_independently_and_keep_paused_decks_paused(tmp_path):
+    moment = [0.]
+    player = radio.Player(lambda: ManualDeck(lambda: moment[0]), lambda: moment[0])
+    for channel in range(4):
+        path = tmp_path/f"deck-{channel}.wav"
+        path.touch()
+        player.load_deck(channel, path)
+        player.dj_control(channel, "assign", (-1, 1, 0, 0)[channel])
+    for channel in (0, 1, 2):
+        player.toggle_deck(channel)
+    player.set_crossfade(0)
+    assert [deck.volume for deck in player.loaded_decks()] == [65, 0, 65, 65]
+    player.set_crossfade(1)
+    assert [deck.volume for deck in player.loaded_decks()] == pytest.approx([0, 65, 65, 65])
+    player.dj_control(2, "mute")
+    player.set_deck_volume(1, 50)
+    assert player.studio_decks[2].volume == 0 and player.studio_decks[1].volume == 32.5
+    player.pause()
+    assert player.studio_paused == {0, 1, 2, 3}
+    player.resume()
+    assert player.studio_paused == {3}
+
+    song = tmp_path/"finished.wav"
+    song.touch()
+    incoming = player.mix_studio_song(song, 4)
+    assert incoming == 3 and player.studio_decks[3].start_gain == 0
+    moment[0] = 2
+    player.advance_mix()
+    assert player.studio_decks[3].volume > 0 and player.studio_decks[1].volume > 0
+    player.pause()
+    levels = player.deck_levels.copy()
+    moment[0] = 9
+    player.advance_mix()
+    assert player.deck_levels == levels
+    player.resume()
+    moment[0] = 11
+    player.advance_mix()
+    assert not player.mixing and 1 in player.studio_paused and player.studio_decks[3].volume == 65
+    player.stop()
+    assert not player.loaded_decks()[0].opened and not player.studio_decks
+
+
+def test_performance_pads_recall_playheads_and_roll_returns_to_unlooped_time(tmp_path):
+    moment = [0.]
+    player = radio.Player(lambda: ManualDeck(lambda: moment[0]), lambda: moment[0])
+    path = tmp_path/"cues.wav"
+    path.touch()
+    player.load_deck(2, path)
+    player.dj_control(2, "seek", 5)
+    player.dj_control(2, "cue_set")
+    player.dj_control(2, "hotcue", {"slot": 3})
+    player.dj_control(2, "beat_jump", 4)
+    assert player.deck_clock(player.studio_decks[2])[0] == 7
+    player.dj_control(2, "hotcue", {"slot": 3})
+    deck = player.studio_decks[2]
+    assert deck.clock()[0] == 5 and deck.running and not deck.paused
+    player.dj_control(2, "roll_on", 1)
+    moment[0] = .6
+    player.advance_mix()
+    assert deck.clock()[0] == 5
+    moment[0] = .8
+    player.dj_control(2, "roll_off")
+    assert deck.clock()[0] == pytest.approx(5.8) and 2 not in player.loops
+    player.dj_control(2, "loop_in")
+    moment[0] = 1.8
+    player.dj_control(2, "loop_out")
+    assert player.loops[2][1:] == pytest.approx((5.8, 6.8))
+    player.dj_control(2, "cue")
+    assert deck.paused and deck.clock()[0] == 5
+    player.dj_control(2, "hotcue", {"slot": 3, "clear": True})
+    assert player.hot_cues[2][3] is None
+    player.dj_control(2, "eject")
+    assert not deck.opened and 2 not in player.studio_decks
+
+
+def test_sampler_voices_follow_their_channel_and_are_released(tmp_path):
+    moment = [0.]
+    player = radio.Player(lambda: ManualDeck(lambda: moment[0]), lambda: moment[0])
+    path = radio.sampler_sound(tmp_path, 1)
+    assert max(radio.waveform_peaks(path)) > .1
+    player.play_sample(2, 1, path)
+    voice = player.samples[2, 1]
+    assert voice.running and voice.start_gain == 52
+    player.dj_control(2, "mute")
+    assert voice.volume == 0
+    player.play_sample(2, 1, path)
+    assert not voice.opened and len(player.samples) == 1
+    moment[0] = 181
+    player.advance_mix()
+    assert not player.samples

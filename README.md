@@ -10,6 +10,8 @@ Created by [Cale Media](https://calemedia.com).
 2. Click **Install** and watch the progress bar. Accounts are optional; you can connect them while models download.
 3. Click **Open Cale AI** and describe what you want in chat.
 
+Release 0.5.567 gives Music two jog wheels and four independent decks. Load a local audio file or a finished Cale song, then mix with channel EQ, filters, tone FX and A/B faders. Use the RGB pads for hot cues, loops, temporary rolls or local samples. **Auto DJ** switches back to radio. Tempo and beat markers are estimates; you can halve or double the detected BPM.
+
 Release 0.5.566 checks a worker's script, task ID and exact process start time before waiting on it or stopping it. Recovery waits when Windows cannot confirm the process identity.
 
 Release 0.5.565 gives a blocked task fresh retry attempts when you resume it or give it new instructions. It retains the work and conversation, clears the old error, and reruns verification.
