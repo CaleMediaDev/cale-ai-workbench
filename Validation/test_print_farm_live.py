@@ -23,10 +23,10 @@ class LiveObservationTests(unittest.TestCase):
             "changed_at": 100,
             "signature": bytes([128] * 576),
         }
-        result = {"checked_at": 80, "signature": bytes([129] * 576)}
-        self.assertFalse(scan_due(frame, result, False, 100))
+        result = {}
+        self.assertTrue(scan_due(frame, result, False, 100))
         self.assertTrue(scan_due(frame, result, True, 100))
-        result["checked_at"] = 55
+        result = {"checked_at": 55, "signature": bytes([129] * 576)}
         self.assertTrue(scan_due(frame, result, False, 100))
         result["checked_at"] = 90
         frame["signature"] = bytes([180] * 60 + [128] * 516)

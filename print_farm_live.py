@@ -91,7 +91,7 @@ def scan_due(frame, result, busy, now):
         or now - frame.get("changed_at", 0) >= 15
     ):
         return False
-    if not result:
+    if not result or not result.get("checked_at", 0):
         return True
     elapsed = now - result.get("checked_at", 0)
     if result.get("state") == "unavailable":
