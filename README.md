@@ -10,6 +10,8 @@ Created by [Cale Media](https://calemedia.com).
 2. Click **Install** and watch the progress bar. Accounts are optional; you can connect them while models download.
 3. Click **Open Cale AI** and describe what you want in chat.
 
+Release 0.5.563 sends Music controls directly to the playback worker when you click them. Volume, pause and mixer adjustments can take effect between the radio's status checks.
+
 Release 0.5.562 keeps playback controls and fades responsive while Music prepares waveforms for newly loaded songs. The waveforms still show peaks measured from the original audio.
 
 Release 0.5.561 reduces redraws in Music and on the task dashboard. Music playback continues when you switch pages. Model activity loads in the background, and its chart uses the loaded data when you resize it. The native agent can also recognize an exact saved file after an interrupted edit and continue from it.

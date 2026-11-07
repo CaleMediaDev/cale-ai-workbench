@@ -493,6 +493,7 @@ class Service:
         self.local_tokens = self.radio_tokens = None
         self.tracks_made = 0
         self.commands = queue.SimpleQueue()
+        self.command_ready = threading.Event()
         self.auto_blend = True
         self.waveforms = {}
         self.waveform_pending = False
@@ -526,9 +527,13 @@ class Service:
                 self.dj_setup={"status":"error","percent":0,"message":str(exc)}
         self.dj_thread=threading.Thread(target=setup,daemon=True);self.dj_thread.start()
 
-    def dj_control(self,channel,action,value=None):self.commands.put(("dj_control",(channel,action,value)))
+    def enqueue(self, action, value=None):
+        self.commands.put((action, value))
+        self.command_ready.set()
 
-    def play_song(self,job_id):self.commands.put(("play_song",job_id))
+    def dj_control(self,channel,action,value=None):self.enqueue("dj_control",(channel,action,value))
+
+    def play_song(self,job_id):self.enqueue("play_song",job_id)
 
     def _song_library(self):
         return completed_songs(self.root)
@@ -566,11 +571,11 @@ class Service:
 
     def choose(self, identity):
         # Resolve the selected row on the radio thread, not the Tk thread.
-        self.commands.put(("choose_id", identity))
+        self.enqueue("choose_id", identity)
 
     def station_prompt(self, name, prompt, instrumental=True, station_id=None):
         values = _station_record(name, prompt, instrumental, station_id)
-        self.commands.put(("station_prompt", values))
+        self.enqueue("station_prompt", values)
         return values[0]
 
     def _choose(self, station):
@@ -591,7 +596,7 @@ class Service:
                 self.message = "Tuning in · preparing your first track…"
 
     def toggle(self):
-        self.commands.put(("toggle", None))
+        self.enqueue("toggle")
 
     def _toggle(self):
         with self.lock:
@@ -607,7 +612,7 @@ class Service:
             self.paused = paused
 
     def stop(self):
-        self.commands.put(("stop", None))
+        self.enqueue("stop")
 
     def _stop(self):
         with self.lock:
@@ -624,21 +629,21 @@ class Service:
                 self.message = "Radio stopped. Your stations are saved; the current render can finish in cache."
 
     def skip(self):
-        self.commands.put(("skip", None))
+        self.enqueue("skip")
 
     def volume(self, value):
-        self.commands.put(("volume", max(0, min(100, int(float(value))))))
+        self.enqueue("volume", max(0, min(100, int(float(value)))))
 
     def crossfade(self, value):
-        self.commands.put(("crossfade", max(0, min(1, float(value)))))
+        self.enqueue("crossfade", max(0, min(1, float(value))))
 
     def auto_mix(self, enabled):
-        self.commands.put(("auto_mix", bool(enabled)))
+        self.enqueue("auto_mix", bool(enabled))
 
     def deck_volume(self, channel, value):
         if channel not in (0, 1):
             raise ValueError("Choose deck A or B.")
-        self.commands.put(("deck_volume", (channel, max(0, min(100, float(value))))))
+        self.enqueue("deck_volume", (channel, max(0, min(100, float(value)))))
 
     def snapshot(self):
         return dict(self.view)
@@ -944,6 +949,11 @@ class Service:
         next_tick = 0
         while not self.closed.is_set():
             try:
+                # Clear before draining so a command arriving during the drain
+                # or a playback tick also wakes the next wait.
+                self.command_ready.clear()
+                with self.lock:
+                    self._commands()
                 if time.monotonic() >= next_tick:
                     self.tick()
                     next_tick = time.monotonic()+0.5
@@ -960,11 +970,12 @@ class Service:
                     # Publishing uses the same database that may have failed
                     # above. Leave the last snapshot intact and retry next tick.
                     pass
-            self.closed.wait(0.05 if getattr(self.player, "mixing", False) else 0.15)
+            self.command_ready.wait(0.05 if getattr(self.player, "mixing", False) else 0.15)
         self.player.stop()
 
     def close(self):
         self.closed.set()
+        self.command_ready.set()
 
 
 def waveform_peaks(path, bins=384):

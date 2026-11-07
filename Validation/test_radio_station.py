@@ -937,7 +937,7 @@ def test_worker_processes_stop_before_a_failing_crossfade(tmp_path):
     # End after one worker iteration; final shutdown alone must not count as
     # handling the queued Stop command and updating the service state.
     with patch.object(player.active, "set_volume", side_effect=RuntimeError("Cannot set volume")), \
-            patch.object(service.closed, "wait", side_effect=lambda timeout: service.closed.set()), \
+            patch.object(service.command_ready, "wait", side_effect=lambda timeout: service.closed.set()), \
             patch.object(radio.time, "monotonic", return_value=100):
         service._loop()
 
@@ -945,6 +945,39 @@ def test_worker_processes_stop_before_a_failing_crossfade(tmp_path):
     assert service.commands.empty()
     assert service.snapshot()["message"].startswith("Radio stopped.")
     assert not player.mixing and not player.busy()
+
+
+def test_controls_wake_playback_worker_between_radio_status_checks(tmp_path):
+    import threading
+
+    player = Player()
+    service = radio.Service(tmp_path, player)
+    sleeping, changed = threading.Event(), threading.Event()
+    wait = service.command_ready.wait
+
+    def await_command(timeout):
+        sleeping.set()
+        return wait(timeout)
+
+    def set_volume(value):
+        player.volume = value
+        changed.set()
+
+    with patch.object(service, "tick") as tick, \
+            patch.object(service.command_ready, "wait", side_effect=await_command), \
+            patch.object(player, "set_volume", side_effect=set_volume), \
+            patch.object(radio.time, "monotonic", return_value=100):
+        service.start()
+        try:
+            assert sleeping.wait(2)
+            service.volume(42)
+            assert changed.wait(2)
+            assert player.volume == 42
+            assert tick.call_count == 1
+        finally:
+            service.close()
+            service.thread.join(2)
+        assert not service.thread.is_alive()
 
 
 def test_worker_survives_failure_to_publish_its_retry_status(tmp_path):
@@ -960,7 +993,7 @@ def test_worker_survives_failure_to_publish_its_retry_status(tmp_path):
 
     with patch.object(service, "tick", side_effect=[sqlite3.OperationalError("database is locked"), None]) as tick, \
             patch.object(service, "_publish", side_effect=sqlite3.OperationalError("database is locked")) as publish, \
-            patch.object(service.closed, "wait", side_effect=wait), \
+            patch.object(service.command_ready, "wait", side_effect=wait), \
             patch.object(radio.time, "monotonic", side_effect=range(0, 100, 10)):
         service._loop()
 
