@@ -87,6 +87,9 @@ def valid_clear(result):
     )
 
 
+AI_LOCK = threading.RLock()
+
+
 def local_ai(prompt, images=(), model="cale-vision:latest"):
     message = {"role": "user", "content": prompt}
     if images:
@@ -110,8 +113,9 @@ def local_ai(prompt, images=(), model="cale-vision:latest"):
         data=json.dumps(body).encode(),
         headers={"Content-Type": "application/json"},
     )
-    with urllib.request.urlopen(request, timeout=90) as response:
-        data = json.loads(response.read(2_000_000))
+    with AI_LOCK:
+        with urllib.request.urlopen(request, timeout=90) as response:
+            data = json.loads(response.read(2_000_000))
     result = json.loads(data["message"]["content"])
     if not isinstance(result, dict):
         raise ValueError("AI returned an invalid decision")

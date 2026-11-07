@@ -17,3 +17,9 @@ Private settings, cached G-code, credentials and queue databases live in `PrintF
 ## Validation
 
 Run `python -m unittest -q Validation.test_print_farm Validation.test_long_tasks`. Tests cover the confidence boundary, single OK action, fresh unobstructed-bed gating, cancellation, account changes and pause during inference, durable reservation, duplicate prevention, and uncertain submissions.
+
+## Live cameras
+
+The Print Farm page shows continuous camera video at four frames per second when an optional RTSP or HTTP video URL is configured, and otherwise polls the JPEG snapshot URL. While the page is visible, a separate read-only AI observer scans available cameras in turn, including busy printers. It shows the observation, confidence and age. Enable **AI overlay** to see detected object boxes on the exact inspected frame, or choose **Enlarge** for a bigger view. Preview images continue refreshing while inference runs; inference is serialized with dispatch AI to avoid concurrent model calls. Frozen or unavailable feeds are visibly held. These single-frame observations do not supply bed-clear tickets or authorize motion; dispatch still requires its own fresh two-frame check.
+
+Video decoders use the existing bundled FFmpeg and stop when the page closes or is hidden. The local relay protocol is documented in the [go2rtc API documentation](https://github.com/AlexxIT/go2rtc/blob/master/pkg/README.md). Detection boxes are approximate model observations and are drawn only on the inspected frame.

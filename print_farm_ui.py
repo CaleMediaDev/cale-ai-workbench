@@ -9,20 +9,34 @@ import threading
 import time
 import tkinter as tk
 from tkinter import messagebox, ttk
+from urllib.parse import urlsplit
 
 from print_farm import Service, digest
+from print_farm_live import CameraTile, LiveCameras
 
 
 class Controls:
     def __init__(self, parent, window, root, service=None):
         self.parent, self.window = parent, window
         self.service = service or Service(root)
+        self.live = LiveCameras(self.service.settings)
+        self.camera_tiles = {}
         self.events = queue.Queue()
         self.busy = False
         self.last_render = ""
         style = ttk.Style(window)
-        style.configure("PrintFarm.TLabelframe", background="#0b1016", bordercolor="#29364a", relief="solid")
-        style.configure("PrintFarm.TLabelframe.Label", background="#0b1016", foreground="#aebccc", font=("Segoe UI", 10, "bold"))
+        style.configure(
+            "PrintFarm.TLabelframe",
+            background="#0b1016",
+            bordercolor="#29364a",
+            relief="solid",
+        )
+        style.configure(
+            "PrintFarm.TLabelframe.Label",
+            background="#0b1016",
+            foreground="#aebccc",
+            font=("Segoe UI", 10, "bold"),
+        )
         self.frame = ttk.Frame(parent, padding=(8, 8, 8, 0))
         self.frame.pack(fill="both", expand=True)
         heading = ttk.Frame(self.frame)
@@ -64,6 +78,11 @@ class Controls:
         ttk.Button(top, text="Refresh files", command=self.refresh_files).pack(
             side="right", padx=8
         )
+        ttk.Label(
+            self.frame,
+            text="LIVE CAMERAS · Live video when available; snapshots otherwise. Local AI scans cameras in turn. AI overlay shows the inspected frame.",
+            style="Muted.TLabel",
+        ).pack(anchor="w", pady=(8, 0))
         self.printers_frame = ttk.Frame(self.frame)
         self.printers_frame.pack(fill="x", pady=(8, 14))
         ttk.Label(
@@ -96,6 +115,7 @@ class Controls:
 
     def on_destroy(self, event):
         if event.widget is self.parent:
+            self.live.stop()
             self.service.stop()
 
     def toggle_printing(self):
@@ -169,7 +189,7 @@ class Controls:
     def add_printer(self, existing=None):
         dialog = tk.Toplevel(self.window)
         dialog.title("Print Farm · Printer")
-        dialog.geometry("620x450")
+        dialog.geometry("620x520")
         panel = ttk.Frame(dialog, padding=24)
         panel.pack(fill="both", expand=True)
         ttk.Label(panel, text="Connect a printer", font=("Segoe UI", 19, "bold")).pack(
@@ -186,6 +206,7 @@ class Controls:
             ("hostname", "Printer hostname (as shown on the printer)"),
             ("color", "Loaded PLA color: black or white"),
             ("camera_url", "Live camera JPEG snapshot URL"),
+            ("camera_stream_url", "Video stream URL (optional, RTSP or HTTP)"),
         ]:
             ttk.Label(panel, text=label).pack(anchor="w", pady=(6, 2))
             values[field] = tk.StringVar(value=(existing or {}).get(field, ""))
@@ -209,6 +230,17 @@ class Controls:
                     raise ValueError(
                         "Enter the live JPEG snapshot URL for the bed camera."
                     )
+                if printer["camera_stream_url"]:
+                    video = urlsplit(printer["camera_stream_url"])
+                    if (
+                        video.scheme not in ("rtsp", "http", "https")
+                        or not video.hostname
+                        or video.username
+                        or video.password
+                    ):
+                        raise ValueError(
+                            "Use an RTSP or HTTP video URL without embedded credentials."
+                        )
             except ValueError as exc:
                 result.set(str(exc))
                 return
@@ -231,6 +263,12 @@ class Controls:
         ttk.Button(panel, text="Save printer", command=save).pack(anchor="e")
 
     def render(self, snapshot):
+        modes = {
+            pid: tile.overlay.get()
+            for pid, tile in self.camera_tiles.items()
+            if tile.winfo_exists()
+        }
+        self.camera_tiles = {}
         for frame in (self.printers_frame, self.orders_frame):
             for child in frame.winfo_children():
                 child.destroy()
@@ -260,13 +298,15 @@ class Controls:
                 text=printer.get("detail", "Checking…"),
                 font=("Segoe UI", 11, "bold"),
             ).pack(anchor="w")
+            tile = CameraTile(card, self.live, printer["id"])
+            tile.pack(fill="x", pady=(8, 4))
+            tile.overlay.set(modes.get(printer["id"], False))
+            self.camera_tiles[printer["id"]] = tile
             bed = printer.get("bed", {})
             ttk.Label(
-                card, text="Bed: " + bed.get("state", "unchecked").replace("_", " ")
+                card,
+                text="Start check: " + bed.get("state", "unchecked").replace("_", " "),
             ).pack(anchor="w", pady=(4, 0))
-            ttk.Label(
-                card, text=bed.get("reason", ""), wraplength=230, style="Muted.TLabel"
-            ).pack(anchor="w")
             ttk.Button(
                 card, text="Settings", command=lambda p=printer: self.add_printer(p)
             ).pack(anchor="w", pady=(8, 0))
@@ -353,6 +393,9 @@ class Controls:
         except queue.Empty:
             pass
         snapshot = self.service.snapshot
+        self.live.update(
+            snapshot.get("printers", []), bool(self.parent.winfo_ismapped())
+        )
         self.toggle.configure(
             text="Pause automatic printing"
             if self.service.settings().get("enabled")
