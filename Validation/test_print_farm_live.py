@@ -379,6 +379,30 @@ class LiveObservationTests(unittest.TestCase):
         self.assertEqual(frame["changed_at"], 116)
         self.assertFalse(result)
 
+    def test_duplicate_frame_reuses_preview_without_hiding_a_new_scene(self):
+        live = LiveCameras(lambda: {})
+        source = ("", "http://camera")
+        live.sources["p"] = source
+        old, new = picture("red"), picture("blue")
+        with (patch("print_farm_live.time.time", return_value=100) as clock,
+              patch("print_farm_live.Image.open", wraps=Image.open) as decode):
+            live.accept_frame("p", source, source[1], old)
+            initial = live.snapshot("p")[0]
+            clock.return_value = 100.25
+            live.accept_frame("p", source, source[1], old)
+            frame = live.snapshot("p")[0]
+            self.assertIs(frame["preview"], initial["preview"])
+            self.assertEqual(frame["at"], 100.25)
+            self.assertEqual(frame["changed_at"], 100)
+            decode.assert_called_once()
+
+            clock.return_value = 100.5
+            live.accept_frame("p", source, source[1], new)
+            frame = live.snapshot("p")[0]
+            self.assertNotEqual(frame["signature"], initial["signature"])
+            self.assertEqual(frame["changed_at"], 100.5)
+            self.assertEqual(decode.call_count, 2)
+
     def test_failed_camera_drops_old_live_frame(self):
         finished = threading.Event()
 

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import io
 import math
 import subprocess
@@ -272,40 +271,35 @@ class LiveCameras:
                     self.processes.pop(pid, None)
 
     def accept_frame(self, pid, source, url, raw):
-        with self.lock:
-            feed = self.frames.get(pid, {}).get("feed")
         now = time.time()
-        fingerprint = hashlib.sha256(raw).hexdigest()
+        with self.lock:
+            if self.sources.get(pid) is not source:
+                return
+            previous = self.frames.get(pid, {})
+            feed = previous.get("feed")
+            if previous.get("url") == url and previous.get("bytes") == raw:
+                # A new delivery of the same image is still a frozen scene.
+                previous["at"] = now
+                previous.pop("awaiting_frame", None)
+                return
         with Image.open(io.BytesIO(raw)) as image:
             preview = image.convert("RGB")
             preview.thumbnail((640, 360))
+        signature = preview.convert("L").resize((32, 18)).tobytes()
         with self.lock:
             previous = self.frames.get(pid, {})
             if self.sources.get(pid) is not source or previous.get("feed") is not feed:
                 return
-            resumed = (
-                previous.get("hash") != fingerprint
-                and now - previous.get("changed_at", now) >= LIVE_FEED_MAX_AGE
-            )
+            resumed = now - previous.get("changed_at", now) >= LIVE_FEED_MAX_AGE
             if previous.get("url") != url or resumed:
                 self.results.pop(pid, None)
                 previous = {}
-            changed = (
-                now
-                if previous.get("hash") != fingerprint
-                else previous.get("changed_at", now)
-            )
-            signature, signature_at = previous.get("signature"), previous.get("signature_at", 0)
-            if not signature or now - signature_at >= 1:
-                signature, signature_at = preview.convert("L").resize((32, 18)).tobytes(), now
             self.frames[pid] = {
                 "bytes": raw,
                 "preview": preview,
                 "signature": signature,
-                "signature_at": signature_at,
                 "at": now,
-                "changed_at": changed,
-                "hash": fingerprint,
+                "changed_at": now,
                 "url": url,
                 "feed": previous.get("feed") or object(),
             }
