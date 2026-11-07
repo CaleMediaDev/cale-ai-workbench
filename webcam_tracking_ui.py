@@ -10,7 +10,7 @@ from tkinter import simpledialog, ttk
 
 from PIL import Image, ImageTk
 
-from webcam_tracking import read_json, write_json
+from webcam_tracking import read_json, valid_region, write_json
 
 
 class TrackingView:
@@ -25,6 +25,8 @@ class TrackingView:
         self.decoded = None
         self.decoded_id = None
         self.image_item = None
+        self.area_mode = False
+        self.region_start = None
         self.notice_until = 0
         self.config = self.root/"Media/webcam-tracking.json"
         self.was_enabled = read_json(self.config).get("enabled") is True
@@ -54,6 +56,7 @@ class TrackingView:
     def clear(self):
         self.result, self.selected, self.photo = None, None, None
         self.decoded, self.decoded_id, self.image_item = None, None, None
+        self.area_mode, self.region_start = False, None
         if self.dialog and self.dialog.winfo_exists():
             self.canvas.delete("all")
             self.status.set("Waiting for a fresh camera frame…")
@@ -73,15 +76,22 @@ class TrackingView:
         body = ttk.Frame(dialog, padding=16)
         body.pack(fill="both", expand=True)
         ttk.Label(body, text="Webcam AI", font=("Segoe UI", 22, "bold")).pack(anchor="w")
-        ttk.Label(body, text="Live people & objects · Local processing · Click a box to teach its name").pack(anchor="w", pady=(4, 10))
+        ttk.Label(body, text="Live people & objects · Click a box, or Select area for a missed object").pack(anchor="w", pady=(4, 10))
         self.canvas = tk.Canvas(body, background="#101923", highlightthickness=0, height=540)
         self.canvas.pack(fill="both", expand=True)
-        self.canvas.bind("<Button-1>", self.select)
+        self.canvas.bind("<Button-1>", self.press)
+        self.canvas.bind("<B1-Motion>", self.drag_area)
+        self.canvas.bind("<ButtonRelease-1>", self.finish_area)
         self.canvas.bind("<Configure>", lambda _: self.draw())
         self.status = tk.StringVar(value="Preparing local people and object detection…")
         ttk.Label(body, textvariable=self.status, wraplength=1020).pack(anchor="w", pady=(8, 4))
         self.people = tk.StringVar(value="Known people: loading…")
         ttk.Label(body, textvariable=self.people).pack(anchor="w", pady=(0, 8))
+        scan_actions = ttk.Frame(body)
+        scan_actions.pack(fill="x", pady=(0, 6))
+        ttk.Button(scan_actions, text="Select area", command=self.begin_area).pack(side="left", padx=(0, 8))
+        ttk.Button(scan_actions, text="Look closer", command=self.focus_area).pack(side="left", padx=(0, 8))
+        ttk.Button(scan_actions, text="Scan whole view", command=self.whole_view).pack(side="left", padx=(0, 8))
         actions = ttk.Frame(body)
         actions.pack(fill="x")
         for name in config.get("quick_names", [])[:4]:
@@ -155,12 +165,19 @@ class TrackingView:
             else:
                 self.canvas.coords(self.image_item, ox, oy)
                 self.canvas.itemconfigure(self.image_item, image=self.photo)
+            focus = self.result.get("focus_box")
+            if valid_region(focus):
+                x, y, w, h = focus
+                self.canvas.create_rectangle(ox+x*width, oy+y*height, ox+(x+w)*width, oy+(y+h)*height,
+                                             outline="#ffe27b", dash=(6, 4), width=2, tags="overlay")
+                self.canvas.create_text(ox+x*width+4, oy+y*height+4, text="CLOSE SCAN", anchor="nw",
+                                        fill="#ffe27b", font=("Segoe UI", 10, "bold"), tags="overlay")
             for item in self.result.get("items", []):
                 x, y, w, h = item["box"]
                 color = "#ffe27b" if self.selected == item["id"] else "#55e1b4" if item.get("remembered") else "#75c9ff"
                 x1, y1, x2, y2 = ox+x*width, oy+y*height, ox+(x+w)*width, oy+(y+h)*height
                 self.canvas.create_rectangle(x1, y1, x2, y2, outline=color, width=3, tags="overlay")
-                label = item["label"] + (" · face" if item["kind"] == "face" else f" #{item['id']}")
+                label = item["label"] + (" · face" if item["kind"] == "face" else "" if item["id"] == "selected-area" else f" #{item['id']}")
                 text = self.canvas.create_text(x1+4, max(oy+2, y1-22), text=label, fill="#071018", anchor="nw", font=("Segoe UI", 11, "bold"), tags="overlay")
                 box = self.canvas.bbox(text)
                 rect = self.canvas.create_rectangle(box[0]-3, box[1]-1, box[2]+3, box[3]+1, fill=color, outline="", tags="overlay")
@@ -183,14 +200,76 @@ class TrackingView:
 
     def resume(self):
         self.selected = None
+        self.area_mode, self.region_start = False, None
         self.notice_until = 0
+
+    def begin_area(self):
+        if not self.result:
+            self.notice("Wait for a camera frame first.")
+            return
+        self.area_mode, self.selected = True, "drawing-area"
+        self.notice("Drag a tight rectangle around the object, then choose Look closer or Name selected.")
+
+    def point(self, event):
+        ox, oy, width, height = self.origin
+        return max(0., min(1., (event.x-ox)/width)), max(0., min(1., (event.y-oy)/height))
+
+    def press(self, event):
+        if self.area_mode and self.result and hasattr(self, "origin"):
+            self.region_start = self.point(event)
+        else:
+            self.select(event)
+
+    def drag_area(self, event):
+        if self.area_mode and self.region_start:
+            x, y = self.region_start
+            ex, ey = self.point(event)
+            ox, oy, width, height = self.origin
+            self.canvas.delete("area-drag")
+            self.canvas.create_rectangle(ox+x*width, oy+y*height, ox+ex*width, oy+ey*height,
+                                         outline="#ffe27b", width=3, tags="area-drag")
+
+    def finish_area(self, event):
+        if not self.area_mode or not self.region_start:
+            return
+        x, y = self.region_start
+        ex, ey = self.point(event)
+        box = [min(x, ex), min(y, ey), abs(ex-x), abs(ey-y)]
+        self.canvas.delete("area-drag")
+        self.region_start = None
+        if not valid_region(box):
+            self.notice("Draw a slightly larger rectangle around the object.")
+            return
+        self.result["items"] = [item for item in self.result["items"] if item["id"] != "selected-area"]
+        self.result["items"].append({"id": "selected-area", "kind": "object", "class": "manual", "label": "Selected area", "box": box})
+        self.area_mode, self.selected = False, "selected-area"
+        self.notice("Area selected. Look closer runs detection here at a larger scale.")
+        self.draw()
+
+    def focus_area(self):
+        item = next((item for item in (self.result or {}).get("items", []) if item["id"] == self.selected), None)
+        if not item or not valid_region(item.get("box")):
+            self.notice("Use Select area and drag around the object first.")
+            return
+        write_json(self.config, {**read_json(self.config), "focus_box": item["box"]})
+        self.resume()
+        self.notice("Looking closer in the selected area. Keep the object there, or choose Scan whole view.")
+
+    def whole_view(self):
+        config = read_json(self.config)
+        config.pop("focus_box", None)
+        write_json(self.config, config)
+        self.resume()
+        self.notice("Scanning the whole view, with an extra close scan for objects held near a person.")
 
     def submit(self, item, name):
         if not self.result or time.time()-self.result.get("at", 0) > 18:
             self.notice("That view expired. Resume live and select again.")
             return
-        write_json(self.root/"Media/webcam-learn-request.json", {
-            "frame_id": self.result["frame_id"], "id": item["id"], "name": name})
+        request = {"frame_id": self.result["frame_id"], "id": item["id"], "name": name}
+        if item["id"] == "selected-area":
+            request.update(box=item["box"], category=item.get("category", ""))
+        write_json(self.root/"Media/webcam-learn-request.json", request)
         self.selected = None
         self.notice("Learning " + name + "…")
 
@@ -212,6 +291,11 @@ class TrackingView:
         if chosen is None or chosen.get("class") == "person":
             self.notice("Click a face box or a specific object box first.")
             return
+        if chosen["id"] == "selected-area":
+            category = simpledialog.askstring("Object type", "What type of object is in this area? For example: spoon, cup, book.", parent=self.dialog)
+            if not category:
+                return
+            chosen["category"] = category.strip().lower()
         name = simpledialog.askstring("Teach a name", "Name for this " + ("person" if chosen["kind"] == "face" else "object") + ":", parent=self.dialog)
         if name and name.strip():
             self.submit(chosen, name.strip()[:60])

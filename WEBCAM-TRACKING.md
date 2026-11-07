@@ -42,6 +42,18 @@ Face detection stays bounded to 960 pixels wide, while face alignment uses the
 original camera pixels. Teaching another face angle keeps up to eight recent
 examples, so earlier angles are not all discarded.
 
+For small handheld objects, the detector makes one additional close pass around
+the largest visible person and merges duplicate boxes. If an object is still
+missed, choose **Select area**, drag a tight rectangle around it, then **Look
+closer**. Object detection now scans that area at a larger scale; **Scan whole
+view** restores the full scene. Face recognition continues across the full view.
+
+An undetected area can also use **Name selected**: enter a supported object type
+(such as spoon) and a name. This learns visual descriptors from the exact selected
+frame; it does not invent a detection or train a new general object class. Smooth,
+reflective or occluded items can lack enough detail and are rejected with a clear
+message instead of falsely claiming they were learned.
+
 The 3.8 MB OpenCV Zoo NanoDet model is downloaded only when this feature is
 enabled and verified with SHA-256
 `4b82da9944b88577175ee23a459dce2e26e6e4be573def65b1055dc2d9720186`.

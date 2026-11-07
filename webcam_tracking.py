@@ -10,6 +10,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import math
 import os
 import time
 import urllib.request
@@ -78,6 +79,14 @@ def tracking_enabled(root=ROOT):
     return read_json(Path(root)/"Media/webcam-tracking.json").get("enabled") is True
 
 
+def valid_region(box):
+    return (isinstance(box, list) and len(box) == 4
+            and all(type(v) in (int, float) and math.isfinite(v) for v in box)
+            and 0 <= box[0] < 1 and 0 <= box[1] < 1
+            and box[2] >= .01 and box[3] >= .01
+            and box[0]+box[2] <= 1.000001 and box[1]+box[3] <= 1.000001)
+
+
 class ObjectDetector:
     def __init__(self, root=ROOT):
         import cv2
@@ -102,6 +111,43 @@ class ObjectDetector:
         self.net.setPreferableTarget(cv2.dnn.DNN_TARGET_CPU)
 
     def detect(self, frame):
+        found = self.detect_single(frame)
+        people = [item for item in found if item["class"] == "person"
+                  and .08 <= item["box"][2]*item["box"][3] <= .75]
+        if people:
+            # One additional crop, bounded independently of the number of people.
+            person = max(people, key=lambda item: item["box"][2]*item["box"][3])
+            x, y, w, h = person["box"]
+            left, top = max(0, x-.04), max(0, y-.04)
+            box = [left, top, min(1, x+w+.04)-left, min(1, y+h+.04)-top]
+            held = {"spoon", "fork", "knife", "cup", "bowl", "bottle", "cell phone", "remote", "book", "scissors"}
+            found += [item for item in self.detect_region(frame, box) if item["class"] in held]
+        return self.merge(found)
+
+    @staticmethod
+    def merge(items):
+        selected = []
+        for item in sorted(items, key=lambda value: -value["score"]):
+            if not any(old["class"] == item["class"] and overlap(old["box"], item["box"]) > .4 for old in selected):
+                selected.append(item)
+        return selected[:20]
+
+    def detect_region(self, frame, box):
+        if not valid_region(box):
+            return []
+        h, w = frame.shape[:2]
+        left, top = max(0, round(box[0]*w)), max(0, round(box[1]*h))
+        right, bottom = min(w, round((box[0]+box[2])*w)), min(h, round((box[1]+box[3])*h))
+        if right-left < 8 or bottom-top < 8:
+            return []
+        found = self.detect_single(frame[top:bottom, left:right])
+        for item in found:
+            x, y, bw, bh = item["box"]
+            item["box"] = [(left+x*(right-left))/w, (top+y*(bottom-top))/h,
+                           bw*(right-left)/w, bh*(bottom-top)/h]
+        return found
+
+    def detect_single(self, frame):
         cv, np = self.cv, self.np
         h, w = frame.shape[:2]
         scale = 416/max(h, w)
@@ -206,8 +252,10 @@ class ObjectMemory:
         return {"points": [list(point.pt) for point in points], "descriptors": descriptors.tolist()}
 
     def learn(self, name, category, signature):
-        if category == "person" or not signature:
-            raise ValueError("Choose a detailed object. Use face learning for people.")
+        if category == "person":
+            raise ValueError("Use face learning for people.")
+        if not signature:
+            raise ValueError("This object has too little visible detail to remember reliably. Try a closer view or a different angle.")
         name = clean_name(name)
         known = read_json(self.path)
         if name not in known and len(known) >= 100:
@@ -317,7 +365,9 @@ class SceneTracker:
                     face["name"] = face_model.identify(face["feature"])
         elif request and request.get("name") not in known_people and time.time() < request.get("until", 0):
             learning = "Learning " + request["name"] + " automatically beside " + request["alongside"] + f" · {len(self.auto.samples)}/5 samples"
-        items = self.tracks.update(self.detector.detect(frame), now)
+        focus = config.get("focus_box")
+        detections = self.detector.detect_region(frame, focus) if valid_region(focus) else self.detector.detect(frame)
+        items = self.tracks.update(detections, now)
         # Suppress weak single-frame guesses without hiding strong detections.
         items = [item for item in items if item.get("hits", 1) >= 2 or item.get("score", 0) >= .65]
         private = {}
@@ -340,8 +390,7 @@ class SceneTracker:
             private[key] = {"feature": face["feature"], "class": "face"}
         token = uuid.uuid4().hex
         self.cache = {key: value for key, value in self.cache.items() if now-value["at"] < 20}
-        self.cache[token] = {"at": now, "items": private,
-                             "frame": frame if any(item["class"] != "face" for item in private.values()) else None}
+        self.cache[token] = {"at": now, "items": private, "frame": frame}
         while len(self.cache) > 32:
             self.cache.pop(next(iter(self.cache)))
         h, w = frame.shape[:2]
@@ -350,6 +399,7 @@ class SceneTracker:
         return {"frame_id": token, "at": time.time(), "items": items,
                 "image": base64.b64encode(raw.tobytes()).decode("ascii") if ok else "",
                 "learning": learning,
+                "focus_box": focus if valid_region(focus) else None,
                 "known_people": list(known_people),
                 "known_objects": list(self.memory.known())}
 
@@ -364,6 +414,11 @@ class SceneTracker:
             if time.monotonic()-scene.get("at", 0) > 20:
                 raise ValueError("That view expired. Select the person or object again.")
             item = scene.get("items", {}).get(request.get("id"))
+            if request.get("id") == "selected-area" and valid_region(request.get("box")):
+                category = str(request.get("category", "")).lower().strip()
+                if category not in CLASSES or category == "person":
+                    raise ValueError("Choose a known object type, such as spoon, cup or book.")
+                item = {"class": category, "box": request["box"]}
             if not item:
                 raise ValueError("Select a visible face or object first.")
             name = clean_name(request.get("name", ""))

@@ -19,6 +19,66 @@ from webcam_tracking import (
 from webcam_tracking_ui import TrackingView
 
 
+def test_close_scan_maps_small_spoon_back_to_original_frame():
+    from webcam_tracking import ObjectDetector
+    detector = ObjectDetector.__new__(ObjectDetector)
+    seen = []
+    def infer(frame):
+        seen.append(frame.shape)
+        return [{"kind": "object", "class": "spoon", "label": "spoon", "score": .8, "box": [.1, .2, .3, .4]}]
+    detector.detect_single = infer
+    found = detector.detect_region(np.zeros((600, 1000, 3), np.uint8), [.2, .25, .4, .5])
+    assert seen == [(300, 400, 3)]
+    np.testing.assert_allclose(found[0]["box"], [.24, .35, .12, .2])
+
+
+def test_held_object_scan_is_bounded_and_deduplicates():
+    from webcam_tracking import ObjectDetector
+    detector = ObjectDetector.__new__(ObjectDetector)
+    detector.detect_single = lambda _: [
+        {"class": "person", "score": .9, "box": [.2, .2, .5, .7]},
+        {"class": "spoon", "score": .8, "box": [.3, .4, .1, .2]}]
+    crops = []
+    def region(frame, box):
+        crops.append(box)
+        return [{"class": "spoon", "score": .9, "box": [.3, .4, .1, .2]},
+                {"class": "laptop", "score": .9, "box": [.1, .1, .8, .8]}]
+    detector.detect_region = region
+    found = detector.detect(np.zeros((600, 1000, 3), np.uint8))
+    assert len(crops) == 1
+    assert [item["class"] for item in found].count("spoon") == 1
+    assert not any(item["class"] == "laptop" for item in found)
+
+
+@pytest.mark.parametrize("box", [[0, 0, 2, 1], [0, 0, float("nan"), .2], [True, 0, .2, .2], [0, 0, 0, .3]])
+def test_manual_region_validation_rejects_bad_coordinates(box):
+    from webcam_tracking import valid_region
+    assert not valid_region(box)
+
+
+def test_manual_teaching_does_not_need_a_detection_box(tmp_path):
+    tracker = SceneTracker.__new__(SceneTracker)
+    tracker.root = tmp_path
+    frame = np.zeros((50, 50, 3), np.uint8)
+    tracker.cache = {"shown": {"at": time.monotonic(), "items": {}, "frame": frame}}
+    calls = []
+    tracker.memory = SimpleNamespace(signature=lambda image, box: {"exact": image is frame, "box": box}, learn=lambda *args: calls.append(args))
+    write_json(tmp_path/"Media/webcam-learn-request.json", {"frame_id": "shown", "id": "selected-area", "box": [.2, .2, .3, .4], "category": "spoon", "name": "My spoon"})
+    assert "Remembered" in tracker.handle_request()
+    assert calls == [("My spoon", "spoon", {"exact": True, "box": [.2, .2, .3, .4]})]
+
+
+def test_focus_area_applies_without_claiming_a_detection(tmp_path):
+    notices = []
+    view = SimpleNamespace(config=tmp_path/"config.json", selected="selected-area",
+                           result={"items": [{"id": "selected-area", "box": [.1, .2, .3, .4]}]},
+                           resume=lambda: None, notice=notices.append)
+    TrackingView.focus_area(view)
+    assert json.loads(view.config.read_text())["focus_box"] == [.1, .2, .3, .4]
+    TrackingView.whole_view(view)
+    assert "focus_box" not in json.loads(view.config.read_text())
+
+
 def test_restoring_panel_requires_existing_camera_permission(tmp_path, monkeypatch):
     config = tmp_path / "Media/webcam-tracking.json"
     config.parent.mkdir()
