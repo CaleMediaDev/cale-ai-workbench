@@ -28,6 +28,7 @@ RELEASES = (
 )
 MAX_ZIP = 100 * 1024 * 1024
 STARTUP_RETRY_SECONDS = 30 * 60
+STAGED_ARCHIVE = re.compile(r"Cale-AI-Workbench-(\d+\.\d+\.\d+)-([a-f0-9]{64})\.zip")
 
 
 @contextmanager
@@ -105,7 +106,10 @@ def fetch_json(url):
 
 def validated_manifest(archive):
     """Accept only flat relative release paths declared by its source manifest."""
-    names = set(archive.namelist())
+    entries = archive.namelist()
+    names = set(entries)
+    if len(entries) != len(names):
+        raise ValueError("Duplicate release archive member.")
     if "install-files.json" not in names:
         raise ValueError("Release has no install manifest.")
     manifest = json.loads(archive.read("install-files.json"))
@@ -132,7 +136,7 @@ def validated_manifest(archive):
     for name in files:
         pure = PurePosixPath(name)
         if (
-            not name
+            not pure.parts
             or name.startswith("/")
             or "\\" in name
             or ":" in name
@@ -165,6 +169,15 @@ def _held_startup(version):
     return None
 
 
+def _download_matches(path, size, digest):
+    try:
+        with path.open("rb") as source:
+            return (os.fstat(source.fileno()).st_size == size
+                    and hashlib.file_digest(source, "sha256").hexdigest() == digest)
+    except FileNotFoundError:
+        return False
+
+
 def stage():
     """Download and verify a newer release; return its archive path or None."""
     choice = release_candidate(fetch_json(RELEASES), current_version())
@@ -173,43 +186,48 @@ def stage():
     version, asset = choice
     folder = ROOT / "Updates"
     folder.mkdir(exist_ok=True)
-    destination = folder / asset["name"]
     digest = asset["digest"].split(":", 1)[1].lower()
+    size = int(asset["size"])
+    destination = folder / f"{Path(asset['name']).stem}-{digest}.zip"
     held = _held_startup(version)
     if held and held["sha256"] == digest:
         return None
-    if (
-        not destination.is_file()
-        or hashlib.sha256(destination.read_bytes()).hexdigest() != digest
-    ):
-        temporary = destination.with_suffix(".partial")
-        total = 0
-        checksum = hashlib.sha256()
-        with (
-            urlopen(
-                Request(
-                    asset["browser_download_url"],
-                    headers={"User-Agent": "Cale-AI-Workbench"},
-                ),
-                timeout=30,
-            ) as response,
-            temporary.open("wb") as output,
-        ):
-            while chunk := response.read(1024 * 1024):
-                total += len(chunk)
-                if total > MAX_ZIP:
-                    raise ValueError("Release archive is too large.")
-                output.write(chunk)
-                checksum.update(chunk)
-        if checksum.hexdigest() != digest or total != int(asset["size"]):
-            temporary.unlink(missing_ok=True)
-            raise ValueError(
-                "Release checksum does not match GitHub's published digest."
-            )
-        os.replace(temporary, destination)
-    with ZipFile(destination) as archive:
-        validated_manifest(archive)
-    return destination, version
+    if _download_matches(destination, size, digest):
+        with ZipFile(destination) as archive:
+            validated_manifest(archive)
+    else:
+        temporary = None
+        try:
+            with tempfile.NamedTemporaryFile(dir=folder, prefix=".cale-download-",
+                                             suffix=".partial", delete=False) as output:
+                temporary = Path(output.name)
+                request = Request(asset["browser_download_url"],
+                                  headers={"User-Agent": "Cale-AI-Workbench"})
+                checksum = hashlib.sha256()
+                total = 0
+                with urlopen(request, timeout=30) as response:
+                    while chunk := response.read(1024 * 1024):
+                        total += len(chunk)
+                        if total > size:
+                            raise ValueError("Release download exceeded the published size.")
+                        output.write(chunk)
+                        checksum.update(chunk)
+            if total != size or checksum.hexdigest() != digest:
+                raise ValueError("Release checksum does not match GitHub's published digest.")
+            with ZipFile(temporary) as archive:
+                validated_manifest(archive)
+            try:
+                os.replace(temporary, destination)
+            except PermissionError:
+                # Another check may have already published and opened these bytes.
+                if not _download_matches(destination, size, digest):
+                    raise
+        finally:
+            if temporary is not None:
+                temporary.unlink(missing_ok=True)
+    if current_version() < version:
+        return destination, version
+    return None
 
 
 def retire_terminal_board_worker(process):
@@ -587,19 +605,24 @@ def apply(archive_path, version, *, verify_startup=None):
     """Keep the old source recoverable and swap only files in the manifest."""
     if active_tasks():
         raise RuntimeError("Wait for current tasks to finish before updating.")
-    # Install new app-owned Python dependencies before swapping source. A
-    # source update must not expose tools that the installed runtimes lack.
-    with ZipFile(archive_path) as archive:
-        validated_manifest(archive)
+    archive_path = Path(archive_path)
+    # Use the same open file for validation, dependency pins and source files.
+    # A concurrent stage can never switch the contents between these steps.
+    with archive_path.open("rb") as source, ZipFile(source) as archive:
+        if staged := STAGED_ARCHIVE.fullmatch(archive_path.name):
+            source.seek(0)
+            if (staged[1] != ".".join(map(str, version))
+                    or hashlib.file_digest(source, "sha256").hexdigest() != staged[2]):
+                raise ValueError("Staged release no longer matches its verified version and digest.")
+        files = validated_manifest(archive)
+        # Install new app-owned dependencies before swapping source.
         sync_new_media_requirements(archive)
         sync_new_toolbox_requirements(archive)
-    backups = ROOT / "Updates/backups"
-    backups.mkdir(parents=True, exist_ok=True)
-    prefix = ".".join(map(str, current_version())) + "-"
-    backup = Path(tempfile.mkdtemp(prefix=prefix, dir=backups))
-    replaced = []
-    with ZipFile(archive_path) as archive:
-        files = validated_manifest(archive)
+        backups = ROOT / "Updates/backups"
+        backups.mkdir(parents=True, exist_ok=True)
+        prefix = ".".join(map(str, current_version())) + "-"
+        backup = Path(tempfile.mkdtemp(prefix=prefix, dir=backups))
+        replaced = []
         try:
             for name in files:
                 target = ROOT / name

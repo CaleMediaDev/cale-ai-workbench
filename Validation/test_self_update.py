@@ -370,10 +370,12 @@ class SelfUpdateTests(unittest.TestCase):
                             "browser_download_url": "https://github.com/CaleMediaDev/cale-ai-workbench/releases/download/v0.5.569/" + archive_path.name,
                         }]}
                         hold = json.loads((updates / "startup-retry.json").read_text())
+                        staged = updates / f"{archive_path.stem}-{digest}.zip"
+                        staged.write_bytes(archive_path.read_bytes())
                         with patch.object(self_update, "fetch_json", return_value=[release]):
                             self.assertIsNone(self_update.stage())
                             with patch.object(self_update.time, "time", return_value=hold["retry_at"] + 1):
-                                self.assertEqual(self_update.stage(), (archive_path, version))
+                                self.assertEqual(self_update.stage(), (staged, version))
                     else:
                         self_update.run_update(archive_path, version, 0)
                         desktop.assert_called_once()
@@ -575,6 +577,103 @@ class SelfUpdateTests(unittest.TestCase):
                 [{"tag_name": "v0.5.0", "assets": [{**asset, "digest": ""}]}], (0, 4, 1)
             )
         )
+
+    def test_interrupted_concurrent_download_preserves_verified_stage(self):
+        import hashlib
+        import io
+        import threading
+        from concurrent.futures import ThreadPoolExecutor
+
+        version = (0, 5, 570)
+        name = "Cale-AI-Workbench-0.5.570.zip"
+        buffer = io.BytesIO()
+        with ZipFile(buffer, "w") as archive:
+            archive.writestr("install-files.json", json.dumps(["long_tasks.py"]))
+            archive.writestr("long_tasks.py", "verified desktop")
+        contents = buffer.getvalue()
+        digest = hashlib.sha256(contents).hexdigest()
+        release = {"tag_name": "v0.5.570", "assets": [{
+            "name": name, "size": len(contents), "digest": f"sha256:{digest}",
+            "browser_download_url": "https://github.com/CaleMediaDev/cale-ai-workbench/releases/download/v0.5.570/" + name,
+        }]}
+        both_downloading = threading.Barrier(2)
+
+        class Response(io.BytesIO):
+            def __init__(self, interrupted):
+                super().__init__(contents)
+                self.interrupted = interrupted
+
+            def read(self, size=-1):
+                if self.tell() == 0:
+                    return super().read(len(contents) // 2)
+                if self.tell() < len(contents):
+                    both_downloading.wait(timeout=5)
+                    if self.interrupted:
+                        raise TimeoutError("fixture connection dropped")
+                return super().read(size)
+
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            marker = root / ".cale-ai-install"
+            marker.write_text("Cale AI Workbench 0.5.569")
+            desktop = root / "long_tasks.py"
+            desktop.write_text("prior desktop")
+            with (patch.object(self_update, "ROOT", root),
+                  patch.object(self_update, "fetch_json", return_value=[release]),
+                  patch.object(self_update, "urlopen", side_effect=[Response(True), Response(False)]) as download,
+                  ThreadPoolExecutor(max_workers=2) as pool):
+                jobs = [pool.submit(self_update.stage) for _ in range(2)]
+                outcomes = []
+                for job in jobs:
+                    try:
+                        outcomes.append(job.result(timeout=10))
+                    except TimeoutError as exc:
+                        self.assertIn("fixture connection dropped", str(exc))
+                self.assertEqual(len(outcomes), 1)
+                staged, staged_version = outcomes[0]
+                self.assertEqual(staged_version, version)
+                self.assertEqual(staged.name, f"{Path(name).stem}-{digest}.zip")
+                self.assertEqual(staged.read_bytes(), contents)
+                self.assertFalse(list(staged.parent.glob("*.partial")))
+                self.assertEqual(self_update.stage(), (staged, version))
+                self.assertEqual(download.call_count, 2)
+                staged.write_bytes(contents + b"changed after staging")
+                with (patch.object(self_update, "active_tasks", return_value=False),
+                      patch.object(self_update, "sync_new_toolbox_requirements") as sync):
+                    with self.assertRaisesRegex(ValueError, "verified version and digest"):
+                        self_update.apply(staged, version)
+                    sync.assert_not_called()
+                self.assertEqual(desktop.read_text(), "prior desktop")
+                self.assertEqual(marker.read_text(), "Cale AI Workbench 0.5.569")
+                staged.write_bytes(contents)
+                with patch.object(self_update, "active_tasks", return_value=False):
+                    self_update.apply(staged, version)
+                self.assertEqual(desktop.read_text(), "verified desktop")
+                self.assertEqual(marker.read_text(), "Cale AI Workbench 0.5.570")
+
+    def test_digest_matching_archive_with_invalid_manifest_is_not_staged(self):
+        import hashlib
+        import io
+
+        payload = io.BytesIO()
+        with ZipFile(payload, "w") as archive:
+            archive.writestr("install-files.json", json.dumps(["Projects/notes.txt"]))
+            archive.writestr("Projects/notes.txt", "unsafe release file")
+        contents = payload.getvalue()
+        name = "Cale-AI-Workbench-0.5.570.zip"
+        release = {"tag_name": "v0.5.570", "assets": [{
+            "name": name, "size": len(contents), "digest": "sha256:" + hashlib.sha256(contents).hexdigest(),
+            "browser_download_url": "https://github.com/CaleMediaDev/cale-ai-workbench/releases/download/v0.5.570/" + name,
+        }]}
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            (root / ".cale-ai-install").write_text("Cale AI Workbench 0.5.569")
+            with (patch.object(self_update, "ROOT", root),
+                  patch.object(self_update, "fetch_json", return_value=[release]),
+                  patch.object(self_update, "urlopen", return_value=io.BytesIO(contents))):
+                with self.assertRaisesRegex(ValueError, "Unsafe or missing release file"):
+                    self_update.stage()
+            self.assertEqual(list((root / "Updates").iterdir()), [])
 
     def test_manifest_rejects_project_or_secret_paths(self):
         with tempfile.TemporaryDirectory() as folder:

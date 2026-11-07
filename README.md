@@ -10,6 +10,8 @@ Created by [Cale Media](https://calemedia.com).
 2. Click **Install** and watch the progress bar. Accounts are optional; you can connect them while models download.
 3. Click **Open Cale AI** and describe what you want in chat.
 
+Release 0.5.570 keeps simultaneous update downloads separate and validates each ZIP before staging it. The updater rechecks the staged digest before installing.
+
 Release 0.5.569 checks that the local router starts before committing an update. If startup fails, Workbench restores the previous app files and settings and delays retrying the same download for 30 minutes.
 
 Release 0.5.568 brings the four-deck DJ controller, Print Farm with live camera previews, and more reliable native task startup. The previous supervisor can exit during startup and the worker can still register itself so Pause and Stop find the right process.
