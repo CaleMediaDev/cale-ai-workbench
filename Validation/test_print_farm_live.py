@@ -118,6 +118,10 @@ class LiveObservationTests(unittest.TestCase):
             self.assertEqual(card.accent.cget("bg"), card.FILAMENT["white"][0])
             self.assertEqual(card.icon.itemcget("printer", "fill"), card.FILAMENT["white"][0])
             self.assertEqual(card.status.cget("fg"), badge_color)
+            data["printers"][0].update(detail="Finished · waiting for clear bed", idle=True)
+            page.render(data)
+            self.assertIn("Unload finished print", card.bed.cget("text"))
+            self.assertTrue(card.camera.unload_required)
             data["printers"][0].update(detail="Offline", online=False, progress=78)
             page.render(data)
             self.assertEqual(card.percent.cget("text"), "—")
@@ -132,7 +136,7 @@ class LiveObservationTests(unittest.TestCase):
             # A general service heartbeat can stay fresh while the printer
             # sample stalls. Only the printer timestamp can restore the badge.
             page.live.update = Mock()
-            data["printers"][0].update(detail="Printing / busy", online=True)
+            data["printers"][0].update(detail="Printing / busy", online=True, idle=False)
             data["printer_telemetry_at"] = 100
             service.snapshot = data
             with patch("print_farm_ui.time.time", return_value=100):
@@ -342,6 +346,13 @@ class LiveObservationTests(unittest.TestCase):
             self.assertTrue(
                 any(tile.canvas.type(i) == "rectangle" for i in tile.canvas.find_all())
             )
+            tile.after_cancel(tile.timer)
+            tile.unload_required = True
+            analysis.update(state="clear", reason="Bed looks empty")
+            tile.refresh(force=True)
+            self.assertIn("Printer finished", tile.detected.cget("text"))
+            self.assertEqual(tile.reason.cget("text"), "")
+            tile.unload_required = False
             tile.after_cancel(tile.timer)
             live.frames["p"]["signature"] = bytes([255]) * 576
             tile.refresh(force=True)

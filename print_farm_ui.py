@@ -158,11 +158,15 @@ class PrinterCard(tk.Frame):
             )
             temperatures.append("—" if temp is None else f"{temp:.0f}°C")
         bed_state = None if telemetry_stale else (printer.get("bed") or {}).get("state")
+        self.camera.unload_required = state == "complete"
+        if state == "complete" and bed_state in {None, "clear", "unchecked", "unknown"}:
+            bed_state = "unload_required"
         bed_label, bed_color = {
             "clear": ("✓  Build plate clear", "#78e6ab"),
             "blocked": ("!  Build plate occupied", "#ffc879"),
             "out_of_view": ("◇  Bed out of view", "#ffc879"),
             "unknown": ("◇  Build plate unverified", self.MUTED),
+            "unload_required": ("!  Unload finished print", "#ffc879"),
             "queued": ("◇  Check queued", self.MUTED),
             "checking": ("◎  Checking bed…", "#50eaff"),
             "skipped_busy": ("◇  Skipped · printer busy", self.MUTED),

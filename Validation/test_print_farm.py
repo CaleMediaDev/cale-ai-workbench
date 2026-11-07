@@ -65,6 +65,29 @@ def clear():
 
 
 class Decisions(unittest.TestCase):
+    def test_finished_status_blocks_automatic_transport_even_with_a_bed_ticket(self):
+        from print_farm_transport import Hold, K1, PRINTERS
+
+        with patch.dict(PRINTERS, {"p": ("192.0.2.1", "fixture", "black")}, clear=True):
+            printer = K1("p")
+        socket = Mock()
+        job_id = "00000000-0000-4000-8000-000000000001"
+        status = {"state": 0}
+
+        def query(*args, **kwargs):
+            status.update(state=2, printProgress=100)
+            return []
+
+        with (tempfile.TemporaryDirectory() as temporary,
+              patch.object(printer, "open", return_value=(socket, status)),
+              patch.object(printer, "query", side_effect=query),
+              patch.object(printer, "preflight", return_value={"path": "/fixture.gcode"})):
+            with self.assertRaisesRegex(Hold, "Unload the finished print"):
+                printer._start_once(job_id, {"file_fingerprint": "fixture"}, Path(temporary),
+                                    time.time() + 20, "ebay_order", "a" * 32)
+        socket.send.assert_not_called()
+        socket.close.assert_called_once()
+
     def test_printer_read_rejects_late_reply_and_restores_socket_timeout(self):
         from print_farm_transport import Hold, K1, PRINTERS
 
@@ -349,6 +372,18 @@ class Decisions(unittest.TestCase):
         result = watcher.check({"id": "p", "camera_url": "http://camera"}, "vision")
         self.assertEqual(result["state"], "out_of_view")
 
+    def test_finished_bed_check_reports_visible_part_and_never_confirms_empty(self):
+        watcher = farm.BedWatcher(
+            capture=Mock(side_effect=[b"a", b"b", b"c", b"d"]),
+            infer=Mock(side_effect=[{**clear(), "bed_fully_visible": False, "object_present": True}, clear()]),
+            sleep=lambda _: None,
+        )
+        printer = {"id": "p", "camera_url": "http://camera", "unload_required": True}
+        self.assertEqual(watcher.check(printer, "vision")["state"], "blocked")
+        result = watcher.check(printer, "vision")
+        self.assertEqual(result["state"], "unknown")
+        self.assertIn("Unload the finished print", result["reason"])
+
     def test_removal_changes_occupied_to_clear_with_new_ticket(self):
         frames = iter([b"a", b"b", b"c", b"d"])
         results = iter(
@@ -496,6 +531,17 @@ class Production(unittest.TestCase):
         self.printer["idle"] = True
         self.dispatch()
         self.machine.start_order.assert_called_once()
+
+    def test_finished_ebay_printer_waits_for_unload_before_dispatch(self):
+        self.printer["unload_required"] = True
+        result = self.dispatch()
+        self.assertEqual(result["status"], "queued")
+        self.assertIn("Unload the finished print", result["reason"])
+        self.service.beds.check.assert_not_called()
+        self.machine.start_order.assert_not_called()
+
+        self.printer["unload_required"] = False
+        self.assertEqual(self.dispatch()["status"], "printing")
 
     def test_manual_bed_check_is_read_only_and_coalesces_requests(self):
         self.printer.update(online=True, camera_url="http://camera")

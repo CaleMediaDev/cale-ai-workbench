@@ -26,6 +26,9 @@ an observation, not permission to start a printer. Return concise JSON:
 "box":[left,top,right,bottom]}]}. Boxes use image coordinates normalized to 0..1000.
 Only include boxes for objects actually visible; at most six. A print head alone
 is not an object on the bed, but can obstruct the view. A hand means occupied.
+Look for raised edges and shadows along the visible plate, especially a dark
+print blending into a dark plate near the bottom of the frame. Report visible
+objects even when the rest of the plate is cut off.
 Use clear only if the entire usable bed is visibly empty."""
 
 
@@ -380,6 +383,7 @@ class CameraTile(ttk.Frame):
     def __init__(self, parent, live, pid, width=330, height=185):
         super().__init__(parent)
         self.live, self.pid, self.size = live, pid, (width, height)
+        self.unload_required = False
         self.photo = None
         self.image_item = None
         self.last_key = None
@@ -550,6 +554,8 @@ class CameraTile(ttk.Frame):
         state = result.get("state", "waiting")
         if not live_ok:
             text, color = "AI: waiting for a live camera", "#aebccc"
+        elif self.unload_required and state != "occupied":
+            text, color = "Printer finished · check the bed for the print", "#ffc65c"
         elif overlay:
             labels = {
                 "clear": "Bed looks clear",
@@ -569,5 +575,7 @@ class CameraTile(ttk.Frame):
         if analyzing:
             text += " · analyzing…"
         self.detected.configure(text=text, foreground=color)
-        self.reason.configure(text=result.get("reason", "") if overlay else "")
+        self.reason.configure(text=(result.get("reason", "") if overlay and not (
+            self.unload_required and state == "clear"
+        ) else ""))
         self.timer = self.after(250, self.refresh)

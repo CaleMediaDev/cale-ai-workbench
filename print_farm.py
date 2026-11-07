@@ -248,15 +248,19 @@ class BedWatcher:
             if not fresh():
                 raise Hold("Vision response was too slow; a fresh bed check is required")
             state = "unknown"
-            if valid_clear(answer):
-                state = "clear"
+            reason = str(answer.get("reason", "Bed not clearly empty"))[:300]
+            if answer.get("object_present") is True or answer.get("person_or_hand") is True:
+                state = "blocked"
             elif answer.get("bed_fully_visible") is False:
                 state = "out_of_view"
-            elif answer.get("object_present") is True or answer.get("person_or_hand") is True:
-                state = "blocked"
+            elif valid_clear(answer):
+                if printer.get("unload_required"):
+                    reason = "Unload the finished print and return the printer to Idle"
+                else:
+                    state = "clear"
             result = {
                 "state": state,
-                "reason": str(answer.get("reason", "Bed not clearly empty"))[:300],
+                "reason": reason,
                 "checked_at": self.clock(),
                 "captured_at": captured,
                 "confidence": confidence(answer.get("confidence", 0)),
@@ -656,6 +660,7 @@ class Service:
                     **p,
                     "online": True,
                     "idle": ready_state(state) and not fault,
+                    "unload_required": state.get("state") == 2,
                     "progress": state.get("printProgress"),
                     "nozzle_c": state.get("nozzleTemp"),
                     "bed_c": state.get("bedTemp0"),
@@ -1202,6 +1207,7 @@ class Service:
             return update_hold
         routes = list(proposal["recipes"])
         source = routes[0]
+        awaiting_unload = False
         for p in printers:
             if (
                 p.get("idle")
@@ -1220,6 +1226,9 @@ class Service:
                 None,
             )
             if not printer:
+                continue
+            if printer.get("unload_required"):
+                awaiting_unload = True
                 continue
             active = store.db.execute(
                 "SELECT 1 FROM jobs WHERE printer_id=? AND status IN ('dispatching','printing','submission_uncertain')",
@@ -1384,5 +1393,7 @@ class Service:
                 return {"status": state, "reason": message}
         return {
             "status": "queued",
-            "reason": "Waiting for an available compatible printer with a visibly clear bed",
+            "reason": "Unload the finished print and return the printer to Idle"
+            if awaiting_unload
+            else "Waiting for an available compatible printer with a visibly clear bed",
         }
