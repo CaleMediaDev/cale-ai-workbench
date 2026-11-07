@@ -12,7 +12,7 @@ import tkinter as tk
 from tkinter import messagebox, ttk
 from urllib.parse import urlsplit
 
-from print_farm import PRINTER_TELEMETRY_MAX_AGE, Service, digest
+from print_farm import BED_CLEAR_MAX_AGE, PRINTER_TELEMETRY_MAX_AGE, Service, digest
 from print_farm_live import CameraTile, LiveCameras
 
 
@@ -101,6 +101,9 @@ class PrinterCard(tk.Frame):
         self.check_bed = ttk.Button(bed_row, text="◎ Check bed", command=check_bed, state="disabled")
         self.check_bed.pack(side="right", padx=(4, 0))
         self.bed.pack(side="left", fill="x", expand=True)
+        self.bed_note = tk.Label(body, bg=self.SURFACE, fg=self.MUTED, anchor="w",
+                                 justify="left", font=("Segoe UI", 9))
+        body.bind("<Configure>", lambda event: self.bed_note.configure(wraplength=max(120, event.width - 8)))
 
     def draw_meter(self, _event=None):
         self.meter.delete("segments")
@@ -127,6 +130,18 @@ class PrinterCard(tk.Frame):
         except (TypeError, ValueError, OverflowError):
             return None
         return value if math.isfinite(value) and 0 <= value <= maximum else None
+
+    @staticmethod
+    def bed_observation_state(printer, now):
+        bed = printer.get("bed") or {}
+        state = bed.get("state")
+        if state in {"clear", "blocked", "out_of_view", "unknown"}:
+            if not printer.get("online") or not printer.get("idle"):
+                return None
+            sampled = bed.get("checked_at") if state == "unknown" else bed.get("captured_at")
+            if type(sampled) not in (int, float) or not 0 <= now - sampled < BED_CLEAR_MAX_AGE:
+                return "expired"
+        return state
 
     def render(self, printer, *, telemetry_stale=False, bed_check=None):
         detail = printer.get("detail", "")
@@ -157,15 +172,16 @@ class PrinterCard(tk.Frame):
                 if printer.get("online") and not telemetry_stale else None
             )
             temperatures.append("—" if temp is None else f"{temp:.0f}°C")
-        bed_state = None if telemetry_stale else (printer.get("bed") or {}).get("state")
+        bed_state = None if telemetry_stale else self.bed_observation_state(printer, time.time())
         self.camera.unload_required = state == "complete"
-        if state == "complete" and bed_state in {None, "clear", "unchecked", "unknown"}:
+        if state == "complete" and bed_state in {None, "clear", "unchecked", "unknown", "expired"}:
             bed_state = "unload_required"
         bed_label, bed_color = {
             "clear": ("✓  Build plate clear", "#78e6ab"),
             "blocked": ("!  Build plate occupied", "#ffc879"),
             "out_of_view": ("◇  Bed out of view", "#ffc879"),
             "unknown": ("◇  Build plate unverified", self.MUTED),
+            "expired": ("◇  Bed check expired", self.MUTED),
             "unload_required": ("!  Unload finished print", "#ffc879"),
             "queued": ("◇  Check queued", self.MUTED),
             "checking": ("◎  Checking bed…", "#50eaff"),
@@ -173,6 +189,13 @@ class PrinterCard(tk.Frame):
             "skipped_offline": ("◇  Skipped · offline", self.MUTED),
             "skipped_camera_changed": ("◇  Camera changed", self.MUTED),
         }.get(bed_check or bed_state, ("◇  Bed check pending", self.MUTED))
+        bed_note = ""
+        if not bed_check and bed_state in {"blocked", "out_of_view", "unknown", "unload_required"}:
+            note = (printer.get("bed") or {}).get("reason")
+            if isinstance(note, str) and note != "Checked before the next print":
+                bed_note = note
+            if bed_state == "unload_required":
+                bed_note = "Remove the part. Cale rechecks the plate once the printer is idle."
         name = printer.get("hostname") or printer["id"]
         color = str(printer.get("color") or "").strip()
         readings = (eta, *temperatures)
@@ -180,7 +203,7 @@ class PrinterCard(tk.Frame):
             not bed_check and state in {"ready", "complete"}
             and bool(printer.get("idle") and printer.get("camera_url"))
         )
-        shown = (state, progress, bed_label, name, color, readings, can_check)
+        shown = (state, progress, bed_label, bed_note, name, color, readings, can_check)
         if self.last_state == shown:
             return
         self.last_state = shown
@@ -199,6 +222,11 @@ class PrinterCard(tk.Frame):
         self.icon.itemconfigure("printer", fill=filament)
         self.material.configure(text=(color.upper() + " FILAMENT") if color else "LOCAL PRINTER")
         self.bed.configure(text=bed_label, fg=bed_color)
+        if bed_note:
+            self.bed_note.configure(text=bed_note)
+            self.bed_note.pack(fill="x", pady=(3, 0))
+        else:
+            self.bed_note.pack_forget()
         self.check_bed.configure(state="normal" if can_check else "disabled")
         for label, value in zip(self.metrics, readings):
             label.configure(text=value)
@@ -593,8 +621,9 @@ class Controls:
         except queue.Empty:
             pass
         snapshot = self.service.snapshot
+        now = time.time()
         telemetry_stale = bool(snapshot.get("printers")) and not (
-            0 <= time.time() - snapshot.get("printer_telemetry_at", 0) <= PRINTER_TELEMETRY_MAX_AGE
+            0 <= now - snapshot.get("printer_telemetry_at", 0) <= PRINTER_TELEMETRY_MAX_AGE
         )
         self.live.update(
             snapshot.get("printers", []),
@@ -622,6 +651,7 @@ class Controls:
             },
             telemetry_stale,
             bed_checks,
+            [PrinterCard.bed_observation_state(printer, now) for printer in snapshot.get("printers", [])],
         ])
         if signature != self.last_render:
             self.render(snapshot, telemetry_stale=telemetry_stale, bed_checks=bed_checks)

@@ -89,9 +89,12 @@ class LiveObservationTests(unittest.TestCase):
             tile = page.camera_tiles["0"]
             card = page.printer_cards["0"]
             self.assertTrue(card.check_bed.instate(["disabled"]))
-            data["printers"][0].update(camera_url="http://camera", bed={"state": "out_of_view"})
+            data["printers"][0].update(camera_url="http://camera", bed={
+                "state": "out_of_view", "captured_at": time.time(), "reason": "Lower plate is cut off",
+            })
             page.render(data)
             self.assertIn("Bed out of view", card.bed.cget("text"))
+            self.assertEqual(card.bed_note.cget("text"), "Lower plate is cut off")
             card.check_bed.invoke()
             service.request_bed_check.assert_called_once_with("0")
             page.render(data, bed_checks={"0": "queued"})
@@ -99,16 +102,26 @@ class LiveObservationTests(unittest.TestCase):
             self.assertTrue(card.check_bed.instate(["disabled"]))
             page.render(data, bed_checks={"0": "checking"})
             self.assertIn("Checking bed", card.bed.cget("text"))
+            self.assertFalse(card.bed_note.winfo_manager())
             self.assertEqual(page.printer_cards["0"].percent.cget("text"), "—")
+            data["printers"][0]["bed"] = {"state": "clear", "captured_at": 100}
+            data["printer_telemetry_at"] = 125
+            service.snapshot = data
+            with patch("print_farm_ui.time.time", return_value=129):
+                page.tick()
+                self.assertIn("Build plate clear", card.bed.cget("text"))
+            with patch("print_farm_ui.time.time", return_value=130):
+                page.tick()
+                self.assertIn("Bed check expired", card.bed.cget("text"))
             data["printers"][0].update(detail="Printing / busy", progress="78.4", idle=False,
                                        seconds_remaining=982, nozzle_c="220.02", bed_c="50.21",
-                                       bed={"state": "clear"}, color="black")
+                                       bed={"state": "clear", "captured_at": time.time()}, color="black")
             page.render(data)
             self.assertIs(tile, page.camera_tiles["0"])
             self.assertTrue(card.check_bed.instate(["disabled"]))
             self.assertEqual(card.percent.cget("text"), "78%")
             self.assertIn("PRINTING", card.status.cget("text"))
-            self.assertIn("clear", card.bed.cget("text"))
+            self.assertIn("check pending", card.bed.cget("text"))
             self.assertEqual([value.cget("text") for value in card.metrics],
                              ["17m", "220°C", "50°C"])
             self.assertEqual(card.accent.cget("bg"), card.FILAMENT["black"][0])

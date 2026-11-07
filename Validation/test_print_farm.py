@@ -261,6 +261,30 @@ class Decisions(unittest.TestCase):
             self.assertEqual(service.update_restart_blocker(reserve=True), "")
             self.assertTrue(service._update_reserved)
 
+    def test_printer_state_change_discards_previous_bed_result(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            service = farm.Service(temporary)
+            store = farm.Store(Path(temporary) / "queue.sqlite")
+            printer = {"id": "p", "ip": "192.0.2.1", "hostname": "fixture",
+                       "driver": "creality_k1_se", "color": "black", "camera_url": "http://camera"}
+            service.configure({"printers": [printer]})
+            machine = Mock()
+            machine.open.side_effect = [(Mock(), {"state": state}) for state in (0, 1, 0)]
+            try:
+                with (patch.object(farm, "K1", return_value=machine),
+                      patch.object(service, "account_client", return_value=None)):
+                    service.cycle(store)
+                    service.beds.last["p"] = {
+                        "state": "clear", "captured_at": time.time(),
+                        "camera_source": farm.bed_camera_key(printer),
+                    }
+                    service.cycle(store)
+                    self.assertEqual(service.snapshot["printers"][0]["bed"]["state"], "unchecked")
+                    service.cycle(store)
+                    self.assertEqual(service.snapshot["printers"][0]["bed"]["state"], "unchecked")
+            finally:
+                store.db.close()
+
     def test_update_waits_for_a_busy_printer_across_failed_polls(self):
         with tempfile.TemporaryDirectory() as temporary:
             service = farm.Service(temporary)

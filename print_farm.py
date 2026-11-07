@@ -980,13 +980,25 @@ class Service:
     def cycle(self, store):
         settings = self.settings()
         printers = self.scan_printers(settings)
+        previous = {printer["id"]: printer for printer in self.snapshot["printers"]}
         previously_busy = {
             printer["id"] for printer in self.snapshot["printers"]
             if printer.get("busy_unconfirmed")
             or (printer.get("online") and not printer.get("idle"))
         }
         for printer in printers:
-            if not printer.get("online") and printer["id"] in previously_busy:
+            printer_id = printer["id"]
+            prior = previous.get(printer_id)
+            if prior and any(
+                bool(printer.get(field)) != bool(prior.get(field))
+                for field in ("online", "idle", "unload_required")
+            ):
+                # A past observation cannot describe the plate after a job or
+                # connection transition, even within the capture age limit.
+                self.beds.last.pop(printer_id, None)
+                if "bed" in printer:
+                    printer["bed"] = {"state": "unchecked", "reason": "Checked before the next print"}
+            if not printer.get("online") and printer_id in previously_busy:
                 printer["busy_unconfirmed"] = True
         sampled_at = time.time()
         self.snapshot = {
