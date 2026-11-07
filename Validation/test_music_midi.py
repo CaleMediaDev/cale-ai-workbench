@@ -410,7 +410,7 @@ def test_note_csv_without_pitch_bends_can_be_normalized_repeatedly(tmp_path):
     path = tmp_path / "notes.csv"
     path.write_text(
         ",".join(music_midi.NOTE_COLUMNS) + "\n"
-        + "0.0,1.0,69,85,\n"
+        + "0.0,1.0,69,85," + "\n"
     )
 
     music_midi.normalize_note_events(path)
