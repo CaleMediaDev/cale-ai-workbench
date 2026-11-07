@@ -29,7 +29,12 @@ class SkillCatalogTests(unittest.TestCase):
     def test_installs_idempotently_and_updates_only_unchanged_files(self):
         first = skill_catalog.sync(self.root)
         self.assertEqual(first["installed"], len(skill_catalog.SKILLS) + len(skill_catalog.SHARED_REFERENCES))
-        self.assertEqual(skill_catalog.sync(self.root)["installed"], 0)
+        # Second run should result in 0 installed, 0 updated, 0 preserved
+        second_run = skill_catalog.sync(self.root)
+        self.assertEqual(second_run["installed"], 0)
+        self.assertEqual(second_run["updated"], 0)
+        self.assertEqual(second_run["preserved"], 0)
+        
         source = self.root / "vendor/agent-skills/context-engineering/SKILL.md"
         source.write_text(source.read_text(encoding="utf-8") + "\nNew upstream guidance", encoding="utf-8")
         changed = skill_catalog.sync(self.root)

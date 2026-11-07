@@ -98,7 +98,7 @@ def sync(root: str | Path) -> dict:
             if current == _hash(data):
                 managed[key] = current
                 continue
-            if previous.get(key) != current:
+            if previous.get(key) != current and current != _hash(data):
                 preserved += 1
                 continue
             updated += 1
