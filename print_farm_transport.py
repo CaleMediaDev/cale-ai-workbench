@@ -8,6 +8,7 @@ test authorization or a claimed one-use bed authorization for a paid order.
 import hashlib
 import json
 import os
+import re
 import time
 import uuid
 from pathlib import Path
@@ -19,6 +20,10 @@ PRINTERS = {}  # Populated only from this installation's printer settings.
 
 class Hold(RuntimeError):
     pass
+
+
+def gcode_object_count(raw):
+    return len(set(re.findall(rb"^EXCLUDE_OBJECT_DEFINE\s+NAME=([^\s]+)", raw, re.M)))
 
 
 def ready_state(status):
@@ -195,6 +200,8 @@ class K1:
             or hashlib.sha256(content).hexdigest() != digest
         ):
             raise Hold("Printer file content changed; match this file again")
+        if gcode_object_count(content) > 1:
+            raise Hold("This single-item run contains multiple objects; select the correct layout")
         return file
 
     def start_supervised(self, job_id, recipe, authorization, ledger):

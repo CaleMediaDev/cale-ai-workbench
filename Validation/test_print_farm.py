@@ -107,6 +107,12 @@ class Decisions(unittest.TestCase):
         self.assertNotEqual(reviewed["token"], "old")
         verified = {**proposal, "quantity_basis": "verified_listing_recipe", "match_basis": "verified_listing_recipe"}
         self.assertEqual(farm.review_file_match(item, verified)["runs_per_sale"], 2)
+        self.assertEqual(farm.product_words("ar15wallmount_final.stl") & farm.product_words(item["title"]), {"ar15"})
+
+    def test_object_count_detects_duplicate_items_without_counting_layer_markers(self):
+        raw = b"EXCLUDE_OBJECT_DEFINE NAME=mount_0 CENTER=1,1\nEXCLUDE_OBJECT_START NAME=mount_0\nEXCLUDE_OBJECT_END NAME=mount_0\n"
+        self.assertEqual(farm.gcode_object_count(raw * 2), 1)
+        self.assertEqual(farm.gcode_object_count(raw + b"EXCLUDE_OBJECT_DEFINE NAME=mount_1 CENTER=2,2\n"), 2)
 
     def test_finished_status_allows_fresh_bed_ticket_through_preflight(self):
         from print_farm_transport import K1, PRINTERS
@@ -302,6 +308,11 @@ class Decisions(unittest.TestCase):
             service._unsettled_jobs = False
             self.assertEqual(service.update_restart_blocker(reserve=True), "")
             self.assertTrue(service._update_reserved)
+            service.cancel_update_restart()
+            service.snapshot["printers"][0].update(idle=False, active_print=False)
+            self.assertEqual(service.update_restart_blocker(), "")
+            service.snapshot["printers"][0]["active_print"] = True
+            self.assertIn("active print", service.update_restart_blocker())
 
     def test_printer_state_change_discards_previous_bed_result(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -926,6 +937,32 @@ class Production(unittest.TestCase):
             self.store.reserve(jid, self.key, unit, {**self.recipe, "invalid_for_order": True})
             self.store.outcome(jid, "completed")
         self.assertEqual(self.service.order_states(self.store, self.item, self.proposal, {}), ["held", "held"])
+
+    def test_explicit_recovery_preserves_invalid_attempts_and_uses_new_job_ids(self):
+        old_ids = []
+        for unit in range(self.item["quantity"]):
+            jid = farm.job_id(self.item, unit)
+            old_ids.append(jid)
+            self.store.reserve(jid, self.key, unit, {**self.recipe, "invalid_for_order": True})
+            self.store.outcome(jid, "completed")
+        replacement = {**self.proposal, "token": "replacement"}
+        self.store.recover_invalid_match(self.key, "t", replacement)
+        self.proposal = replacement
+        self.assertEqual(self.service.order_states(self.store, self.item, replacement, {}), [None, None])
+        self.assertNotIn(self.store.job_id(self.item, 0), old_ids)
+        self.assertEqual(self.dispatch()["status"], "printing")
+        self.assertEqual(self.store.db.execute("SELECT count(*) FROM jobs").fetchone()[0], 3)
+        with self.assertRaises(farm.Hold):
+            self.store.recover_invalid_match(self.key, "replacement", replacement)
+
+    def test_recovery_cannot_replace_active_or_valid_attempts(self):
+        jid = farm.job_id(self.item, 0)
+        self.store.reserve(jid, self.key, 0, self.recipe)
+        for state in ("printing", "submission_uncertain", "completed"):
+            self.store.outcome(jid, state)
+            with self.assertRaises(farm.Hold):
+                self.store.recover_invalid_match(self.key, "t", self.proposal)
+        self.assertEqual(self.store.job_id(self.item, 0), jid)
 
     def test_thumbs_up_sets_100_and_dispatch_still_requires_clear_bed(self):
         self.proposal.update(confidence=0.49, historical=True)

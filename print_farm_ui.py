@@ -30,6 +30,7 @@ class PrinterCard(tk.Frame):
         "starting": ("Starting", "#50eaff"),
         "ready": ("Standby", "#78e6ab"),
         "complete": ("Print complete", "#78e6ab"),
+        "stopped": ("Stopped", "#ffc879"),
         "fault": ("Needs attention", "#ffc879"),
         "offline": ("Offline", "#9cadc4"),
         "disconnected_busy": ("Connection lost", "#ffc879"),
@@ -151,6 +152,8 @@ class PrinterCard(tk.Frame):
             state = "disconnected_busy" if printer.get("busy_unconfirmed") else "offline"
         elif detail == "Printer error":
             state = "fault"
+        elif detail == "Print stopped":
+            state = "stopped"
         elif detail.startswith("Finished"):
             state = "complete"
         elif detail == "Starting print":
@@ -509,7 +512,7 @@ class Controls:
     def render(self, snapshot, *, telemetry_stale=False, bed_checks=None):
         printers = snapshot.get("printers", [])
         online = sum(bool(printer.get("online")) for printer in printers)
-        busy = sum(bool(printer.get("online") and not printer.get("idle")) for printer in printers)
+        busy = sum(bool(printer.get("online") and printer.get("active_print", not printer.get("idle"))) for printer in printers)
         self.fleet_status.configure(
             text="PRINTERS    ◇ SIGNAL DELAYED" if telemetry_stale
             else f"PRINTERS    ● {online}/{len(printers)} ONLINE    ◇ {busy} BUSY"

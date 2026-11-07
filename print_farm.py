@@ -33,6 +33,7 @@ from print_farm_transport import (
     PRINTERS,
     Hold,
     file_fingerprint,
+    gcode_object_count,
     persist,
     ready_state,
     validate_file,
@@ -74,12 +75,12 @@ def digest(value):
     ).hexdigest()
 
 
-def job_id(row, unit):
+def job_id(row, unit, generation=0):
     # Same IDs as the previous helper, so migration preserves printed quantities.
     return str(
         uuid.uuid5(
             uuid.NAMESPACE_URL,
-            "cale-print:" + json.dumps([row["order_id"], row["line_id"], unit]),
+            "cale-print:" + json.dumps([row["order_id"], row["line_id"], unit] + ([generation] if generation else [])),
         )
     )
 
@@ -111,6 +112,7 @@ def product_key(row):
 
 def product_words(value):
     value = re.sub(r"([a-z])([A-Z])", r"\1 \2", value)
+    value = re.sub(r"wall[ _-]*mount", " wall mount ", value, flags=re.I)
     value = re.sub(r"\d+h\d+m\d+s", " ", value, flags=re.I)
     generic = set("3d printed print printing wall mount mounts mounting bracket stand holder case clip base frame support adapter strong sturdy convenient made in the usa us black white pla petg abs stl gcode obj file model version gen and for with of a an to".split())
     return {word for word in re.findall(r"[a-z0-9]+", value.lower())
@@ -405,6 +407,27 @@ class Store:
                 "UPDATE orders SET decision=? WHERE id=?", (json.dumps(proposal), key)
             )
 
+    def job_id(self, row, unit):
+        key = row["order_id"] + "/" + row["line_id"]
+        generation = self.db.execute("SELECT value FROM meta WHERE key=?", ("generation:" + key,)).fetchone()
+        return job_id(row, unit, int(generation[0]) if generation else 0)
+
+    def recover_invalid_match(self, key, old_token, replacement):
+        """Explicit recovery preserves failed attempts and allocates fresh job IDs."""
+        with self.db:
+            saved = self.db.execute("SELECT decision FROM orders WHERE id=?", (key,)).fetchone()
+            if not saved or not saved[0] or json.loads(saved[0]).get("token") != old_token:
+                raise Hold("The match changed before recovery")
+            jobs = self.db.execute("SELECT status,recipe FROM jobs WHERE line_key=?", (key,)).fetchall()
+            if not jobs or any(j["status"] not in ("completed", "failed") or
+                               not json.loads(j["recipe"]).get("invalid_for_order") for j in jobs):
+                raise Hold("Recovery requires terminal, explicitly invalidated attempts")
+            prior = self.db.execute("SELECT value FROM meta WHERE key=?", ("generation:" + key,)).fetchone()
+            if prior:
+                raise Hold("This order has already been recovered; inspect its new attempts")
+            self.db.execute("INSERT INTO meta(key,value) VALUES(?,?)", ("generation:" + key, "1"))
+            self.db.execute("UPDATE orders SET decision=?,approved_token=NULL WHERE id=?", (json.dumps(replacement), key))
+
     def approve(self, key, token):
         with self.db:
             row = self.db.execute(
@@ -580,7 +603,7 @@ class Service:
     def order_states(self, store, row, proposal, settings):
         states = []
         for unit in range(row["quantity"] * proposal["runs_per_sale"]):
-            jid = job_id(row, unit)
+            jid = store.job_id(row, unit)
             job = store.db.execute("SELECT status,recipe FROM jobs WHERE id=?", (jid,)).fetchone()
             states.append("held" if job and json.loads(job["recipe"]).get("invalid_for_order")
                           else job["status"] if job else self.prior_status(jid, settings))
@@ -743,7 +766,7 @@ class Service:
             return "Print Farm is checking jobs."
         try:
             if self._unsettled_jobs or any(
-                printer.get("online") and not printer.get("idle")
+                printer.get("online") and printer.get("active_print", not printer.get("idle"))
                 for printer in self.snapshot["printers"]
             ):
                 return "Print Farm has an active print."
@@ -925,6 +948,7 @@ class Service:
                     **p,
                     "online": True,
                     "idle": ready_state(state) and not fault,
+                    "active_print": state.get("state") not in (0, 2, 3, 4),
                     "unload_required": state.get("state") == 2,
                     "progress": state.get("printProgress"),
                     "nozzle_c": state.get("nozzleTemp"),
@@ -932,6 +956,7 @@ class Service:
                     "seconds_remaining": state.get("printLeftTime"),
                     "detail": "Printer error"
                     if fault
+                    else "Print stopped" if state.get("state") in (3, 4)
                     else (
                         "Finished · waiting for clear bed"
                         if state.get("state") == 2
@@ -958,7 +983,7 @@ class Service:
             and settings.get("account_mode") == "existing_owner"
             else None
         )
-        known = read(legacy / "recipes.json", []) if legacy else []
+        known = read(self.root / "recipes.json", []) + (read(legacy / "recipes.json", []) if legacy else [])
         if legacy:
             old = read(legacy / "gameboy-test-recipe.json", {})
             if old.get("id") and old["id"] not in {r["id"] for r in known}:
@@ -1056,9 +1081,9 @@ class Service:
             terms = set(re.findall(r"[a-z0-9]+", row["title"].lower()))
             ranked = sorted(
                 candidates,
-                key=lambda c: len(
-                    terms & set(re.findall(r"[a-z0-9]+", c["name"].lower()))
-                ),
+                key=lambda c: (len(product_words(row["title"]) & product_words(c["name"])),
+                               c.get("object_count") == 1,
+                               len(terms & set(re.findall(r"[a-z0-9]+", c["name"].lower())))),
                 reverse=True,
             )[:24]
             options = [
@@ -1134,6 +1159,8 @@ class Service:
                 raw = response.read(file["file_size"] + 1)
             if len(raw) != file["file_size"]:
                 raise Hold("Saved print file could not be verified")
+            if gcode_object_count(raw) > 1:
+                raise Hold("This file contains multiple objects. Choose a verified one-item file to avoid overprinting.")
             files_root = self.root / "files"
             files_root.mkdir(exist_ok=True)
             content_hash = hashlib.sha256(raw).hexdigest()
@@ -1148,6 +1175,7 @@ class Service:
                     for k, v in {
                         **recipe,
                         "content_sha256": content_hash,
+                        "object_count": gcode_object_count(raw),
                     }.items()
                     if k != "file"
                 }
@@ -1251,7 +1279,7 @@ class Service:
         previously_busy = {
             printer["id"] for printer in self.snapshot["printers"]
             if printer.get("busy_unconfirmed")
-            or (printer.get("online") and not printer.get("idle"))
+            or (printer.get("online") and printer.get("active_print", not printer.get("idle")))
         }
         for printer in printers:
             printer_id = printer["id"]
@@ -1587,7 +1615,7 @@ class Service:
                 if current:
                     store.ingest(current)
                 return {"status": "held", "reason": "Order changed before printing"}
-            jid = job_id(row, unit)
+            jid = store.job_id(row, unit)
             if self.prior_status(jid, settings) or (ledger / (jid + ".json")).exists():
                 return {
                     "status": "held",
@@ -1648,6 +1676,7 @@ class Service:
                 )
                 store.outcome(jid, record["status"])
                 printer["idle"] = False
+                printer["active_print"] = True
                 printer["detail"] = "Starting print"
                 self.beds.last.pop(printer["id"], None)
                 return {
