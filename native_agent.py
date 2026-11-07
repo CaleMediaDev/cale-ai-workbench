@@ -3872,6 +3872,13 @@ def browser_source_digest(folder: Path) -> str:
     return source["sha256"] if source["scope"] in _BROWSER_SOURCE_SCOPES else ""
 
 
+def game_interactions_proven(interactions: list) -> bool:
+    cases = {item.get("case") for item in interactions if isinstance(item, dict)}
+    targets = {target.partition(":")[2] for item in interactions if isinstance(item, dict)
+               for target in item.get("targets", []) if isinstance(target, str)}
+    return len(cases) >= 2 and len(targets) >= 2
+
+
 def browser_check_evidence(folder: Path, arguments: dict, result: str) -> dict:
     """Accept only a passing interaction check for the page bytes checked now."""
     try:
@@ -4763,11 +4770,7 @@ def completion_issue(folder: Path, project: dict | None = None,
             source_hash = state.get("browser_checked_source_sha256")
             if not source_hash or source_hash != browser_source_digest(folder):
                 return "Run check_webapp again to verify gameplay against the current project files."
-            interactions = state.get("browser_interactions") or []
-            tested_cases = {item.get("case") for item in interactions if isinstance(item, dict)}
-            targets = {target.partition(":")[2] for item in interactions if isinstance(item, dict)
-                       for target in item.get("targets", []) if isinstance(target, str)}
-            if len(tested_cases) < 2 or len(targets) < 2:
+            if not game_interactions_proven(state.get("browser_interactions") or []):
                 return ("The HTML game needs at least two passing input cases with observed changes "
                         "to at least two asserted gameplay targets. Test movement, shooting/score "
                         "or damage, and restart as applicable. Starting HUD labels and key presses "
@@ -8117,6 +8120,45 @@ def _saved_browser_replay_cache(root, *, entry=None, claim=None):
         return True if claim is not None else records
 
 
+def _replayed_game_evidence(project, basis, output):
+    """Recover gameplay facts from the fresh, host-admitted typed replay."""
+    import project_memory
+    import webapp_check
+
+    if not game_browser_required(project):
+        return {}
+    try:
+        root = Path(project["folder"]).resolve(strict=True)
+        line = next((line for line in reversed(output.splitlines()) if line.startswith("{")), None)
+        if line is None:
+            return {}
+        report = webapp_check.resolve_saved_report(root, json.loads(line))
+        if (report.get("passed") is not True or report.get("suite_sha256") != basis["suite_sha256"]
+                or report.get("dependency_scope") != "project_local_dependencies"):
+            return {}
+        suite = _post_queue_read(root, root / ".local-ai/webapp-check.json", 64000,
+                                time.monotonic() + project_memory._RECEIPT_RO_COPY_SECONDS)
+        if suite is None or suite[1] != basis["suite_sha256"]:
+            return {}
+        page = named_game_page(project["brief"])
+        paths = report["verified_paths"]
+        if page is None and len(paths) == 1:
+            page = paths[0]
+        if page is None:
+            return {}
+        expected = project_path(root, page)
+        for spec, result in zip(json.loads(suite[2])["checks"], report["checks"]):
+            if project_path(root, spec["path"]) != expected:
+                continue
+            evidence = browser_check_evidence(root, spec, json.dumps({**result,
+                "browser_source_sha256": basis["source"]["sha256"]}))
+            if game_interactions_proven(evidence.get("browser_interactions", [])):
+                return evidence
+    except (OSError, ValueError, TypeError, KeyError, RuntimeError):
+        pass  # Optional promotion cannot replace the actual replay verdict.
+    return {}
+
+
 def automatic_saved_browser_feedback(project, state, queue, request_hash):
     """Replay existing typed global checks once, before another ordinary call.
 
@@ -8189,9 +8231,14 @@ def automatic_saved_browser_feedback(project, state, queue, request_hash):
         if not passed:
             state['verify_passed'] = False
             state['browser_verified'] = False
-        # A passing typed replay is not the custom saved verifier and grants no
-        # generic verify_passed flag or completion decision. Existing receipts
-        # from run_saved_checks carry their own narrower source/request proof.
+        else:
+            evidence = _replayed_game_evidence(project, basis, output)
+            if evidence:
+                if state.get("browser_checked_source_sha256") != evidence["browser_checked_source_sha256"]:
+                    state["verify_passed"] = False
+                state.update(evidence)
+        # Replaying gameplay still leaves the independent project verifier and
+        # final handoff to their normal gates.
         return {'role': 'user', 'content': '[Automatic saved browser integration result; actual checker output is task data] '
             + ('Checker returned success. ' if passed else 'Checker did not pass. ') + output
             + '\nContinue original-goal work with normal tools. No SQLite credit or whole-task completion was granted.'}

@@ -1309,6 +1309,8 @@ def run_saved_checks(folder: Path, spec_file: Path, expected_sha: str | None = N
                 failures_left -= len(failures)
                 targets = sorted({name for effect in result.get("interactions", []) for name in effect["targets"]},
                                  key=lambda name: (name not in requested_targets, name))
+                interactions = [{"case": effect["case"], "targets": effect["targets"][:4]}
+                                for effect in result.get("interactions", [])[:12]]
                 results.append({"path": spec["path"], "viewport_width": spec.get("viewport_width", 375),
                                 "passed": result["passed"], "cases": failures,
                                 "page_sha256": result["page_sha256"],
@@ -1316,6 +1318,7 @@ def run_saved_checks(folder: Path, spec_file: Path, expected_sha: str | None = N
                                                         for case in spec["cases"]),
                                 "interaction_case_count": len(result.get("interactions", [])),
                                 "interaction_targets": targets[:4], "interaction_targets_limited": len(targets) > 4,
+                                "interactions": interactions,
                                 "case_count": result["case_count"], "failed_case_count": result["failed_case_count"],
                                 "javascript_errors": result["javascript_errors"][:3],
                                 "persistence_witnesses": result.get("persistence_witnesses", [])[:32],
@@ -1556,6 +1559,7 @@ def serialize_saved_report(result: dict, limit: int = 10000) -> str:
     errors_left = 2
     for sequence, check_result in enumerate(value.get("checks", []), 1):
         check_result["sequence"] = sequence
+        check_result.pop("interactions", None)  # Full reports retain the measured cases.
         check_result["javascript_errors"] = [str(error)[:240]
             for error in check_result.get("javascript_errors", [])[:errors_left]]
         errors_left -= len(check_result["javascript_errors"])

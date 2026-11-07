@@ -11074,6 +11074,48 @@ def test_saved_browser_monitor_pause_denies_without_a_full_capture(tmp_path, mon
 
 
 
+def test_saved_browser_actual_game_replay_refreshes_only_gameplay_evidence(tmp_path, monkeypatch):
+    import webapp_check
+
+    item = project(tmp_path / 'replay-game')
+    item['brief'] = 'Build a browser arcade game in index.html.'
+    folder = Path(item['folder'])
+    registry = tmp_path / 'game-registry'
+    registry.mkdir()
+    monkeypatch.setattr(long_tasks, 'STATE', registry)
+    with long_tasks.database() as db:
+        db.execute('INSERT INTO projects(id,title,folder,brief,status,created,updated) VALUES(?,?,?,?,?,?,?)',
+                   (item['id'], 'Fixture game', item['folder'], item['brief'], 'working', time.time(), time.time()))
+    (folder / 'index.html').write_text(
+        '<button id="fire">Fire</button><button id="move">Move</button>'
+        '<p id="score">0</p><p id="position">left</p><script src="game.js"></script>', encoding='utf-8')
+    (folder / 'game.js').write_text("fire.onclick=()=>{score.textContent='1'};"
+                                    "move.onclick=()=>{position.textContent='right'};", encoding='utf-8')
+    prepare_existing_html_gate_fixture(folder, 'index.html')
+    (folder / '.local-ai/PLAN.md').write_text('- [x] Built\n', encoding='utf-8')
+    verifier = folder / '.local-ai/verify.ps1'
+    verifier.write_text("throw 'Replay must not run my independent verifier'", encoding='utf-8')
+    spec = {'path': 'index.html', 'cases': [
+        {'click': ['fire'], 'expect': {'score': '1'}},
+        {'click': ['move'], 'expect': {'position': 'right'}},
+    ]}
+    suite = folder / '.local-ai/webapp-check.json'
+    suite.write_text(json.dumps(webapp_check.saved_suite(folder, spec)), encoding='utf-8')
+    suite_bytes = suite.read_bytes()
+    state = {'status': 'running', 'turns': 1, 'verify_passed': True, 'browser_checked_source_sha256': 'old'}
+    native_agent.save_state(item, state)
+    queue = task_context.step_status(folder)
+    result = native_agent.automatic_saved_browser_feedback(item, state, queue, task_context.request_identity(folder))
+
+    assert result is not None and 'Checker returned success.' in result['content']
+    assert state.get('browser_verified') is True
+    assert state['browser_checked_source_sha256'] == native_agent.browser_source_digest(folder)
+    assert {value['case'] for value in state['browser_interactions']} == {1, 2}
+    assert state['status'] == 'running' and state['turns'] == 1 and state['verify_passed'] is False
+    assert 'Run .local-ai/verify.ps1' in native_agent.completion_issue(folder, item, state)
+    assert suite.read_bytes() == suite_bytes and task_context.step_status(folder) == queue
+
+
 def test_saved_browser_actual_passing_replay_records_bound_receipt_without_supervisor_import_bootstrap(tmp_path, monkeypatch):
     import ast
     import webapp_check
