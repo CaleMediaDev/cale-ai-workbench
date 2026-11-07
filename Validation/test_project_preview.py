@@ -61,6 +61,11 @@ class ProjectPreviewTests(unittest.TestCase):
             preview.safe_loopback_url("https://localhost:8443"),
             "https://localhost:8443",
         )
+        # Test IPv6 loopback without brackets, which should now pass
+        self.assertEqual(
+            preview.safe_loopback_url("http://::1:3000/"),
+            "http://::1:3000/",
+        )
         for url in (
             "https://example.com:443",
             "http://localhost",
