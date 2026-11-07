@@ -38,6 +38,7 @@ from print_farm_transport import (
 )
 
 PRINTER_TELEMETRY_MAX_AGE = 20
+BED_CLEAR_MAX_AGE = 30
 
 
 def read(path, default=None):
@@ -213,10 +214,22 @@ class BedWatcher:
         try:
             if not printer.get("camera_url"):
                 raise Hold("Add a camera snapshot URL to this printer")
+            # Both images support the authorization. Use the beginning of
+            # the first request as the earliest possible capture time.
+            captured = self.clock()
+            capture_started = time.monotonic()
+
+            def fresh():
+                return (
+                    0 <= self.clock() - captured < BED_CLEAR_MAX_AGE
+                    and time.monotonic() - capture_started < BED_CLEAR_MAX_AGE
+                )
+
             first = self.capture(printer["camera_url"])
             self.sleep(2)
             second = self.capture(printer["camera_url"])
-            captured = self.clock()
+            if not fresh():
+                raise Hold("Camera snapshots took too long; a fresh bed check is required")
             if hashlib.sha256(first).digest() == hashlib.sha256(second).digest():
                 raise Hold("Camera frames are identical; waiting for a live view")
             answer = self.infer(
@@ -224,7 +237,9 @@ class BedWatcher:
                 [first, second],
                 model=model,
             )
-            clear = valid_clear(answer) and 0 <= self.clock() - captured <= 30
+            if not fresh():
+                raise Hold("Vision response was too slow; a fresh bed check is required")
+            clear = valid_clear(answer)
             result = {
                 "state": "clear" if clear else "blocked",
                 "reason": str(answer.get("reason", "Bed not clearly empty"))[:300],
@@ -234,11 +249,6 @@ class BedWatcher:
                 "ticket_id": uuid.uuid4().hex,
                 "image_hash": hashlib.sha256(second).hexdigest(),
             }
-            if self.clock() - captured > 30:
-                result.update(
-                    state="unknown",
-                    reason="Vision response was too slow; a fresh bed check is required",
-                )
         except Exception as exc:
             result["reason"] = (
                 str(exc)
@@ -1184,7 +1194,7 @@ class Service:
                 or json.loads(decision[0]).get("token") != proposal["token"]
                 or json.loads(decision[2]) != row
                 or not (can_auto(proposal) or decision[1] == proposal["token"])
-                or not 0 <= time.time() - bed["captured_at"] <= 30
+                or not 0 <= time.time() - bed["captured_at"] < BED_CLEAR_MAX_AGE
             ):
                 return {
                     "status": "queued",
@@ -1214,12 +1224,15 @@ class Service:
             # normally. The desktop cannot restart during this cycle.
             if self._update_draining.is_set():
                 return update_hold
+            if not 0 <= time.time() - bed["captured_at"] < BED_CLEAR_MAX_AGE:
+                return {"status": "queued", "reason": "Camera check expired; waiting for a fresh view"}
             if not store.reserve(jid, key, unit, recipe):
                 return {"status": "held", "reason": "This unit is already reserved"}
             try:
                 # Bind a one-use bed ticket to this specific order and printer.
                 now = time.time()
-                if not self.settings().get("enabled") or now - bed["captured_at"] > 30:
+                if (not self.settings().get("enabled")
+                        or not 0 <= now - bed["captured_at"] < BED_CLEAR_MAX_AGE):
                     raise Hold("Printing paused or camera check expired")
                 auth = {
                     "ticket_id": bed["ticket_id"],
@@ -1230,7 +1243,7 @@ class Service:
                     "bed_clear": True,
                     "confirmed_at": bed["captured_at"],
                     "claimed_at": now,
-                    "expires_at": bed["captured_at"] + 30,
+                    "expires_at": bed["captured_at"] + BED_CLEAR_MAX_AGE,
                 }
                 machine = K1(printer["id"])
 

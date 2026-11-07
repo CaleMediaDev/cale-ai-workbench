@@ -377,6 +377,24 @@ class Decisions(unittest.TestCase):
             "unknown",
         )
 
+    def test_slow_camera_capture_expires_before_vision_is_called(self):
+        now = [100]
+        durations = iter([(b"a", 19), (b"b", 10)])
+        infer = Mock(return_value=clear())
+
+        def capture(_):
+            image, duration = next(durations)
+            now[0] += duration
+            return image
+
+        def sleep(seconds):
+            now[0] += seconds
+
+        watcher = farm.BedWatcher(capture=capture, infer=infer, clock=lambda: now[0], sleep=sleep)
+        result = watcher.check({"id": "p", "camera_url": "http://camera"}, "vision")
+        self.assertEqual(result["state"], "unknown")
+        infer.assert_not_called()
+
     def test_camera_failure_blocks(self):
         watcher = farm.BedWatcher(
             capture=Mock(side_effect=TimeoutError), sleep=lambda _: None
@@ -468,6 +486,20 @@ class Production(unittest.TestCase):
         self.printer["idle"] = True
         self.dispatch()
         self.machine.start_order.assert_called_once()
+
+    def test_expiry_during_order_refresh_leaves_job_queued_for_fresh_camera_check(self):
+        now = [100]
+
+        def lookup(_):
+            if self.client.order.call_count == 2:
+                now[0] = 130
+            return api_order(self.item)
+
+        self.client.order.side_effect = lookup
+        with patch.object(farm.time, "time", side_effect=lambda: now[0]):
+            self.assertEqual(self.dispatch()["status"], "queued")
+        self.assertIsNone(self.store.db.execute("SELECT 1 FROM jobs").fetchone())
+        self.machine.start_order.assert_not_called()
 
     def test_pending_update_holds_new_jobs_and_releases_them_when_canceled(self):
         self.service.set_update_drain(True)
