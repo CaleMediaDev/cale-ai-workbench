@@ -421,10 +421,10 @@ def test_note_csv_without_pitch_bends_can_be_normalized_repeatedly(tmp_path, suf
 
     assert path.read_bytes() == normalized
     with path.open(newline="") as stream:
-        rows = list(csv.DictReader(stream))
-    assert len(rows) == 1
-    assert list(rows[0]) == music_midi.NOTE_COLUMNS
-    assert rows[0]["pitch_bend"] == "[]"
+        rows = list(csv.reader(stream))
+    assert len(rows) == 2
+    assert rows[0] == music_midi.NOTE_COLUMNS
+    assert rows[1][4] == "[]"
     assert not path.with_suffix(".csv.tmp").exists()
 
 
