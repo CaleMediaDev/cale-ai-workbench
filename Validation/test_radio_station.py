@@ -1064,6 +1064,59 @@ def test_studio_waveform_comes_from_pcm_and_invalid_audio_is_blank(tmp_path):
     assert radio.waveform_peaks(tmp_path / "missing.wav") == []
 
 
+def test_waveform_read_does_not_hold_up_radio_playback_or_stop(tmp_path):
+    import threading
+    import time
+
+    moment = [0]
+    player = radio.Player(lambda: Deck(lambda: moment[0]), lambda: moment[0])
+    service = radio.Service(tmp_path, player)
+    first = _studio_pcm(tmp_path / "first.wav")
+    second = _studio_pcm(tmp_path / "second.wav")
+    started, release, finished = threading.Event(), threading.Event(), threading.Event()
+
+    def read_waveform(path):
+        started.set()
+        try:
+            assert release.wait(3)
+            return [.25]
+        finally:
+            finished.set()
+
+    player.play(first)
+    player.prepare(second)
+    service.enabled = service.manual_mode = True
+    with patch.object(radio, "waveform_peaks", side_effect=read_waveform) as decode:
+        try:
+            service.tick()
+            assert started.wait(1) and not finished.is_set()
+            assert {deck["status"] for deck in service.snapshot()["decks"]} == {"Playing", "Cued"}
+            assert all(not deck["peaks"] for deck in service.snapshot()["decks"])
+            assert player.blend(second, 8)
+            moment[0] = 4
+            player.advance_mix()
+            assert player.active.volume > 0 and player.outgoing.volume > 0
+            service.tick()
+            assert decode.call_count == 1
+            service.stop()
+            service.tick()
+            assert not service.enabled and not player.busy() and not finished.is_set()
+        finally:
+            release.set()
+            assert finished.wait(2)
+        deadline = time.monotonic() + 2
+        while service.waveform_pending and time.monotonic() < deadline:
+            service.tick()
+            time.sleep(.01)
+        assert not service.waveform_pending
+        assert all(not deck["peaks"] for deck in service.snapshot()["decks"])
+        player.play(first)
+        service.enabled = True
+        service.tick()
+        assert any(deck["peaks"] == [.25] for deck in service.snapshot()["decks"])
+        assert decode.call_count == 1
+
+
 def studio_preview_fixture(tmp_path):
     """Screenshot-capable real Tk harness; no generation, audio device or user state."""
     import tkinter as tk

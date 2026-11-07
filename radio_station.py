@@ -495,6 +495,8 @@ class Service:
         self.commands = queue.SimpleQueue()
         self.auto_blend = True
         self.waveforms = {}
+        self.waveform_pending = False
+        self.waveform_results = queue.SimpleQueue()
         self.dj_setup = {"status":"idle","percent":0,"message":"Preparing DJ sound"}
         self.dj_thread = None
         self.dj_attempts = 0
@@ -681,7 +683,16 @@ class Service:
                      "station_id": (self.station or {}).get("id")}
 
     def _deck_views(self):
-        """Read/decode audio only on the service thread, never in Tk callbacks."""
+        """Publish timing immediately while the waveform worker reads audio."""
+        try:
+            identity, peaks = self.waveform_results.get_nowait()
+        except queue.Empty:
+            pass
+        else:
+            self.waveform_pending = False
+            self.waveforms[identity] = peaks
+            while len(self.waveforms) > 4:
+                self.waveforms.pop(next(iter(self.waveforms)))
         views = [{"channel": index, "title": "Deck "+letter, "status": "Empty", "elapsed": 0,
                   "duration": 0, "peaks": [], "level": 100, "gain": 0} for index, letter in enumerate("AB")]
         for deck in (getattr(self.player, "active", None), getattr(self.player, "outgoing", None),
@@ -693,11 +704,10 @@ class Service:
             try:
                 stat = Path(path).stat()
                 identity = (path, stat.st_size, stat.st_mtime_ns)
-                if identity not in self.waveforms:
-                    self.waveforms[identity] = waveform_peaks(path)
-                    while len(self.waveforms) > 4:
-                        self.waveforms.pop(next(iter(self.waveforms)))
-                peaks = self.waveforms[identity]
+                if identity not in self.waveforms and not self.waveform_pending and not self.closed.is_set():
+                    threading.Thread(target=self._read_waveform, args=(identity,), daemon=True).start()
+                    self.waveform_pending = True
+                peaks = self.waveforms.get(identity, [])
                 elapsed, duration = deck.clock()
                 views[channel].update(title=(self.current or {}).get("title") if path==(self.current or {}).get("path") and (self.current or {}).get("title") else (self.station or {}).get("name", "Local track"),
                     status="Cued" if deck is getattr(self.player, "prepared", None) else "Paused" if self.paused else "Playing",
@@ -706,6 +716,14 @@ class Service:
             except (OSError, RuntimeError, ValueError):
                 views[channel]["status"] = "Audio unavailable"
         return views
+
+    def _read_waveform(self, identity):
+        """Complete one optional waveform without touching the live decks."""
+        peaks = []
+        try:
+            peaks = waveform_peaks(identity[0])
+        finally:
+            self.waveform_results.put((identity, peaks))
 
     def _commands(self):
         while not self.commands.empty():
@@ -951,8 +969,6 @@ class Service:
 
 def waveform_peaks(path, bins=384):
     """Bounded PCM waveform from the actual recording; unsupported audio is blank."""
-    import array
-    import sys
     import wave
     bins = max(1, min(512, int(bins)))
     try:
@@ -965,17 +981,28 @@ def waveform_peaks(path, bins=384):
             chunk = max(1, math.ceil(frames/bins))
             if chunk*channels*width > 1024*1024:
                 return []
+            try:
+                import numpy as np
+            except ImportError:
+                np = None
+                import array
+                import sys
+            scale = 2**(width*8-1)
             peaks = []
             for _ in range(bins):
                 data = audio.readframes(chunk)
                 if not data:
                     break
-                values = array.array({1: "B", 2: "h", 4: "i"}[width])
-                values.frombytes(data)
-                if sys.byteorder != "little" and width > 1:
-                    values.byteswap()
-                peak = max((abs(value-128) if width == 1 else abs(value) for value in values), default=0)
-                peaks.append(min(1, peak/(128 if width == 1 else 2**(width*8-1))))
+                if np is None:
+                    values = array.array({1: "B", 2: "h", 4: "i"}[width], data)
+                    if sys.byteorder != "little" and width > 1:
+                        values.byteswap()
+                    low, high = min(values), max(values)
+                else:
+                    values = np.frombuffer(data, dtype={1: "u1", 2: "<i2", 4: "<i4"}[width])
+                    low, high = int(values.min()), int(values.max())
+                offset = 128 if width == 1 else 0
+                peaks.append(max(abs(low-offset), abs(high-offset))/scale)
             return peaks
     except (OSError, EOFError, ValueError, wave.Error):
         return []
