@@ -334,18 +334,43 @@ def process_file(project: dict) -> Path:
     return Path(project["folder"]) / ".local-ai" / "native-worker-process.json"
 
 
+class CheckpointCorrupt(OSError):
+    """An existing checkpoint cannot be used to resume safely."""
+
+
+CHECKPOINT_CORRUPT_DETAIL = "Saved task progress is missing or damaged. Restore a valid checkpoint before resuming."
+
+
 def read_state(project: dict) -> dict:
+    missing = False
     for attempt in range(5):
         try:
-            state = json.loads(state_file(project).read_text(encoding="utf-8"))
+            state = json.loads(state_file(project).read_text(encoding="utf-8-sig"))
             break
         except PermissionError:
             if os.name != "nt" or attempt == 4:
                 raise
             time.sleep(0.01 * (attempt + 1))
-        except (OSError, ValueError):
+        except FileNotFoundError:
+            missing = True
             state = {"status": "new", "messages": [], "turns": 0, "failures": 0}
             break
+        except (ValueError, RecursionError) as exc:
+            raise CheckpointCorrupt(CHECKPOINT_CORRUPT_DETAIL) from exc
+    if (
+        not isinstance(state, dict)
+        or not state
+        or ("status" in state and not isinstance(state["status"], str))
+        or (state.get("messages") is not None and not isinstance(state["messages"], list))
+    ):
+        raise CheckpointCorrupt(CHECKPOINT_CORRUPT_DETAIL)
+    _read_worker_identity(project, state)
+    if missing and "pid" in state:
+        raise CheckpointCorrupt(CHECKPOINT_CORRUPT_DETAIL)
+    return state
+
+
+def _read_worker_identity(project: dict, state: dict) -> None:
     for attempt in range(5):
         try:
             identity = json.loads(process_file(project).read_text(encoding="utf-8"))
@@ -357,7 +382,6 @@ def read_state(project: dict) -> dict:
             time.sleep(0.01 * (attempt + 1))
         except (FileNotFoundError, ValueError, TypeError, KeyError):
             break  # Older worker checkpoints still carry their process identity.
-    return state
 
 
 def _save_worker_json(target: Path, value: dict) -> None:
@@ -6417,7 +6441,10 @@ def worker_main(project_id: str) -> int:
         import psutil
 
         with _worker_launch_lock(project):
-            state = read_state(project)
+            try:
+                state = read_state(project)
+            except CheckpointCorrupt:
+                return 1
             if state.get("status") != "starting" or state.get("launch") != launch:
                 return 0
             process = _worker_process(state, project)
@@ -6441,8 +6468,13 @@ def worker_main(project_id: str) -> int:
         else:
             task_context.clear_instruction_wait(project)
         return 0
+    except CheckpointCorrupt:
+        return 1
     except Exception as exc:
-        state = read_state(project)
+        try:
+            state = read_state(project)
+        except CheckpointCorrupt:
+            return 1
         if state.get("status") in {"paused", "stopped", "done"}:
             return 0
         state.update(status="error", error=f"{type(exc).__name__}: {exc}",
@@ -6548,7 +6580,10 @@ def advance(project: dict) -> tuple[str, str] | None:
         return None
     if status == "waiting_for_setup":
         return None
-    state = read_state(project)
+    try:
+        state = read_state(project)
+    except CheckpointCorrupt:
+        return "needs_input", CHECKPOINT_CORRUPT_DETAIL
     if process_alive(state, project):
         detail = state.get("current") or "Cale is working"
         return ("working", detail) if project["detail"] != detail else None
@@ -6563,7 +6598,10 @@ def advance(project: dict) -> tuple[str, str] | None:
         return "checking", "Cale finished the work slice; checking the result."
     if _worker_recovery_exhausted(state):
         return "needs_input", f"Native worker could not recover after 3 tries: {state.get('error', '')}"
-    started = start_worker(project)
+    try:
+        started = start_worker(project)
+    except CheckpointCorrupt:
+        return "needs_input", CHECKPOINT_CORRUPT_DETAIL
     if started and started.get("status") in {"paused", "stopped"}:
         return None
     if started and _worker_recovery_exhausted(started):
@@ -6580,10 +6618,19 @@ def apply_request(project: dict, action: str, note: str) -> str:
 def _apply_request(project: dict, action: str, note: str) -> str:
     import long_tasks
 
-    state = read_state(project)
+    preserve_checkpoint = False
+    try:
+        state = read_state(project)
+    except CheckpointCorrupt:
+        if action not in {"pause", "stop", "delete"}:
+            raise
+        preserve_checkpoint = True
+        state = {}
+        _read_worker_identity(project, state)
     if action in ("pause", "stop", "delete"):
         state["status"] = "paused" if action == "pause" else "stopped"
-        save_state(project, state)
+        if not preserve_checkpoint:
+            save_state(project, state)
         process = _worker_process(state, project)
         if process is not None:
             import psutil

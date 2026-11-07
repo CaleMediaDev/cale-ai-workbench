@@ -3319,7 +3319,11 @@ def advance_project(p):
 
         if p["status"] == "ready_for_review":
             if fingerprint(Path(p["folder"])) != p["fingerprint"]:
-                worker = native_agent.read_state(p)
+                try:
+                    worker = native_agent.read_state(p)
+                except native_agent.CheckpointCorrupt:
+                    update(p["id"], status="needs_input", detail=native_agent.CHECKPOINT_CORRUPT_DETAIL)
+                    return
                 worker["status"] = "continue"
                 worker.setdefault("messages", []).append({
                     "role": "user", "content": "Project files changed after verification. Check the changes and rerun the saved tests.",
@@ -3336,7 +3340,11 @@ def advance_project(p):
                 conn.execute("BEGIN IMMEDIATE")
                 if not _native_verification_is_current(conn, p):
                     return
-                worker = native_agent.read_state(p)
+                try:
+                    worker = native_agent.read_state(p)
+                except native_agent.CheckpointCorrupt:
+                    _update_project(conn, p["id"], dict(status="needs_input", detail=native_agent.CHECKPOINT_CORRUPT_DETAIL))
+                    return
                 failures = 0 if passed else int(worker.get("verification_failures", 0)) + 1
                 if passed:
                     if worker.get("verification_failures"):

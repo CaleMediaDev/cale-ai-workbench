@@ -96,6 +96,59 @@ def test_persistent_checkpoint_denial_never_becomes_a_new_task(tmp_path):
     assert read.call_count == (5 if os.name == "nt" else 1)
 
 
+@pytest.mark.parametrize("content", [b'{"status":', b'[]', b'{"status":"running","messages":{}}', None])
+def test_bad_checkpoint_never_restarts_existing_work(tmp_path, content):
+    item = {**project(tmp_path / "damaged"), "status": "working", "detail": "Running"}
+    checkpoint = native_agent.state_file(item)
+    if content is None:
+        native_agent.process_file(item).write_text('{"pid":42,"process_created":1}', encoding="utf-8")
+    else:
+        checkpoint.write_bytes(content)
+    with (patch.object(native_agent, "process_alive", return_value=False),
+          patch.object(native_agent, "start_worker", return_value={"status": "starting"}) as launch):
+        result = native_agent.advance(item)
+    assert result[0] == "needs_input"
+    assert "Restore a valid checkpoint" in result[1]
+    launch.assert_not_called()
+    if content is None:
+        assert not checkpoint.exists()
+    else:
+        assert checkpoint.read_bytes() == content
+
+
+def test_failed_worker_preserves_corrupt_checkpoint_for_recovery(tmp_path):
+    item = project(tmp_path / "damaged-during-work")
+    checkpoint = native_agent.state_file(item)
+    damaged = b'{"status":"running","messages":'
+    native_agent.save_state(item, {"status": "running", "messages": []})
+
+    def failed(_item):
+        checkpoint.write_bytes(damaged)
+        raise OSError("Fixture worker failed")
+
+    with (patch.object(long_tasks, "projects", return_value=[item]),
+          patch.object(native_agent, "run_slice", side_effect=failed)):
+        assert native_agent.worker_main(item["id"]) == 1
+    assert checkpoint.read_bytes() == damaged
+
+
+def test_stop_uses_verified_worker_identity_without_overwriting_bad_checkpoint(tmp_path):
+    item = project(tmp_path / "stop-damaged")
+    checkpoint = native_agent.state_file(item)
+    checkpoint.write_bytes(b"{")
+    native_agent.process_file(item).write_text('{"pid":42,"process_created":1}', encoding="utf-8")
+    worker = Mock()
+    worker.children.return_value = []
+    with (patch.object(native_agent, "_worker_process", return_value=worker) as process,
+          patch.object(long_tasks, "update") as update):
+        assert native_agent.apply_request(item, "stop", "") == "Stopped"
+    assert checkpoint.read_bytes() == b"{"
+    state, owner = process.call_args.args
+    assert owner == item and state["pid"] == 42 and state["process_created"] == 1.0
+    worker.terminate.assert_called_once()
+    update.assert_called_once_with(item["id"], status="stopped", detail="Stopped")
+
+
 def test_failed_checkpoint_publication_keeps_prior_state_and_cleans_temporary_file(tmp_path):
     item = project(tmp_path / "locked-checkpoint")
     previous = {"status": "continue", "messages": [], "current": "Saved progress"}
@@ -4551,6 +4604,23 @@ def test_passing_review_resets_old_verification_failures():
             with patch.object(long_tasks, "verify_project", return_value=(True, "Checks passed")):
                 long_tasks.advance_project(item)
             assert native_agent.read_state(item)["verification_failures"] == 0
+
+
+def test_bad_checkpoint_is_not_overwritten_by_independent_verification(tmp_path):
+    with patch.object(long_tasks, "STATE", tmp_path / "registry"):
+        task_id = long_tasks.add_project("Page", str(tmp_path / "page"), "Make a page")
+        long_tasks.update(task_id, status="checking")
+        item = long_tasks.projects()[0]
+        checkpoint = native_agent.state_file(item)
+        checkpoint.write_bytes(b'{"status":')
+
+        with patch.object(long_tasks, "verify_project", return_value=(False, "Fixture check failed")):
+            long_tasks.advance_project(item)
+
+        held = long_tasks.projects()[0]
+        assert held["status"] == "needs_input"
+        assert "Restore a valid checkpoint" in held["detail"]
+        assert checkpoint.read_bytes() == b'{"status":'
 
 
 @pytest.mark.parametrize("action,note", [("resume", ""), ("note", "Use the updated dependency and try again.")])
