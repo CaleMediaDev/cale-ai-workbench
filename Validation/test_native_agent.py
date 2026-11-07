@@ -2946,6 +2946,75 @@ def test_native_worker_reuses_router_across_model_turns():
         assert created[0].calls == 2
 
 
+def test_native_worker_early_exit_recovers_from_checkpoint_then_stops_crash_loop(tmp_path, monkeypatch):
+    monkeypatch.setattr(long_tasks, "STATE", tmp_path / "registry")
+    task_id = long_tasks.add_project("Page", str(tmp_path / "page"), "Make a page")
+    item = long_tasks.projects()[0]
+    script = tmp_path / "native_agent.py"
+    source = str(Path(native_agent.__file__).resolve().parent)
+    script.write_text(
+        "import os, sys\n"
+        f"sys.path.insert(0, {source!r})\n"
+        "import long_tasks, native_agent\n"
+        "native_agent.__file__ = __file__\n"
+        f"item = {item!r}\n"
+        "long_tasks.projects = lambda: [item]\n"
+        "def work(project):\n"
+        "    state = native_agent.read_state(project)\n"
+        "    state.setdefault('messages', []).append({'role': 'assistant', 'content': 'Saved step'})\n"
+        "    state.update(status='running', failures=0, turns=state.get('turns', 0)+1)\n"
+        "    native_agent.save_state(project, state)\n"
+        "    os._exit(73)\n"
+        "native_agent.run_slice = work\n"
+        "raise SystemExit(native_agent.worker_main(sys.argv[2]))\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(native_agent, "__file__", str(script))
+    monkeypatch.setattr(long_tasks, "environment", lambda: os.environ.copy())
+    popen = subprocess.Popen
+    launches = []
+
+    def launch(*args, **kwargs):
+        child = popen(*args, **kwargs)
+        launches.append(child)
+        return child
+
+    monkeypatch.setattr(native_agent.subprocess, "Popen", launch)
+    for expected in (1, 2, 3):
+        long_tasks.tick()
+        assert len(launches) == expected
+        try:
+            assert launches[-1].wait(timeout=15) == 73
+        finally:
+            if launches[-1].poll() is None:
+                launches[-1].kill()
+                launches[-1].wait(timeout=5)
+    long_tasks.tick()
+    long_tasks.tick()
+    blocked = long_tasks.projects()[0]
+    checkpoint = native_agent.read_state(item)
+    assert len(launches) == 3
+    assert blocked["status"] == "needs_input"
+    assert "exited before saving" in blocked["detail"]
+    assert checkpoint["worker_interruptions"] == checkpoint["turns"] == 3
+    assert [message["content"] for message in checkpoint["messages"]] == ["Saved step"] * 3
+    long_tasks.request(task_id, "resume", "Use the alternate method.")
+    long_tasks.process_requests()
+    resumed = native_agent.read_state(item)
+    assert resumed["status"] == "continue" and "worker_interruptions" not in resumed
+    assert resumed["messages"][-1]["content"] == "Use the alternate method."
+
+
+def test_native_worker_start_grace_waits_for_late_registration(tmp_path, monkeypatch):
+    item = {**project(tmp_path / "registering"), "status": "working", "detail": ""}
+    previous = {"status": "starting", "launch": "prior", "launch_started": time.time()}
+    native_agent.save_state(item, previous)
+    monkeypatch.setattr(native_agent, "process_alive", lambda *_: False)
+    with patch.object(native_agent.subprocess, "Popen", side_effect=AssertionError("Duplicate start")):
+        assert native_agent.start_worker(item) == previous
+    assert native_agent.read_state(item) == previous
+
+
 def test_worker_start_does_not_overwrite_a_child_checkpoint():
     with tempfile.TemporaryDirectory() as temporary:
         item = project(Path(temporary) / "page")

@@ -43,6 +43,8 @@ _BROWSER_REVISION_BINDINGS = {}
 _INVALID_ACCEPTANCE_CONTEXT_FORMAT = "invalid_acceptance_context_v2"
 _GENERIC_ASSERTION_SCOPE_FORMAT = "generic_assertion_scope_v2"
 _WORKER_LAUNCH_ENV = "CALE_NATIVE_WORKER_LAUNCH"
+_WORKER_START_GRACE_SECONDS = 10
+_WORKER_RECOVERY_LIMIT = 3
 _WORKER_LOCK_NAME = "native-worker.lock"
 
 EXPRESSION_HELPER_TOOL = {"type":"function","function":{"name":"check_expression_helper",
@@ -6462,6 +6464,13 @@ def process_alive(state: dict, project: dict | None = None) -> bool:
     return _worker_process(state, project) is not None
 
 
+def _worker_recovery_exhausted(state: dict) -> bool:
+    return state.get("status") == "error" and (
+        int(state.get("failures", 0)) >= _WORKER_RECOVERY_LIMIT
+        or int(state.get("worker_interruptions", 0)) >= _WORKER_RECOVERY_LIMIT
+    )
+
+
 def start_worker(project: dict) -> dict:
     import psutil
 
@@ -6472,15 +6481,34 @@ def start_worker(project: dict) -> dict:
         state = read_state(project)
         if state.get("status") in {"paused", "stopped", "done"} or process_alive(state, project):
             return state
-        if state.get("status") == "error" and int(state.get("failures", 0)) >= 3:
+        if _worker_recovery_exhausted(state):
             return state
         if task_context.instruction_wait(project):
             return state
 
+        previous_status = state.get("status")
+        if previous_status == "starting":
+            # An orphaned child can still be importing and about to register
+            # its identity. Give that launch time to finish before replacing it.
+            age = time.time() - float(state.get("launch_started", 0))
+            if 0 <= age < _WORKER_START_GRACE_SECONDS:
+                return state
+        if previous_status in {"starting", "running"}:
+            # A native crash can skip worker_main's exception handler. Count
+            # it separately so a valid model response cannot erase the crash
+            # budget before the worker reaches a clean slice boundary.
+            state["worker_interruptions"] = int(state.get("worker_interruptions", 0)) + 1
+            if state["worker_interruptions"] >= _WORKER_RECOVERY_LIMIT:
+                state.update(status="error", error="The worker exited before saving a completed work slice.")
+                save_state(project, state)
+                return state
+        elif previous_status == "continue":
+            state.pop("worker_interruptions", None)
         env = long_tasks.environment()
         launch = uuid.uuid4().hex
         env[_WORKER_LAUNCH_ENV] = launch
-        state.update(status="starting", current="Starting Cale's native worker", launch=launch)
+        state.update(status="starting", current="Starting Cale's native worker",
+                     launch=launch, launch_started=time.time())
         save_state(project, state)
         python = ROOT / "Toolbox/python/Scripts/python.exe"
         process = subprocess.Popen([str(python if python.is_file() else sys.executable),
@@ -6517,11 +6545,13 @@ def advance(project: dict) -> tuple[str, str] | None:
             return ('working', detail) if project.get('detail') != detail else None
     if state.get("status") == "done":
         return "checking", "Cale finished the work slice; checking the result."
-    if state.get("status") == "error" and int(state.get("failures", 0)) >= 3:
+    if _worker_recovery_exhausted(state):
         return "needs_input", f"Native worker could not recover after 3 tries: {state.get('error', '')}"
     started = start_worker(project)
     if started and started.get("status") in {"paused", "stopped"}:
         return None
+    if started and _worker_recovery_exhausted(started):
+        return "needs_input", f"Native worker could not recover after 3 tries: {started.get('error', '')}"
     return "working", "Cale's native worker is continuing from saved progress."
 
 
@@ -6564,6 +6594,7 @@ def _apply_request(project: dict, action: str, note: str) -> str:
         if note or project.get("status") == "needs_input":
             invalidate_checks(state)
             state["failures"] = 0
+            state.pop("worker_interruptions", None)
             state["verification_failures"] = 0
             state.pop("error", None)
         state["status"] = "continue"
