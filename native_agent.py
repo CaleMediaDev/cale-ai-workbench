@@ -2098,14 +2098,18 @@ def check_function(folder: Path, arguments: dict, *, javascript: bool = False) -
 
 
 def prompt(project: dict, *, rules_override: str | None = None) -> str:
+    import task_context
+
     folder = Path(project["folder"])
     if rules_override is not None:
         rules = rules_override
     else:
         try:
-            rules = (folder / "AGENTS.md").read_text(encoding="utf-8-sig", errors="replace")
-        except OSError:
+            rules = task_context.read_task_note(folder, folder / "AGENTS.md", errors="replace")
+        except FileNotFoundError:
             rules = ""
+        except OSError as exc:
+            raise InstructionReadUnavailable("Task instructions are temporarily unreadable") from exc
     if len(rules) > 4000:
         rules = (rules[:2000] + "\n… rules excerpt omitted; read AGENTS.md if needed …\n"
                  + rules[-2000:])
@@ -3388,9 +3392,11 @@ def step_repair_requirements(project: dict):
     for name, path in (("project_rules", folder / "AGENTS.md"),
                        ("user_followups", task_context.document_path(folder, "USER-REQUESTS.md"))):
         basis[name] = None
-        if path.is_file():
-            with path.open(encoding="utf-8-sig", errors="replace") as stream:
-                text = stream.read(4001)
+        try:
+            text = task_context.read_task_note(folder, path, limit=4001, errors="replace")
+        except FileNotFoundError:
+            continue
+        else:
             if len(text) > 4000:
                 return None
             documents[name] = text
@@ -4122,8 +4128,11 @@ def planning_intent(project: dict | None) -> str:
 
         folder = Path(project["folder"])
         followups = task_context.document_path(folder, "USER-REQUESTS.md")
-        if followups.is_file():
-            text = followups.read_text(encoding="utf-8-sig").strip()
+        try:
+            text = task_context.read_task_note(folder, followups).strip()
+        except FileNotFoundError:
+            pass
+        else:
             if text:
                 history = task_context.historical_step_status(folder)
                 if history["total"] and not history["remaining"]:
@@ -4171,11 +4180,8 @@ def planning_basis(project: dict) -> dict:
     basis = {"brief": hashlib.sha256(str(project.get("brief", "")).encode()).hexdigest()}
     for name, path in (("rules", folder / "AGENTS.md"),
                        ("followups", task_context.document_path(folder, "USER-REQUESTS.md"))):
-        basis[name] = None
         try:
-            if path.is_file():
-                with path.open("rb") as stream:
-                    basis[name] = hashlib.file_digest(stream, "sha256").hexdigest()
+            basis[name] = task_context.note_digest(folder, path)
         except OSError as exc:
             raise InstructionReadUnavailable("Task instructions are temporarily unreadable") from exc
     return basis
@@ -5789,6 +5795,8 @@ def _run_slice(project: dict, complete=None) -> dict:
             )
         except task_context.CheckpointChanged:
             return _post_queue_instruction_defer(project, state, "checkpoint_changed")
+        except OSError as exc:
+            raise InstructionReadUnavailable("Task instructions are temporarily unreadable") from exc
         if needs_initial_plan and planning_basis(project) != plan_basis:
             continue  # Rebuild the prompt and its identity together, without inference or mutation.
         frontier = post_queue_frontier(project, state, planned_queue, planned_request_hash,

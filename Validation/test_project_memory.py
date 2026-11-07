@@ -539,6 +539,28 @@ def test_recovery_artifact_guard_rejects_database_link(tmp_path):
     assert target.read_text()=='unmodified'
 
 
+def test_regular_project_memory_refuses_a_hardlinked_database(tmp_path):
+    import sqlite3
+    import pytest
+
+    root = tmp_path / "project"
+    notes = root / ".local-ai"
+    notes.mkdir(parents=True)
+    outside = tmp_path / "outside.sqlite3"
+    conn = sqlite3.connect(outside)
+    try:
+        conn.execute("CREATE TABLE fixture (value INTEGER)")
+        conn.commit()
+    finally:
+        conn.close()
+    before = outside.read_bytes()
+    os.link(outside, notes / "memory.sqlite3")
+
+    with pytest.raises(ValueError, match="own project"):
+        memory.initialize(root)
+    assert outside.read_bytes() == before
+
+
 # Scoped host evidence port: original accepted85552a5 regressions.
 
 def test_verification_manifest_covers_external_js_and_marks_omitted_inputs_limited(tmp_path,monkeypatch):

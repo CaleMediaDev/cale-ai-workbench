@@ -3726,6 +3726,37 @@ def test_checkpoint_does_not_mix_request_bytes_with_a_different_saved_queue(tmp_
     assert "Revised requirement" in checkpoint and "Revised step" in checkpoint
 
 
+def test_linked_note_is_excluded_from_checkpoint_and_project_search(tmp_path):
+    item = project(tmp_path / "page")
+    folder = Path(item["folder"])
+    outside = tmp_path / "outside.txt"
+    outside.write_text("- [ ] OutsideProjectSecretFixture", encoding="utf-8")
+    os.link(outside, folder / ".local-ai/PLAN.md")
+
+    checkpoint = task_context.snapshot(folder)
+    assert "[Note unavailable.]" in checkpoint
+    assert "OutsideProjectSecretFixture" not in checkpoint
+    project_memory.index(folder)
+    with project_memory.connection(folder) as conn:
+        assert not conn.execute("SELECT 1 FROM memories WHERE body LIKE '%OutsideProjectSecretFixture%'").fetchone()
+
+
+@pytest.mark.parametrize("name", ["AGENTS.md", ".local-ai/USER-REQUESTS.md"])
+def test_linked_instruction_defers_before_provider_call(tmp_path, name):
+    item = project(tmp_path / "page")
+    folder = Path(item["folder"])
+    outside = tmp_path / "outside.txt"
+    outside.write_text("Outside project instructions", encoding="utf-8")
+    os.link(outside, folder / name)
+    provider = Mock(side_effect=AssertionError("Linked instructions must not reach a provider"))
+
+    state = native_agent.run_slice(item, complete=provider)
+
+    assert state.get("instruction_read_unavailable") is True
+    assert not native_agent.state_file(item).exists()
+    provider.assert_not_called()
+
+
 def test_failed_checker_details_survive_event_trimming_and_fresh_context(tmp_path):
     item = project(tmp_path / "page")
     folder = Path(item["folder"])

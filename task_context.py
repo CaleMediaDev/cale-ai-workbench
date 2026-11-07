@@ -7,10 +7,13 @@ keeps a quick snapshot and a bounded action trail for restartable model calls.
 from __future__ import annotations
 
 import hashlib
+import io
 import json
 import os
 import re
+import stat
 import time
+from contextlib import contextmanager
 from pathlib import Path
 
 import project_memory
@@ -19,6 +22,30 @@ from webapp_check import MAX_SAVED_SEQUENCES
 DOCUMENTS = ("PLAN.md", "PROGRESS.md", "USER-REQUESTS.md")
 LIMITS = {"PLAN.md": 3500, "PROGRESS.md": 3500, "USER-REQUESTS.md": 2500}
 CACHE_RECHECK_SECONDS = 300
+
+
+@contextmanager
+def open_task_note(folder: str | Path, path: Path):
+    """Read an owned file handle, never a linked note or substituted target."""
+    root = Path(folder).resolve()
+    if not path.parent.resolve().is_relative_to(root):
+        raise OSError("Task note is outside its project")
+    info = path.lstat()
+    if (not stat.S_ISREG(info.st_mode) or info.st_nlink != 1
+            or getattr(info, "st_file_attributes", 0) & 0x400):
+        raise OSError("Task notes must be ordinary files owned by the project")
+    with path.open("rb") as stream:
+        actual = os.fstat(stream.fileno())
+        if (actual.st_nlink != 1 or not os.path.samestat(info, actual)
+                or not path.parent.resolve().is_relative_to(root)):
+            raise OSError("Task note changed before opening")
+        yield stream
+
+
+def read_task_note(folder: str | Path, path: Path, *, limit=-1, errors="strict") -> str:
+    with open_task_note(folder, path) as stream:
+        with io.TextIOWrapper(stream, encoding="utf-8-sig", errors=errors) as text:
+            return text.read(limit)
 
 
 def _instruction_wait_basis(project):
@@ -206,9 +233,7 @@ def recovery_snapshot(folder: str | Path) -> str:
     for name in DOCUMENTS:
         path = document_path(root, name)
         try:
-            if not path.resolve().is_relative_to(root.resolve()):
-                raise OSError("Recovery note is outside the project")
-            with path.open("rb") as stream:
+            with open_task_note(root, path) as stream:
                 raw = stream.read(64001)
                 if len(raw) > 64000:
                     stream.seek(-32000, os.SEEK_END)
@@ -303,9 +328,12 @@ def document_path(folder: str | Path, name: str) -> Path:
         return standard
     alternate = root / name
     try:
-        if (alternate.is_file() and alternate.resolve().is_relative_to(root.resolve())
+        info = alternate.lstat()
+        if (stat.S_ISREG(info.st_mode) and info.st_nlink == 1
+                and not getattr(info, "st_file_attributes", 0) & 0x400
+                and alternate.resolve().is_relative_to(root.resolve())
                 and (not standard.is_file()
-                     or alternate.stat().st_mtime_ns > standard.stat().st_mtime_ns)):
+                     or info.st_mtime_ns > standard.stat().st_mtime_ns)):
             return alternate
     except (OSError, ValueError):
         pass  # A removed or inaccessible alternative must not break recovery.
@@ -334,20 +362,28 @@ def checkpoint_view(folder: str | Path, *, expected_request: str | None = None) 
         for name in DOCUMENTS:
             path = document_path(root, name)
             sources[name] = path.relative_to(root).as_posix()
-            stamp = _document_state(path)
             raw = b""
             stable = False
-            for _ in range(2):
-                try:
-                    raw = path.read_bytes() if stamp != (-1, -1) else b""
-                except FileNotFoundError:
-                    raw = b""
-                    stamp = (-1, -1)
-                after = _document_state(path)
-                if after == stamp:
-                    stable = True
-                    break
-                stamp = after
+            try:
+                stamp = _document_state(path)
+                for _ in range(2):
+                    try:
+                        with open_task_note(root, path) as stream:
+                            raw = stream.read()
+                    except FileNotFoundError:
+                        raw = b""
+                        stamp = (-1, -1)
+                    after = _document_state(path)
+                    if after == stamp:
+                        stable = True
+                        break
+                    stamp = after
+            except OSError:
+                if name == "USER-REQUESTS.md":
+                    raise
+                # Do not fall back to cached text from an unreadable or linked note.
+                documents[name], steps[name], stamps[name] = "[Note unavailable.]", "", (-2, -2)
+                continue
             digest = hashlib.sha256(raw).hexdigest()
             hashes[name] = digest
             row = conn.execute("""SELECT body,digest,mtime_ns,size,next_step,updated FROM task_documents
@@ -747,7 +783,7 @@ def save_api_scope(folder: str | Path, brief: str, known: list[str], operation: 
             or len(set(names)) != len(names) or not isinstance(quote, str) or not 8 <= len(quote) <= 1000):
         raise ValueError("Use exclude/only, 1 to 8 declared function_names, and a short exact instruction_quote.")
     request = request_identity(folder)
-    text = document_path(folder, "USER-REQUESTS.md").read_text(encoding="utf-8-sig")
+    text = read_task_note(folder, document_path(folder, "USER-REQUESTS.md"))
     latest = re.split(r"(?m)^## Request \d+\s*$", text)[-1]
     if quote not in latest or any(not re.search(r"(?<![\w$])" + re.escape(name) + r"(?![\w$])", quote) for name in names):
         raise ValueError("The exact quote must come from the latest USER-REQUESTS.md entry and name every selected function.")
@@ -769,7 +805,10 @@ def api_scope(folder: str | Path, brief: str, known: list[str]) -> list[str]:
         rows = conn.execute("SELECT * FROM task_api_scope WHERE brief_hash=? ORDER BY updated",
             (hashlib.sha256(brief.encode()).hexdigest(),)).fetchall()
     path = document_path(folder, "USER-REQUESTS.md")
-    text = path.read_text(encoding="utf-8-sig") if path.is_file() else ""
+    try:
+        text = read_task_note(folder, path)
+    except FileNotFoundError:
+        text = ""
     required = set(known)
     for row in rows:
         size = row["source_chars"]
@@ -826,21 +865,18 @@ def action_outcome(tool: str, result: str) -> str:
     return "Completed"
 
 
-def _file_digest(path: Path) -> str:
-    """Hash source identity without loading a long-lived request file into RAM."""
-    digest = hashlib.sha256()
+def note_digest(folder: str | Path, path: Path) -> str | None:
+    """Hash an owned instruction file without loading it into memory."""
     try:
-        with path.open("rb") as source:
-            for chunk in iter(lambda: source.read(64 * 1024), b""):
-                digest.update(chunk)
+        with open_task_note(folder, path) as source:
+            return hashlib.file_digest(source, "sha256").hexdigest()
     except FileNotFoundError:
-        pass
-    return digest.hexdigest()
+        return None
 
 
 def request_identity(folder: str | Path) -> str:
     """Identify the queued user instructions that a model turn was planned against."""
-    return _file_digest(Path(folder)/".local-ai/USER-REQUESTS.md")
+    return note_digest(folder, Path(folder)/".local-ai/USER-REQUESTS.md") or hashlib.sha256(b"").hexdigest()
 
 
 def checker_failures(folder: str | Path, query: str = "", limit: int = 5) -> list[dict]:

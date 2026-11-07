@@ -12,6 +12,7 @@ import math
 import os
 import re
 import sqlite3
+import stat
 import time
 import unicodedata
 import uuid
@@ -58,12 +59,19 @@ def _artifact_project_root(folder: str | Path) -> Path:
 
 def database_path(folder: str | Path) -> Path:
     """Keep the index with its project so it survives app source updates."""
-    root = Path(folder).resolve(strict=True)
-    if not root.is_dir():
-        raise ValueError("Project folder is not a directory.")
+    root = _artifact_project_root(folder)
     state = root / ".local-ai"
     state.mkdir(exist_ok=True)
-    return state / "memory.sqlite3"
+    database = state / "memory.sqlite3"
+    for suffix in ("", "-wal", "-shm", "-journal"):
+        try:
+            info = database.with_name(database.name + suffix).lstat()
+        except FileNotFoundError:
+            continue
+        if (not stat.S_ISREG(info.st_mode) or info.st_nlink != 1
+                or getattr(info, "st_file_attributes", 0) & 0x400):
+            raise ValueError("SQLite state must stay in its own project; links are not allowed.")
+    return database
 
 
 @contextmanager
@@ -146,8 +154,9 @@ def _eligible(root: Path, path: Path) -> bool:
         if not resolved.is_relative_to(root) or SECRET_NAME.search(resolved.name):
             return False
         relative = resolved.relative_to(root)
+        info = resolved.stat()
         return (resolved.is_file() and not any(SECRET_NAME.search(part) for part in relative.parts[:-1])
-                and resolved.stat().st_size <= 256_000)
+                and info.st_nlink == 1 and info.st_size <= 256_000)
     except (OSError, RuntimeError):
         return False
 
