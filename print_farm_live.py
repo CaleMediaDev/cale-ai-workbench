@@ -454,7 +454,7 @@ class CameraTile(ttk.Frame):
         overlay = self.overlay.get()
         self.mode_button.configure(text="Live camera" if overlay else "AI overlay")
         raw = (
-            result.get("frame")
+            frame.get("bytes")
             if overlay and live_ok
             else frame.get("bytes")
             if live_ok

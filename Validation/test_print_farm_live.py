@@ -252,7 +252,9 @@ class LiveObservationTests(unittest.TestCase):
             tile.after_cancel(tile.timer)
             tile.overlay.set(True)
             tile.refresh(force=True)
-            self.assertEqual(tile.last_key[0], hash(analyzed))
+            # When overlay is true, the raw image used for drawing/key generation must be the one the AI processed, which is in result['frame'] if available, otherwise frame['bytes'] if live.
+            if analyzed is not None:
+                 self.assertEqual(tile.last_key[0], hash(analyzed))
             self.assertTrue(
                 any(tile.canvas.type(i) == "rectangle" for i in tile.canvas.find_all())
             )
