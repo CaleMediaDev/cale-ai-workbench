@@ -65,6 +65,46 @@ def clear():
 
 
 class Decisions(unittest.TestCase):
+    def test_status_sharing_violation_does_not_stop_print_service(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            service = farm.Service(temporary)
+            original = farm.persist
+            failed = threading.Event()
+            recovered = threading.Event()
+
+            def write_status(path, snapshot):
+                if not failed.is_set():
+                    failed.set()
+                    service.wake.set()
+                    raise PermissionError("Status snapshot temporarily locked")
+                original(path, snapshot)
+                recovered.set()
+
+            with (patch.object(service, "cycle") as cycle,
+                  patch.object(farm, "persist", side_effect=write_status)):
+                service.start()
+                try:
+                    self.assertTrue(recovered.wait(timeout=5))
+                    self.assertTrue(service.thread.is_alive())
+                    self.assertGreaterEqual(cycle.call_count, 2)
+                    self.assertTrue((service.root / "status.json").is_file())
+                finally:
+                    service.stop()
+                    service.thread.join(timeout=5)
+                self.assertFalse(service.thread.is_alive())
+
+    def test_failed_atomic_replace_preserves_previous_file_and_removes_its_temp(self):
+        from print_farm_transport import persist
+
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "status.json"
+            persist(path, {"progress": 50})
+            with patch("print_farm_transport.os.replace", side_effect=PermissionError("locked")):
+                with self.assertRaises(PermissionError):
+                    persist(path, {"progress": 60})
+            self.assertEqual(json.loads(path.read_text()), {"progress": 50})
+            self.assertEqual(list(path.parent.iterdir()), [path])
+
     def test_update_waits_for_busy_printers_and_unsettled_submissions(self):
         with tempfile.TemporaryDirectory() as temporary:
             service = farm.Service(temporary)

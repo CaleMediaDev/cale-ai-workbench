@@ -12,7 +12,7 @@ import tkinter as tk
 from tkinter import messagebox, ttk
 from urllib.parse import urlsplit
 
-from print_farm import Service, digest
+from print_farm import PRINTER_TELEMETRY_MAX_AGE, Service, digest
 from print_farm_live import CameraTile, LiveCameras
 
 
@@ -32,6 +32,7 @@ class PrinterCard(tk.Frame):
         "complete": ("Print complete", "#78e6ab"),
         "fault": ("Needs attention", "#ffc879"),
         "offline": ("Offline", "#9cadc4"),
+        "stale": ("Signal delayed", "#ffc879"),
     }
 
     def __init__(self, parent, live, printer_id, settings):
@@ -122,9 +123,11 @@ class PrinterCard(tk.Frame):
             return None
         return value if math.isfinite(value) and 0 <= value <= maximum else None
 
-    def render(self, printer):
+    def render(self, printer, *, telemetry_stale=False):
         detail = printer.get("detail", "")
-        if not printer.get("online"):
+        if telemetry_stale:
+            state = "stale"
+        elif not printer.get("online"):
             state = "offline"
         elif detail == "Printer error":
             state = "fault"
@@ -144,9 +147,9 @@ class PrinterCard(tk.Frame):
             eta = f"{hours}h {minutes:02d}m" if hours else f"{minutes}m"
         temperatures = []
         for field in ("nozzle_c", "bed_c"):
-            temp = self.read_number(printer.get(field), 500) if printer.get("online") else None
+            temp = self.read_number(printer.get(field), 500) if state not in {"offline", "stale"} else None
             temperatures.append("—" if temp is None else f"{temp:.0f}°C")
-        bed_state = (printer.get("bed") or {}).get("state")
+        bed_state = None if telemetry_stale else (printer.get("bed") or {}).get("state")
         bed_label, bed_color = {
             "clear": ("✓  Build plate clear", "#78e6ab"),
             "blocked": ("!  Build plate occupied", "#ffc879"),
@@ -445,11 +448,14 @@ class Controls:
                 pady=(0, 8),
             )
 
-    def render(self, snapshot):
+    def render(self, snapshot, *, telemetry_stale=False):
         printers = snapshot.get("printers", [])
         online = sum(bool(printer.get("online")) for printer in printers)
         busy = sum(bool(printer.get("online") and not printer.get("idle")) for printer in printers)
-        self.fleet_status.configure(text=f"PRINTERS    ● {online}/{len(printers)} ONLINE    ◇ {busy} BUSY")
+        self.fleet_status.configure(
+            text="PRINTERS    ◇ SIGNAL DELAYED" if telemetry_stale
+            else f"PRINTERS    ● {online}/{len(printers)} ONLINE    ◇ {busy} BUSY"
+        )
         previous_ids = tuple(self.printer_data)
         self.printer_data = {p["id"]: p for p in printers}
         for pid in list(self.printer_cards):
@@ -467,7 +473,7 @@ class Controls:
                                    lambda key=pid: self.add_printer(self.printer_data.get(key)))
                 self.printer_cards[pid] = card
                 self.camera_tiles[pid] = card.camera
-            self.printer_cards[pid].render(printer)
+            self.printer_cards[pid].render(printer, telemetry_stale=telemetry_stale)
         if previous_ids != tuple(self.printer_data):
             self.layout_printers(self.canvas.winfo_width())
         rows = snapshot.get("orders", [])
@@ -575,15 +581,19 @@ class Controls:
         else:
             self.connect_button.configure(text="Connect eBay account")
             self.account_button.pack_forget()
-        signature = digest(
+        telemetry_stale = bool(snapshot.get("printers")) and not (
+            0 <= time.time() - snapshot.get("printer_telemetry_at", 0) <= PRINTER_TELEMETRY_MAX_AGE
+        )
+        signature = digest([
             {
                 k: v
                 for k, v in snapshot.items()
-                if k not in ("checked_at", "ebay_checked_at")
-            }
-        )
+                if k not in ("checked_at", "ebay_checked_at", "printer_telemetry_at")
+            },
+            telemetry_stale,
+        ])
         if signature != self.last_render:
-            self.render(snapshot)
+            self.render(snapshot, telemetry_stale=telemetry_stale)
             self.last_render = signature
             if not self.busy:
                 self.status.set(snapshot.get("status", ""))

@@ -64,11 +64,21 @@ def persist(path, data, exclusive=False):
             os.fsync(f.fileno())
     else:
         temp = path.with_suffix("." + uuid.uuid4().hex + ".tmp")
-        with temp.open("xb") as f:
-            f.write(encoded)
-            f.flush()
-            os.fsync(f.fileno())
-        os.replace(temp, path)
+        created = False
+        try:
+            with temp.open("xb") as f:
+                created = True
+                f.write(encoded)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(temp, path)
+        except OSError:
+            if created:
+                try:
+                    temp.unlink(missing_ok=True)
+                except OSError:
+                    pass
+            raise
 
 
 class K1:

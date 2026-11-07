@@ -111,6 +111,29 @@ class LiveObservationTests(unittest.TestCase):
             self.assertEqual(card.percent.cget("text"), "—")
             self.assertIn("OFFLINE", card.status.cget("text"))
             self.assertEqual([value.cget("text") for value in card.metrics], ["—"] * 3)
+
+            # A general service heartbeat can stay fresh while the printer
+            # sample stalls. Only the printer timestamp can restore the badge.
+            page.live.update = Mock()
+            data["printers"][0].update(detail="Printing / busy", online=True)
+            data["printer_telemetry_at"] = 100
+            service.snapshot = data
+            with patch("print_farm_ui.time.time", return_value=100):
+                page.tick()
+            self.assertIn("PRINTING", card.status.cget("text"))
+            data["checked_at"] = 121
+            with patch("print_farm_ui.time.time", return_value=121):
+                page.tick()
+                self.assertIn("SIGNAL DELAYED", card.status.cget("text"))
+                self.assertIn("SIGNAL DELAYED", page.fleet_status.cget("text"))
+                self.assertEqual(card.percent.cget("text"), "—")
+                self.assertEqual([value.cget("text") for value in card.metrics], ["—"] * 3)
+                self.assertIn("check pending", card.bed.cget("text"))
+                self.assertIs(tile, page.camera_tiles["0"])
+                data["printer_telemetry_at"] = 121
+                page.tick()
+            self.assertIn("PRINTING", card.status.cget("text"))
+            self.assertEqual(card.percent.cget("text"), "78%")
             page.layout_printers(1100)
             self.assertEqual(page.printer_cards["3"].grid_info()["row"], 1)
             page.layout_printers(1320)

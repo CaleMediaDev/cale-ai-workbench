@@ -37,6 +37,8 @@ from print_farm_transport import (
     validate_file,
 )
 
+PRINTER_TELEMETRY_MAX_AGE = 20
+
 
 def read(path, default=None):
     try:
@@ -385,7 +387,7 @@ class Service:
                 return "Print Farm has an active print."
             if self.settings().get("printers") and (
                 self._unsettled_jobs is None or self._printers_checked_at is None
-                or time.monotonic() - self._printers_checked_at > 20
+                or time.monotonic() - self._printers_checked_at > PRINTER_TELEMETRY_MAX_AGE
             ):
                 return "Waiting for fresh printer status."
             if reserve:
@@ -464,7 +466,12 @@ class Service:
                                 ).fetchone())
                             except sqlite3.Error:
                                 pass  # An unreadable queue cannot authorize a restart.
-                        persist(self.root / "status.json", self.snapshot)
+                        try:
+                            persist(self.root / "status.json", self.snapshot)
+                        except OSError:
+                            # A locked display snapshot cannot stop printer
+                            # observation or reconciliation of an active job.
+                            pass
                 self.wake.wait(5)
                 self.wake.clear()
         finally:
@@ -840,11 +847,13 @@ class Service:
     def cycle(self, store):
         settings = self.settings()
         printers = self.scan_printers(settings)
+        sampled_at = time.time()
         self.snapshot = {
             **self.snapshot,
             "printers": printers,
             "enabled": settings.get("enabled", False),
-            "checked_at": time.time(),
+            "checked_at": sampled_at,
+            "printer_telemetry_at": sampled_at,
         }
         self._printers_checked_at = time.monotonic()
         ledger = (
