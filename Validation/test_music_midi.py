@@ -205,7 +205,8 @@ def test_transcription_reports_real_midi_and_notes(tmp_path):
         (staging / "guitar_basic_pitch.mid").write_bytes(b"MThd" + b"\x00" * 32)
         (staging / "guitar_note_events.csv").write_text(
             "start_time_s,end_time_s,pitch_midi,velocity,pitch_bend\n\n"
-            "0.0,1.0,69,85,1,2,3\n\n"
+            "0.0,1.0,69,85,1,2,3\n"
+            "0.2,0.8,72,80\n\n"
         )
         return type("Done", (), {"returncode": 0, "stdout": "", "stderr": ""})()
 
@@ -217,9 +218,9 @@ def test_transcription_reports_real_midi_and_notes(tmp_path):
     assert len(result["files"]) == 2
     assert source.read_bytes() == b"audio"
     with (target / "guitar_note_events.csv").open(newline="") as stream:
-        row = next(csv.DictReader(stream))
-    assert list(row) == music_midi.NOTE_COLUMNS
-    assert json.loads(row["pitch_bend"]) == [1.0, 2.0, 3.0]
+        rows = list(csv.DictReader(stream))
+    assert [list(row) for row in rows] == [music_midi.NOTE_COLUMNS] * 2
+    assert [json.loads(row["pitch_bend"]) for row in rows] == [[1.0, 2.0, 3.0], []]
 
 
 @pytest.mark.parametrize("has_midi_file", [False, True])
@@ -406,11 +407,12 @@ def test_note_csv_normalization_can_be_repeated(tmp_path, bends):
     assert not path.with_suffix(".csv.tmp").exists()
 
 
-def test_note_csv_without_pitch_bends_can_be_normalized_repeatedly(tmp_path):
+@pytest.mark.parametrize("suffix", ["", ",", ", ,\t,"])
+def test_note_csv_without_pitch_bends_can_be_normalized_repeatedly(tmp_path, suffix):
     path = tmp_path / "notes.csv"
     path.write_text(
         ",".join(music_midi.NOTE_COLUMNS) + "\n"
-        + "0.0,1.0,69,85,\n"
+        + "0.0,1.0,69,85" + suffix + "\n"
     )
 
     music_midi.normalize_note_events(path)
@@ -498,3 +500,15 @@ def test_unexpected_note_csv_is_preserved_for_diagnosis(tmp_path):
         music_midi.normalize_note_events(path)
     assert path.read_text() == "unknown,format\n1,2\n"
     assert not path.with_suffix(".csv.tmp").exists()
+
+
+def test_note_csv_missing_velocity_is_preserved(tmp_path):
+    path = tmp_path / "notes.csv"
+    path.write_text(",".join(music_midi.NOTE_COLUMNS) + "\n0.0,1.0,69\n")
+    original = path.read_bytes()
+
+    with pytest.raises(RuntimeError, match="incomplete note event"):
+        music_midi.normalize_note_events(path)
+
+    assert path.read_bytes() == original
+    assert list(tmp_path.iterdir()) == [path]

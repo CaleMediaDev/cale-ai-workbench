@@ -59,7 +59,7 @@ def install() -> Path:
 
 
 def normalize_note_events(path: Path) -> None:
-    """Make Basic Pitch's unquoted pitch-bend arrays valid five-column CSV."""
+    """Write a five-column CSV even when Basic Pitch omits pitch bends."""
     temporary_file = tempfile.NamedTemporaryFile(
         mode="w", encoding="utf-8", newline="", dir=path.parent,
         prefix=path.name + ".", suffix=".tmp", delete=False,
@@ -75,10 +75,10 @@ def normalize_note_events(path: Path) -> None:
             for row in reader:
                 if not row:
                     continue
-                if len(row) < 5:
+                if len(row) < 4:
                     raise RuntimeError("Basic Pitch returned an incomplete note event.")
                 bends = row[4:]
-                if bends == [""]:
+                if not any(value.strip() for value in bends):
                     bends = []
                 elif bends[0].lstrip().startswith("["):
                     bends = json.loads(",".join(bends))
