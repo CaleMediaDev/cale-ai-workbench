@@ -167,6 +167,7 @@ class PrinterCard(tk.Frame):
             "checking": ("◎  Checking bed…", "#50eaff"),
             "skipped_busy": ("◇  Skipped · printer busy", self.MUTED),
             "skipped_offline": ("◇  Skipped · offline", self.MUTED),
+            "skipped_camera_changed": ("◇  Camera changed", self.MUTED),
         }.get(bed_check or bed_state, ("◇  Bed check pending", self.MUTED))
         name = printer.get("hostname") or printer["id"]
         color = str(printer.get("color") or "").strip()

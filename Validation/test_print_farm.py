@@ -499,6 +499,8 @@ class Production(unittest.TestCase):
 
     def test_manual_bed_check_is_read_only_and_coalesces_requests(self):
         self.printer.update(online=True, camera_url="http://camera")
+        self.settings["printers"] = [dict(self.printer)]
+        self.service.configure(self.settings)
 
         def inspect(printer, _model):
             self.assertEqual(self.service.bed_check_states(), {"p": "checking"})
@@ -523,6 +525,40 @@ class Production(unittest.TestCase):
         self.service.inspect_requested_bed([self.printer], self.settings, self.store)
         self.service.beds.check.assert_called_once()
         self.assertEqual(self.printer["bed"]["state"], "skipped_busy")
+
+    def test_manual_check_waits_for_fresh_status_and_discards_a_replaced_camera(self):
+        self.printer.update(online=True, camera_url="http://camera")
+        self.settings["printers"] = [dict(self.printer)]
+        self.service.configure(self.settings)
+        self.service.request_bed_check("p")
+        self.service._printers_checked_at = time.monotonic() - farm.PRINTER_TELEMETRY_MAX_AGE - 1
+        self.service.inspect_requested_bed([self.printer], self.settings, self.store)
+        self.assertEqual(self.service.bed_check_states(), {"p": "queued"})
+        self.service.beds.check.assert_not_called()
+
+        def inspect(*_):
+            self.service.configure({"printers": [{**self.printer, "camera_url": "http://new-camera"}]})
+            return {"state": "clear", "ticket_id": "fixture"}
+
+        self.service._printers_checked_at = time.monotonic()
+        self.service.beds.check.side_effect = inspect
+        self.service.inspect_requested_bed([self.printer], self.settings, self.store)
+        self.assertEqual(self.printer["bed"]["state"], "skipped_camera_changed")
+        self.assertEqual(self.service.bed_check_states(), {})
+
+    def test_camera_change_after_reservation_prevents_submission(self):
+        send = Mock()
+
+        def start(*_):
+            self.service.configure({"printers": [{**self.printer, "camera_url": "http://new-camera"}]})
+            self.machine.before_submit()
+            send()
+
+        self.machine.start_order.side_effect = start
+        result = self.dispatch()
+        self.assertEqual(result["status"], "held")
+        self.assertIn("camera changed", result["reason"])
+        send.assert_not_called()
 
     def test_ebay_outage_keeps_saved_progress_visible_and_dispatch_waits_for_recovery(self):
         self.proposal["reason"] = "Saved file match"

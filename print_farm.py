@@ -59,6 +59,14 @@ def read_dispatch_record(path):
     return record
 
 
+def configured_printer(settings, printer_id):
+    return next((printer for printer in settings.get("printers", []) if printer["id"] == printer_id), None)
+
+
+def bed_camera_key(printer):
+    return digest([printer.get("hostname"), printer.get("camera_url")])
+
+
 def digest(value):
     return hashlib.sha256(
         json.dumps(value, sort_keys=True, separators=(",", ":")).encode()
@@ -261,6 +269,7 @@ class BedWatcher:
                 if isinstance(exc, Hold)
                 else "Camera / local vision unavailable (" + type(exc).__name__ + ")"
             )
+        result["camera_source"] = bed_camera_key(printer)
         self.last[pid] = result
         return result
 
@@ -396,7 +405,10 @@ class Service:
             return self._bed_checks.copy()
 
     def inspect_requested_bed(self, printers, settings, store):
-        if self._update_draining.is_set():
+        if self._update_draining.is_set() or (
+            self._printers_checked_at is not None
+            and time.monotonic() - self._printers_checked_at > PRINTER_TELEMETRY_MAX_AGE
+        ):
             return
         with self._bed_checks_lock:
             printer_id = next(iter(self._bed_checks), None)
@@ -407,7 +419,15 @@ class Service:
             printer = next((item for item in printers if item["id"] == printer_id), None)
             if printer is None:
                 return
-            if not printer.get("online"):
+            source = bed_camera_key(printer)
+
+            def camera_matches():
+                configured = configured_printer(self.settings(), printer_id)
+                return configured is not None and bed_camera_key(configured) == source
+
+            if not camera_matches():
+                bed = {"state": "skipped_camera_changed"}
+            elif not printer.get("online"):
                 bed = {"state": "skipped_offline"}
             elif not printer.get("idle") or store.db.execute(
                 "SELECT 1 FROM jobs WHERE printer_id=? AND status IN "
@@ -420,6 +440,9 @@ class Service:
                 # Manual checks are for display. Dispatch always gets its own
                 # clearance and never consumes a result from this button.
                 bed = {key: value for key, value in bed.items() if key != "ticket_id"}
+                if not camera_matches():
+                    bed = {"state": "skipped_camera_changed"}
+            bed["camera_source"] = source
             self.beds.last[printer_id] = bed
             printer["bed"] = bed
         finally:
@@ -626,6 +649,9 @@ class Service:
                     not isinstance(error, dict)
                     or any(error.get(k) for k in ("errcode", "code", "key"))
                 )
+                bed = self.beds.last.get(p["id"], {})
+                if bed.get("camera_source") != bed_camera_key(p):
+                    bed = {"state": "unchecked", "reason": "Checked before the next print"}
                 return {
                     **p,
                     "online": True,
@@ -643,13 +669,7 @@ class Service:
                         if state.get("state") == 0
                         else "Printing / busy"
                     ),
-                    "bed": self.beds.last.get(
-                        p["id"],
-                        {
-                            "state": "unchecked",
-                            "reason": "Checked before the next print",
-                        },
-                    ),
+                    "bed": bed,
                 }
             except Exception:
                 return {**p, "online": False, "idle": False, "detail": "Offline"}
@@ -1306,6 +1326,7 @@ class Service:
                     "expires_at": bed["captured_at"] + BED_CLEAR_MAX_AGE,
                 }
                 machine = K1(printer["id"])
+                assigned = configured_printer(settings, printer["id"])
 
                 def final_gate():
                     current_settings = self.settings()
@@ -1320,6 +1341,8 @@ class Service:
                         raise Hold(
                             "Printing paused or account changed before submission"
                         )
+                    if configured_printer(current_settings, printer["id"]) != assigned:
+                        raise Hold("Printer or camera changed before submission")
 
                 machine.before_submit = final_gate
                 release_after_bed_check(ledger, printer["id"], auth, machine)
