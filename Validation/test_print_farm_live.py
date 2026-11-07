@@ -319,6 +319,43 @@ class LiveObservationTests(unittest.TestCase):
         live.analyze("p", live.snapshot("p")[0])
         self.assertNotIn("p", live.results)
 
+    def test_finished_printer_rechecks_even_when_the_camera_scene_is_unchanged(self):
+        live = LiveCameras(lambda: {})
+        live.workers["p"] = Mock()
+        live.analysis_thread = Mock()
+        printer = {"id": "p", "camera_url": "http://camera", "online": True, "idle": False}
+        finished = {**printer, "idle": True, "unload_required": True}
+        raw = picture("red")
+        live.update([printer], True)
+        source = live.sources["p"]
+        with patch("print_farm_live.time.time", return_value=100):
+            live.accept_frame("p", source, source[1], raw)
+        old_frame = live.snapshot("p")[0]
+        clear = {"state": "clear", "confidence": 0.99}
+        live.infer = Mock(return_value=clear)
+        live.analyze("p", old_frame)
+        self.assertTrue(live.snapshot("p")[1])
+
+        def finish_during_scan(*args, **kwargs):
+            live.update([finished], True)
+            return clear
+
+        live.infer = finish_during_scan
+        live.analyze("p", old_frame)
+        frame, result, _ = live.snapshot("p")
+        self.assertFalse(result)
+        self.assertFalse(scan_due(frame, result, False, 101))
+
+        with patch("print_farm_live.time.time", return_value=101):
+            live.accept_frame("p", source, source[1], raw)
+        live.update([finished], True)
+        frame, result, _ = live.snapshot("p")
+        self.assertTrue(scan_due(frame, result, False, 101))
+        live.infer = Mock(return_value=clear)
+        live.analyze("p", frame)
+        self.assertIn("printer reports that the print finished", live.infer.call_args.args[0])
+        self.assertEqual(live.snapshot("p")[1]["state"], "uncertain")
+
     def test_thawed_feed_discards_inflight_overlay(self):
         live = LiveCameras(lambda: {})
         source = ("", "http://camera")

@@ -593,9 +593,13 @@ class Controls:
         except queue.Empty:
             pass
         snapshot = self.service.snapshot
+        telemetry_stale = bool(snapshot.get("printers")) and not (
+            0 <= time.time() - snapshot.get("printer_telemetry_at", 0) <= PRINTER_TELEMETRY_MAX_AGE
+        )
         self.live.update(
             snapshot.get("printers", []),
             bool(self.parent.winfo_ismapped()) and self.window.state() != "iconic",
+            telemetry_fresh=not telemetry_stale,
         )
         self.toggle.configure(
             text="Pause automatic printing"
@@ -609,9 +613,6 @@ class Controls:
         else:
             self.connect_button.configure(text="Connect eBay account")
             self.account_button.pack_forget()
-        telemetry_stale = bool(snapshot.get("printers")) and not (
-            0 <= time.time() - snapshot.get("printer_telemetry_at", 0) <= PRINTER_TELEMETRY_MAX_AGE
-        )
         bed_checks = self.service.bed_check_states()
         signature = digest([
             {

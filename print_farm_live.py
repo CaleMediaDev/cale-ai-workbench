@@ -33,6 +33,11 @@ print blending into a dark plate near the bottom of the frame. Report visible
 objects even when the rest of the plate is cut off.
 Use clear only if the entire usable bed is visibly empty."""
 
+FINISHED_PROMPT = """The printer reports that the print finished. The part may
+still be on the plate. Check the visible plate and its edges for the finished
+part. Use visible evidence for object boxes. If the plate is cut off or the
+part is unclear, report obstructed or uncertain."""
+
 
 def observation(answer):
     """Validate model output before drawing; never invent a box or clear state."""
@@ -92,6 +97,7 @@ def scene_changed(before, after):
 def scan_due(frame, result, busy, now):
     if (
         not frame.get("bytes")
+        or frame.get("awaiting_frame")
         or now - frame.get("at", 0) >= 5
         or now - frame.get("changed_at", 0) >= LIVE_FEED_MAX_AGE
     ):
@@ -115,14 +121,19 @@ class LiveCameras:
         self.sources, self.workers, self.frames, self.results = {}, {}, {}, {}
         self.processes, self.fallback_until = {}, {}
         self.busy_printers = set()
+        self.finished_printers = set()
         self.analyzing = None
         self.analysis_thread = None
 
-    def update(self, printers, visible):
+    def update(self, printers, visible, *, telemetry_fresh=True):
         sources = {
             p["id"]: (p.get("camera_stream_url") or "", p.get("camera_url") or "")
             for p in printers
             if p.get("camera_stream_url") or p.get("camera_url")
+        }
+        finished = {
+            p["id"] for p in printers
+            if telemetry_fresh and p.get("online") and p.get("unload_required")
         }
         with self.lock:
             for pid, process in list(self.processes.items()):
@@ -131,7 +142,8 @@ class LiveCameras:
                 ) and process.poll() is None:
                     process.terminate()
             self.busy_printers = {
-                p["id"] for p in printers if p.get("online") and not p.get("idle")
+                p["id"] for p in printers
+                if telemetry_fresh and p.get("online") and not p.get("idle")
             }
             for pid in self.sources.keys() | sources.keys():
                 previous = self.sources.get(pid)
@@ -144,6 +156,12 @@ class LiveCameras:
                     self.results.pop(pid, None)
                     self.fallback_until.pop(pid, None)
             self.sources = sources
+            for pid in self.finished_printers ^ finished:
+                self.results.pop(pid, None)
+                if pid in self.frames:
+                    # Keep the raw view while the next frame becomes eligible.
+                    self.frames[pid].update(feed=object(), awaiting_frame=True)
+            self.finished_printers = finished
         if visible:
             self.visible.set()
         else:
@@ -254,15 +272,17 @@ class LiveCameras:
                     self.processes.pop(pid, None)
 
     def accept_frame(self, pid, source, url, raw):
+        with self.lock:
+            feed = self.frames.get(pid, {}).get("feed")
         now = time.time()
         fingerprint = hashlib.sha256(raw).hexdigest()
         with Image.open(io.BytesIO(raw)) as image:
             preview = image.convert("RGB")
             preview.thumbnail((640, 360))
         with self.lock:
-            if self.sources.get(pid) is not source:
-                return
             previous = self.frames.get(pid, {})
+            if self.sources.get(pid) is not source or previous.get("feed") is not feed:
+                return
             resumed = (
                 previous.get("hash") != fingerprint
                 and now - previous.get("changed_at", now) >= LIVE_FEED_MAX_AGE
@@ -327,13 +347,23 @@ class LiveCameras:
                 return
 
     def analyze(self, pid, frame):
+        with self.lock:
+            if frame.get("awaiting_frame") or self.frames.get(pid, {}).get("feed") is not frame["feed"]:
+                return None
+            finished = pid in self.finished_printers
         answer = observation(
             self.infer(
-                PROMPT,
+                PROMPT + "\n\n" + FINISHED_PROMPT if finished else PROMPT,
                 [frame["bytes"]],
                 model=self.settings().get("vision_model", "cale-vision:latest"),
             )
         )
+        if finished and answer["state"] == "clear":
+            answer.update(
+                state="uncertain",
+                confidence=0,
+                reason="Unload the finished print before checking for clearance",
+            )
         answer.update(
             signature=scene_signature(frame["bytes"]),
             frame=frame["bytes"],
@@ -342,7 +372,7 @@ class LiveCameras:
             url=frame["url"],
         )
         with self.lock:
-            # A switched or disconnected feed invalidates outstanding scans.
+            # A feed or completion change invalidates outstanding scans.
             if not self.stop_event.is_set() and self.frames.get(pid, {}).get("feed") is frame["feed"]:
                 self.results[pid] = answer
         return answer
