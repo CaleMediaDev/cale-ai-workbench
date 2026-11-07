@@ -23,6 +23,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import uuid
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
@@ -388,7 +389,7 @@ def _bounded_line(stream, limit: int) -> tuple[str | None, bool]:
 
 
 def edit_project_file(folder: Path, path: str, old_text: str, new_text: str,
-                      expected_sha256: str = "") -> str:
+                      expected_sha256: str = "", *, before_file_publish=None) -> str:
     """Apply one source-checked text replacement without rewriting a model prompt."""
     target = project_path(folder, path)
     if not target.is_file():
@@ -446,6 +447,8 @@ def edit_project_file(folder: Path, path: str, old_text: str, new_text: str,
         with os.fdopen(descriptor, "wb") as output:
             output.write(encoded)
         os.chmod(temporary, stat.S_IMODE(target.stat().st_mode))
+        if before_file_publish is not None:
+            before_file_publish(target, Path(temporary))
         if hashlib.sha256(target.read_bytes()).hexdigest() != original_hash:
             raise ValueError("The file changed during editing; read it again")
         os.replace(temporary, target)
@@ -683,7 +686,7 @@ def readable_powershell_error(stderr: str) -> str:
     return prefix + decoded
 
 
-def execute_tool(folder: Path, name: str, arguments: dict, *, before_step_commit=None) -> str:
+def execute_tool(folder: Path, name: str, arguments: dict, *, before_step_commit=None, before_file_publish=None) -> str:
     """Observe generic actual checker passes without trusting model success claims."""
     import project_memory
     observed=(name in {'check_python_function','check_javascript_function','check_webapp','check_document_report','run_verifier'}
@@ -701,7 +704,8 @@ def execute_tool(folder: Path, name: str, arguments: dict, *, before_step_commit
                     receipt_arguments={key:active.get(key) for key in ('id','check_tool','check_arguments','check_command','shell')}
                     receipt_arguments['check_sha256']=task_context.step_check_identity(active)
         except (OSError,ValueError,TypeError,RuntimeError,project_memory.sqlite3.Error):pass
-    result=_execute_tool(folder,name,arguments,before_step_commit=before_step_commit)
+    result=_execute_tool(folder, name, arguments, before_step_commit=before_step_commit,
+                         before_file_publish=before_file_publish)
     if before is not None:
         try:
             report=({'passed':result.startswith('Exit code: 0\n'),'output_sha256':hashlib.sha256(result.encode()).hexdigest()} if name=='run_verifier' else json.loads(result))
@@ -715,7 +719,7 @@ def execute_tool(folder: Path, name: str, arguments: dict, *, before_step_commit
 
 
 
-def _execute_tool(folder: Path, name: str, arguments: dict, *, before_step_commit=None) -> str:
+def _execute_tool(folder: Path, name: str, arguments: dict, *, before_step_commit=None, before_file_publish=None) -> str:
     try:
         if name == "delegate_subscription_task":
             import cloud_providers
@@ -1320,12 +1324,18 @@ def _execute_tool(folder: Path, name: str, arguments: dict, *, before_step_commi
             if not isinstance(content, str) or len(content) > 2_000_000:
                 raise ValueError("Text must be at most 2 MB")
             target.parent.mkdir(parents=True, exist_ok=True)
-            temporary = target.with_name(target.name + ".native-tmp")
-            # Windows PowerShell 5.1 treats UTF-8 without a BOM as the legacy
-            # code page. Non-ASCII test messages then turn into syntax errors.
+            # Windows PowerShell 5.1 needs a BOM for non-ASCII scripts.
             encoding = "utf-8-sig" if target.suffix.lower() == ".ps1" else "utf-8"
-            temporary.write_text(content, encoding=encoding)
-            os.replace(temporary, target)
+            descriptor, staged_name = tempfile.mkstemp(prefix=".cale-write-", suffix=".tmp", dir=target.parent)
+            temporary = Path(staged_name)
+            try:
+                with os.fdopen(descriptor, "w", encoding=encoding) as stream:
+                    stream.write(content)
+                if before_file_publish is not None:
+                    before_file_publish(target, temporary)
+                os.replace(temporary, target)
+            finally:
+                temporary.unlink(missing_ok=True)
             try:
                 import project_memory
 
@@ -1337,6 +1347,7 @@ def _execute_tool(folder: Path, name: str, arguments: dict, *, before_step_commi
             return edit_project_file(
                 folder, arguments["path"], arguments["old_text"],
                 arguments["new_text"], arguments.get("expected_sha256", ""),
+                before_file_publish=before_file_publish,
             )
         if name == "search_text":
             pattern = arguments["pattern"]
@@ -3627,7 +3638,12 @@ def focused_browser_check(project: dict, state: dict, request_hash: str):
     )}
 
 
-def repair_interrupted_tools(messages: list) -> list:
+def _file_call_signature(function):
+    fields = (str(function.get("name") or ""), str(function.get("arguments") or ""))
+    return hashlib.sha256("\0".join(fields).encode("utf-8", errors="replace")).hexdigest()
+
+
+def repair_interrupted_tools(messages: list, *, project=None, state=None) -> list:
     """Close unfinished calls after a crash without blindly replaying effects."""
     if not messages:
         return messages
@@ -3641,12 +3657,34 @@ def repair_interrupted_tools(messages: list) -> list:
     completed = {item.get("tool_call_id"): item for item in tail
                  if item.get("role") == "tool" and item.get("tool_call_id") in expected}
     ordered = []
-    for item in calls:
+    for position, item in enumerate(calls):
         result = completed.get(item.get("id"))
-        ordered.append(result or {
-            "role": "tool", "tool_call_id": item.get("id", ""),
-            "name": (item.get("function") or {}).get("name", ""),
-            "content": "The worker stopped before this tool result was recorded. Inspect the project state before retrying any action.",
+        if result is not None:
+            ordered.append(result)
+            continue
+        function = item.get("function") or {}
+        name = function.get("name", "")
+        recovered = None
+        if project is not None and state is not None and name in {"write_file", "edit_file"}:
+            # An interrupted mutation invalidates acceptance evidence even when
+            # its publication cannot be confirmed. User steering stays in order.
+            invalidate_checks(state)
+            batch = state.get("file_publication_batch")
+            if isinstance(batch, str) and re.fullmatch(r"[a-f0-9]{32}", batch):
+                import task_context
+
+                folder = Path(project["folder"]).resolve()
+                try:
+                    arguments = json.loads(function.get("arguments") or "{}")
+                    target = project_path(folder, arguments["path"])
+                    recovered = task_context.recover_file_publication(
+                        folder, batch, position, _file_call_signature(function), target)
+                except (OSError, ValueError, KeyError, TypeError):
+                    pass
+        ordered.append({
+            "role": "tool", "tool_call_id": item.get("id", ""), "name": name,
+            "content": recovered or (
+                "The worker stopped before this tool result was recorded. Inspect the project state before retrying any action."),
         })
     # Tool replies must immediately follow their assistant call. User steering
     # may have arrived during the interruption, so keep it after the repaired
@@ -5508,6 +5546,8 @@ def _run_slice(project: dict, complete=None) -> dict:
     # authoritative instructions are readable. Later planning still rechecks
     # their full hashes; this early guard grants no lasting execution authority.
     planning_basis(project)
+    if state.get("messages"):
+        state["messages"] = repair_interrupted_tools(state["messages"], project=project, state=state)
     if small_html_page(project) and automatic_handoff_ready(folder, project, state):
         # A provider outage after real verification must not hold finished work
         # hostage. Recheck the app-owned verifier before skipping another AI call.
@@ -5536,7 +5576,6 @@ def _run_slice(project: dict, complete=None) -> dict:
         # instructions. Rebuild only our owned system briefing from the same
         # authoritative task brief and rules; retain its recent work history.
         messages[0] = {"role": "system", "content": prompt(project)}
-    messages = repair_interrupted_tools(messages)
     # Keep provider cooldowns and local model discovery across the work slice.
     # Constructing a fresh Router for each turn forces repeated model probes
     # and forgets short-term routing decisions during one task.
@@ -5851,6 +5890,13 @@ def _run_slice(project: dict, complete=None) -> dict:
         state["turns"] = int(state.get("turns", 0)) + 1
         state["messages"] = messages
         state["current"] = str(message.get("content") or "Working with tools")[:500]
+        file_batch = None
+        if any((item.get("function") or {}).get("name") in {"write_file", "edit_file"}
+               for item in message.get("tool_calls") or []):
+            file_batch = uuid.uuid4().hex
+            state["file_publication_batch"] = file_batch
+        else:
+            state.pop("file_publication_batch", None)
         save_state(project, state)
         calls = message.get("tool_calls") or []
         if not calls:
@@ -6025,6 +6071,19 @@ def _run_slice(project: dict, complete=None) -> dict:
                             except (OSError, ValueError, TypeError, sqlite3.Error):
                                 return False
                         result = execute_tool(folder, "check_webapp", args, before_step_commit=revision_commit_allowed)
+                    elif file_batch and function.get("name") in {"write_file", "edit_file"}:
+                        def remember_publication(target, staged):
+                            try:
+                                task_context.record_file_publication(
+                                    folder, file_batch, call_index, _file_call_signature(function), target, staged)
+                            except (OSError, ValueError, sqlite3.Error):
+                                pass  # An unavailable receipt leaves the interrupted result unknown.
+                            if (read_state(project).get("status") in {"paused", "stopped", "done"}
+                                    or user_request_stamp(folder) != request_before):
+                                raise ValueError("Task changed before the file was published.")
+
+                        result = execute_tool(folder, function["name"], args,
+                                              before_file_publish=remember_publication)
                     else:
                         result = execute_tool(folder, function.get("name", ""), args)
                     if step_check:

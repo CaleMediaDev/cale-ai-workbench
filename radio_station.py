@@ -1293,7 +1293,9 @@ class Controls:
         tk.Label(blend, textvariable=self.mix_label, fg=self.muted, bg=self.bg, font=("Segoe UI", 9)).pack(side="left", padx=(16, 0))
         self.waves = tk.Canvas(self.frame, bg="#080d13", height=60, highlightthickness=1, highlightbackground="#26333e")
         self.waves.pack(fill="x")
-        self.waves.bind("<Configure>", lambda _: self.draw_waveforms(getattr(self, "last_state", {})))
+        self.last_state = None
+        self.wave_rows = {}
+        self.waves.bind("<Configure>", lambda _: self.draw_waveforms(self.last_state or {}))
         queue_row = tk.Frame(self.frame, bg=self.panel, padx=12, pady=10)
         queue_row.pack(fill="x", pady=(10, 0))
         self.text = tk.StringVar(value="Choose a station. Tracks are created on your PC.")
@@ -1323,6 +1325,7 @@ class Controls:
         tk.Label(self.frame,textvariable=self.dj_text,bg=self.bg,fg=self.muted,anchor="w",font=("Segoe UI",8)).pack(fill="x",pady=(4,0))
         self.bar = ttk.Progressbar(self.frame, maximum=100, style="Radio.Horizontal.TProgressbar")
         self.refresh_stations()
+        self.frame.bind("<Map>", lambda _: self.refresh_view())
         self.poll()
         getattr(service,"enable_dj",lambda:None)()
         service.start()
@@ -1447,7 +1450,7 @@ class Controls:
             self.text.set("Starting your new station in the background...")
 
     def deck_action(self, channel):
-        deck = self.last_state.get("decks", [{}, {}])[channel]
+        deck = (self.last_state or {}).get("decks", [{}, {}])[channel]
         if deck.get("status") == "Cued":
             self.service.skip()
         else:
@@ -1458,22 +1461,36 @@ class Controls:
         self.service.crossfade(value)
 
     def draw_waveforms(self, state):
-        self.waves.delete("all")
         width = max(1, self.waves.winfo_width()-70)
         for index, color in enumerate((self.coral, self.cyan)):
             deck = state.get("decks", [{}, {}])[index]
             center = 16+index*28
-            self.waves.create_text(18, center, text="AB"[index], fill=color, font=("Segoe UI", 10, "bold"))
             peaks = deck.get("peaks", [])
+            tag = f"wave-{index}"
+            geometry = (width, peaks)
+            previous_geometry, previous_x = self.wave_rows.get(index, (None, None))
+            if previous_geometry != geometry:
+                self.waves.delete(tag)
+                self.waves.create_text(18, center, text="AB"[index], fill=color,
+                                       font=("Segoe UI", 10, "bold"), tags=tag)
+                if peaks:
+                    for number, peak in enumerate(peaks):
+                        x = 46 + width * number / max(1, len(peaks)-1)
+                        self.waves.create_line(x, center-peak*9, x, center+peak*9, fill=color, tags=tag)
+                    self.waves.create_line(46, center-11, 46, center+11, fill=self.ink, width=2,
+                                           tags=(tag, tag+"-head"))
+                else:
+                    self.waves.create_text(52, center, text="Waveform appears when a local track is loaded",
+                                           fill=self.muted, anchor="w", font=("Segoe UI", 9), tags=tag)
+                previous_x = None
             if not peaks:
-                self.waves.create_text(52, center, text="Waveform appears when a local track is loaded", fill=self.muted, anchor="w", font=("Segoe UI", 9))
+                self.wave_rows[index] = (geometry, None)
                 continue
-            for number, peak in enumerate(peaks):
-                x = 46+width*number/max(1,len(peaks)-1)
-                self.waves.create_line(x, center-peak*9, x, center+peak*9, fill=color)
             position = min(1, max(0, deck.get("elapsed",0)/max(1,deck.get("duration",0))))
             x = 46+width*position
-            self.waves.create_line(x, center-11, x, center+11, fill=self.ink, width=2)
+            if previous_x != x:
+                self.waves.coords(tag+"-head", x, center-11, x, center+11)
+            self.wave_rows[index] = (geometry, x)
 
     def set_volume(self, value):
         if float(value) > 0:
@@ -1505,7 +1522,16 @@ class Controls:
     def poll(self):
         if self.closed:
             return
+        if self.frame.winfo_ismapped():
+            self.refresh_view()
+        self.poll_id = self.window.after(500, self.poll)
+
+    def refresh_view(self):
+        if self.closed:
+            return
         state = self.service.snapshot()
+        if state == self.last_state:
+            return
         self.last_state = state
         setup=state.get("dj_setup",{})
         self.dj_text.set(setup.get("message","Preparing DJ sound")+(" · "+str(setup.get("percent",0))+"%" if setup.get("status")=="working" else ""))
@@ -1550,7 +1576,6 @@ class Controls:
         self.crossfader.configure(state="normal" if state.get("next_loaded") or state.get("blending") else "disabled")
         self.next.configure(state="normal" if state.get("playing") and state.get("ready") and not state.get("paused") and not state.get("blending") else "disabled")
         self.draw_waveforms(state)
-        self.poll_id = self.window.after(500, self.poll)
 
     def station_dialog(self, editing=False):
         import tkinter as tk

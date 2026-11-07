@@ -6598,7 +6598,7 @@ def gui():
         usage_window.deiconify()
         usage_window.lift()
         usage_window.focus_force()
-        usage_window.after_idle(draw_usage)
+        request_usage()
 
     usage_window.protocol("WM_DELETE_WINDOW", usage_window.withdraw)
     ttk.Button(task_heading, text="✦  Model activity", command=open_usage).pack(side="right")
@@ -6632,21 +6632,21 @@ def gui():
         highlightthickness=0,
     )
     usage_canvas.pack(fill="x")
+    usage_summary = {}
+    usage_results = queue.Queue(maxsize=1)
+    usage_pending = False
 
     def draw_usage():
         """Draw recorded history over time or a lifetime total for every model."""
         usage_canvas.delete("all")
         period = usage_period.get()
-        try:
-            summary = usage_history.history(period if period in ("day", "month") else "day")
-        except (OSError, sqlite3.Error):
-            usage_total.configure(text="Usage history is unavailable")
+        summary = usage_summary.get(period)
+        if summary is None:
+            usage_total.configure(text="Usage history is unavailable" if period in usage_summary else "Loading usage…")
+            usage_speed.configure(text="")
+            usage_peak.configure(text="")
             return
         usage_total.configure(text=f"{summary['total']:,} total tokens")
-        chatgpt_tokens = summary.get("sources", {}).get("chatgpt", 0)
-        chatgpt_usage.configure(
-            text=f"ChatGPT in Cale: {chatgpt_tokens:,} tokens" if chatgpt_tokens else ""
-        )
         speed = summary.get("current_speed")
         usage_speed.configure(
             text=f"Latest {speed:.1f} tokens/s" if speed is not None else "Speed appears after the next response"
@@ -6744,6 +6744,7 @@ def gui():
     def set_usage_period(value):
         usage_period.set(value)
         draw_usage()
+        request_usage()
 
     ttk.Button(
         usage_header, text="Monthly", command=lambda: set_usage_period("month")
@@ -6753,8 +6754,43 @@ def gui():
     ).pack(side="right", padx=(0, 5))
     usage_canvas.bind("<Configure>", lambda _: draw_usage())
 
+    def receive_usage():
+        nonlocal usage_pending
+        try:
+            period, summary = usage_results.get_nowait()
+        except queue.Empty:
+            window.after(80, receive_usage)
+            return
+        usage_pending = False
+        usage_summary[period] = summary
+        if summary is not None:
+            tokens = summary["sources"].get("chatgpt", 0)
+            chatgpt_usage.configure(text=f"ChatGPT in Cale: {tokens:,} tokens" if tokens else "")
+        if usage_window.winfo_ismapped():
+            if period == usage_period.get():
+                draw_usage()
+            else:
+                request_usage()
+
+    def request_usage():
+        nonlocal usage_pending
+        if usage_pending:
+            return
+        usage_pending = True
+        period = usage_period.get()
+
+        def query():
+            try:
+                summary = usage_history.history(period)
+            except (OSError, sqlite3.Error):
+                summary = None
+            usage_results.put_nowait((period, summary))
+
+        threading.Thread(target=query, daemon=True).start()
+        window.after(80, receive_usage)
+
     def refresh_usage():
-        draw_usage()
+        request_usage()
         window.after(30_000, refresh_usage)
 
     window.after(500, refresh_usage)
@@ -7184,7 +7220,7 @@ def gui():
     preview_capture_at = {}
     # Keep a layout anchor for task cards without showing model installation
     # details on the main screen. The separate model worker owns downloads.
-    task_order = []
+    task_order = ()
     task_grid = ttk.Frame(cards)
     task_grid.pack(fill="x")
     models_section = ttk.Frame(cards)
@@ -7193,18 +7229,23 @@ def gui():
     def layout_task_cards(_event=None):
         width = max(1, min(main_canvas.winfo_width(), window.winfo_width() - 80))
         columns = 3 if width >= 1180 else 2 if width >= 700 else 1
-        for column in range(3):
-            task_grid.columnconfigure(column, weight=1 if column < columns else 0,
-                                      uniform="task-cards" if column < columns else "")
+        layout = (columns, task_order)
+        previous = getattr(task_grid, "card_layout", None)
+        if layout == previous:
+            return
+        if previous is None or columns != previous[0]:
+            for column in range(3):
+                task_grid.columnconfigure(column, weight=1 if column < columns else 0,
+                                          uniform="task-cards" if column < columns else "")
         for index, pid in enumerate(task_order):
             entry = task_cards.get(pid)
             if not entry:
                 continue
             entry["panel"].grid(row=index // columns, column=index % columns,
                                  sticky="nsew", padx=(0, 10 if index % columns < columns-1 else 0), pady=(0, 10))
-            entry["name"].configure(wraplength=0)
-            entry["current_label"].configure(wraplength=0)
+        task_grid.card_layout = layout
     task_grid.bind("<Configure>", layout_task_cards)
+    main_canvas.bind("<Configure>", layout_task_cards, add="+")
 
     def create_task_card(title):
         panel = tk.Frame(task_grid, bg=card, padx=14, pady=12,
@@ -7450,9 +7491,9 @@ def gui():
         ).pack(side="right")
         card_info["controls_signature"] = signature
 
-    def render_cards():
+    def render_cards(all_projects=None, progress_by_task=None):
         """Update existing widgets in place so polling never resets the scroll."""
-        nonlocal setup_card, first_scan_card, voice_card, cale_voice_card, ollama_card, empty_label
+        nonlocal setup_card, first_scan_card, voice_card, cale_voice_card, ollama_card, empty_label, task_order
         setup = read_task_status(STATE / "install-progress.json")
         if setup and not setup_card_dismissed.is_file():
             if setup_card is None:
@@ -7585,9 +7626,8 @@ def gui():
             ollama_card["panel"].destroy()
             ollama_card = None
 
-        all_tasks = list(reversed(projects()))
-        task_order[:] = [item["id"] for item in all_tasks]
-        tokens_by_task = usage_history.task_totals()
+        all_tasks = list(reversed(projects() if all_projects is None else all_projects))
+        task_order = tuple(item["id"] for item in all_tasks)
         sources_by_task = usage_history.task_sources()
         live_ids = {item["id"] for item in all_tasks}
         for pid in list(task_cards):
@@ -7617,13 +7657,13 @@ def gui():
             set_text(card_info["title"], item["title"][:42] + ("…" if len(item["title"]) > 42 else ""))
             source_totals = sources_by_task.get(pid, [])
             token_label, source_label = task_usage_labels(
-                item, tokens_by_task.get(pid, 0), source_totals)
+                item, sum(tokens for _, tokens in source_totals), source_totals)
             set_text(
                 card_info["tokens"],
                 token_label[:64] + " · " + task_card_elapsed(item),
             )
             set_text(card_info["sources"], source_label)
-            percent, current = task_progress(item)
+            percent, current = task_progress(item) if progress_by_task is None else progress_by_task[pid]
             finished = item["status"] in ("ready_for_review", "accepted")
             state = "Finished" if finished else item["status"].replace("_", " ").capitalize()
             update_progress_card(
@@ -7979,12 +8019,13 @@ def gui():
                 connect_button.configure(text="Connect OpenRouter", state="normal")
             if disconnect_button.winfo_manager():
                 disconnect_button.pack_forget()
-        render_cards()
         all_projects = projects()
+        progress_by_task = {item["id"]: task_progress(item) for item in all_projects}
+        render_cards(all_projects, progress_by_task)
         update_side_preview(all_projects)
         now = time.monotonic()
         for item in all_projects:
-            current = (item["status"], task_progress(item)[1])
+            current = (item["status"], progress_by_task[item["id"]][1])
             previous = spoken_updates.get(item["id"])
             spoken_updates[item["id"]] = current
             if previous is None or previous == current:

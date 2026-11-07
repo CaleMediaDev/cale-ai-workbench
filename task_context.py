@@ -990,6 +990,58 @@ def _checker_diagnostic(root: Path, tool: str, result: str, arguments: dict | No
         return None
 
 
+def record_file_publication(folder, batch, position, signature, target, staged):
+    """Record the identity of a staged file before its atomic publication."""
+    import sqlite3
+    from contextlib import closing
+
+    root = project_memory._artifact_project_root(folder)
+    relative = target.relative_to(root).as_posix()
+    identity = project_memory._receipt_file_identity(staged)
+    if not identity[1] or identity[2] > 10_000_000:
+        return
+    digest = project_memory._receipt_stream(staged, identity, time.monotonic() + 0.5)
+    database = root / ".local-ai/memory.sqlite3"
+    with closing(sqlite3.connect(database.as_uri() + "?mode=rw", uri=True, timeout=0.05)) as conn, conn:
+        conn.execute("""CREATE TABLE IF NOT EXISTS file_publications (
+            batch TEXT NOT NULL, position INTEGER NOT NULL, signature TEXT NOT NULL,
+            path TEXT NOT NULL, identity TEXT NOT NULL, digest TEXT NOT NULL,
+            PRIMARY KEY(batch,position))""")
+        conn.execute("INSERT INTO file_publications VALUES (?,?,?,?,?,?)",
+                     (batch, position, signature, relative, json.dumps(identity[:4]), digest))
+        conn.execute("""DELETE FROM file_publications WHERE rowid NOT IN
+            (SELECT rowid FROM file_publications ORDER BY rowid DESC LIMIT 32)""")
+
+
+def recover_file_publication(folder, batch, position, signature, target):
+    """Confirm that the exact staged file reached its intended destination."""
+    import sqlite3
+    from contextlib import closing
+
+    try:
+        root = project_memory._artifact_project_root(folder)
+        relative = target.relative_to(root).as_posix()
+        database = root / ".local-ai/memory.sqlite3"
+        if not database.is_file():
+            return None
+        with closing(sqlite3.connect(database.as_uri() + "?mode=ro", uri=True, timeout=0)) as conn:
+            row = conn.execute("""SELECT identity,digest FROM file_publications
+                WHERE batch=? AND position=? AND signature=? AND path=?""",
+                (batch, position, signature, relative)).fetchone()
+        if row is None:
+            return None
+        identity = project_memory._receipt_file_identity(target)
+        # Creation time may change on rename. The file identity, last write
+        # time, length and complete byte hash must still match the staged file.
+        if (not identity[1] or identity[2] > 10_000_000
+                or list(identity[:4]) != json.loads(row[0])
+                or project_memory._receipt_stream(target, identity, time.monotonic() + 0.5) != row[1]):
+            return None
+        return f"Recovered saved file {relative} (sha256 {row[1]}). Continue from this file and check its behavior."
+    except (OSError, ValueError, TypeError, sqlite3.Error):
+        return None
+
+
 def record_action(folder: str | Path, tool: str, result: str, arguments: dict | None = None,
                   *, request_hash: str | None = None) -> None:
     """Save status-only actions and bounded, project-local structured check errors."""

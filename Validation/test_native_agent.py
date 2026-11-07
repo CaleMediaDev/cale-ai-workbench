@@ -2273,8 +2273,8 @@ def test_native_worker_writes_files_and_checkpoints_tool_results():
         ])
         original = native_agent.execute_tool
 
-        def tool(root, name, args):
-            return "Exit code: 0\nPASS" if name == "run_command" else original(root, name, args)
+        def tool(root, name, args, **kwargs):
+            return "Exit code: 0\nPASS" if name == "run_command" else original(root, name, args, **kwargs)
 
         with patch.object(native_agent, "execute_tool", side_effect=tool):
             state = native_agent.run_slice(item, complete=lambda _: next(responses))
@@ -2985,8 +2985,8 @@ def test_passing_verifier_prompts_plan_closeout_and_then_hands_off():
             seen.append(copy.deepcopy(payload))
             return next(responses)
 
-        def tool(root, name, args):
-            return "Exit code: 0\nPASS" if name == "run_command" else original(root, name, args)
+        def tool(root, name, args, **kwargs):
+            return "Exit code: 0\nPASS" if name == "run_command" else original(root, name, args, **kwargs)
 
         with patch.object(native_agent, "execute_tool", side_effect=tool):
             state = native_agent.run_slice(item, complete=complete)
@@ -3013,8 +3013,8 @@ def test_source_write_after_verification_invalidates_automatic_handoff():
         ])
         original = native_agent.execute_tool
 
-        def tool(root, name, args):
-            return "Exit code: 0\nPASS" if name == "run_command" else original(root, name, args)
+        def tool(root, name, args, **kwargs):
+            return "Exit code: 0\nPASS" if name == "run_command" else original(root, name, args, **kwargs)
 
         with patch.object(native_agent, "MAX_TURNS_PER_SLICE", 2), \
                 patch.object(native_agent, "execute_tool", side_effect=tool):
@@ -3043,8 +3043,8 @@ def test_source_edit_after_verification_requires_another_check():
         ])
         original = native_agent.execute_tool
 
-        def tool(root, name, args):
-            return "Exit code: 0\nPASS" if name == "run_command" else original(root, name, args)
+        def tool(root, name, args, **kwargs):
+            return "Exit code: 0\nPASS" if name == "run_command" else original(root, name, args, **kwargs)
 
         with patch.object(native_agent, "MAX_TURNS_PER_SLICE", 2), \
                 patch.object(native_agent, "execute_tool", side_effect=tool):
@@ -4070,6 +4070,65 @@ def test_interrupted_tool_reply_precedes_later_user_steering():
     assert repaired[3]["tool_call_id"] == "b"
     assert "Inspect the project state" in repaired[3]["content"]
     assert repaired[4]["content"] == "Also make it blue."
+
+
+@pytest.mark.parametrize(("tool", "boundary", "recoverable"), [
+    ("write_file", "after", True),
+    ("edit_file", "after", True),
+    ("write_file", "before", False),
+    ("edit_file", "replaced", False),
+])
+def test_worker_recovers_only_the_exact_published_file(tmp_path, monkeypatch, tool, boundary, recoverable):
+    folder = tmp_path / "notes"
+    item = project(folder)
+    item["brief"] = "Maintain the existing notes."
+    output = folder / "notes.txt"
+    output.write_text("Old note", encoding="utf-8")
+    native_agent.save_state(item, {"status": "continue", "turns": 1,
+        "messages": [{"role": "system", "content": "Maintain the notes."},
+                     {"role": "user", "content": "Update the wording."}],
+        "verify_passed": True, "browser_verified": True})
+    arguments = ({"path": "notes.txt", "content": "New note"} if tool == "write_file"
+                 else {"path": "notes.txt", "old_text": "Old note", "new_text": "New note"})
+    replace = os.replace
+
+    class WorkerInterrupted(BaseException):
+        pass
+
+    def stop_at_publication(source, destination):
+        if Path(destination) != output:
+            return replace(source, destination)
+        if boundary != "before":
+            replace(source, destination)
+        raise WorkerInterrupted()
+
+    monkeypatch.setattr(native_agent, "MAX_TURNS_PER_SLICE", 1)
+    with monkeypatch.context() as crash:
+        crash.setattr(native_agent.os, "replace", stop_at_publication)
+        with pytest.raises(WorkerInterrupted):
+            native_agent.run_slice(item, complete=lambda _: initial_planning_reply(tool, arguments))
+    if boundary == "replaced":
+        # Identical bytes on a different file are not this worker's publication.
+        replacement = folder / "replacement.txt"
+        replacement.write_bytes(output.read_bytes())
+        replace(replacement, output)
+    checkpoint = native_agent.read_state(item)
+    checkpoint["messages"].append({"role": "user", "content": "Keep the next change small."})
+    native_agent.save_state(item, checkpoint)
+
+    def resumed(payload):
+        replies = [msg["content"] for msg in payload["messages"] if msg["role"] == "tool"]
+        expected = "Recovered saved file notes.txt" if recoverable else "Inspect the project state"
+        assert any(expected in reply for reply in replies)
+        return initial_planning_reply("read_file", {"path": "notes.txt"})
+
+    resumed_state = native_agent.run_slice(item, complete=resumed)
+    assert output.read_text(encoding="utf-8") == ("Old note" if boundary == "before" else "New note")
+    assert not resumed_state["verify_passed"] and not resumed_state["browser_verified"]
+    messages = resumed_state["messages"]
+    steering = next(index for index, msg in enumerate(messages)
+                    if msg.get("content") == "Keep the next change small.")
+    assert [msg["role"] for msg in messages[steering-2:steering+1]] == ["assistant", "tool", "user"]
 
 
 def test_new_task_uses_native_worker_and_completes_independent_check():

@@ -1144,6 +1144,39 @@ def test_studio_tk_song_callback_radio_controls_and_auto_position_do_not_fake_au
         window.destroy()
 
 
+def test_studio_updates_playheads_without_rebuilding_waves_and_skips_hidden_page(tmp_path):
+    import tkinter as tk
+
+    try:
+        window, controls, service, _ = studio_preview_fixture(tmp_path)
+    except tk.TclError as error:
+        pytest.skip("Tk desktop unavailable: " + str(error))
+    try:
+        state = service.snapshot()
+        waves = controls.waves
+        items = waves.find_all()
+        old_head = waves.coords("wave-0-head")
+        state["decks"][0]["elapsed"] = 1.75
+        with patch.object(service, "snapshot", return_value=state) as snapshot:
+            controls.poll()
+            assert waves.find_all() == items
+            assert waves.coords("wave-0-head")[0] > old_head[0]
+            window.withdraw()
+            window.update()
+            snapshot.reset_mock()
+            controls.poll()
+            snapshot.assert_not_called()
+            state = {**state, "decks": [{}, state["decks"][1]]}
+            snapshot.return_value = state
+            window.deiconify()
+            window.update()
+            snapshot.assert_called()
+            assert not waves.find_withtag("wave-0-head")
+            assert waves.find_withtag("wave-1") == tuple(item for item in items if "wave-1" in waves.gettags(item))
+    finally:
+        window.destroy()
+
+
 def test_studio_station_changes_are_queued_without_ui_database_io(tmp_path):
     _, service, _, _, _, _ = fixture(tmp_path)
     with patch.object(radio, "database", side_effect=AssertionError("Tk callback opened SQLite")):

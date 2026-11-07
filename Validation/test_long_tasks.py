@@ -3607,7 +3607,7 @@ def test_compact_task_cards_reflow_and_keep_original_action_routes(tmp_path):
            for i,status in enumerate(['working','accepted','needs_input'])]
     actions=[];details=[]
     namespace={'tk':tk,'ttk':ttk,'card':'#151d26','text':'#eef7ff','task_grid':grid,
-       'task_cards':{},'task_order':[p['id'] for p in items],'window':root,
+       'task_cards':{},'task_order':tuple(p['id'] for p in items),'window':root,
        'main_canvas':Mock(winfo_width=lambda:root.winfo_width()-80),'ROOT':tmp_path,'time':time,
        'read_task_status':lambda _: {},'task_controls_for':task_module.task_controls_for,
        'music_job_id':lambda p:p.get('music'),'standalone_audio_project':lambda _:False,
@@ -3627,6 +3627,12 @@ def test_compact_task_cards_reflow_and_keep_original_action_routes(tmp_path):
             assert len({entry['panel'].winfo_height() for entry in entries})==1
             assert all(entry['panel'].winfo_height()<220 for entry in entries)
         working=namespace['task_cards']['0'];finished=namespace['task_cards']['1'];needs=namespace['task_cards']['2']
+        with patch.object(working["panel"], "grid") as reposition:
+            namespace["layout_task_cards"]()
+            reposition.assert_not_called()
+        namespace["task_order"] = ("2", "1", "0")
+        namespace["layout_task_cards"]()
+        assert working["panel"].grid_info()["row"] == 2
         for button in working['controls'].winfo_children():button.invoke()
         assert actions==[('0','stop'),('0','pause'),('0','delete')]
         for button in finished['controls'].winfo_children():button.invoke()

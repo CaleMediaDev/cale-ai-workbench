@@ -10,6 +10,8 @@ Created by [Cale Media](https://calemedia.com).
 2. Click **Install** and watch the progress bar. Accounts are optional; you can connect them while models download.
 3. Click **Open Cale AI** and describe what you want in chat.
 
+Release 0.5.561 reduces redraws in Music and on the task dashboard. Music playback continues when you switch pages. Model activity loads in the background, and its chart uses the loaded data when you resize it. The native agent can also recognize an exact saved file after an interrupted edit and continue from it.
+
 Release 0.5.560 puts the DJ mixer, AI Radio, and song maker on the same audio player. Finished creations appear under **Your Songs**. Use **Play / mix** to hear one immediately or blend it into the current radio set; the station continues afterward. Each deck has bass, mid, high, speed, cue and loop controls. The first Music launch installs the local DJ sound engine in the background; ordinary playback is available during setup. No account or song export is needed.
 
 Release 0.5.559 keeps the Create page's chat and Send box visible after a build. Ask for changes to the game/app shown in the preview, including finished projects; choose **New project** in the project picker to start another build. Enter sends, and Shift+Enter adds a line.
