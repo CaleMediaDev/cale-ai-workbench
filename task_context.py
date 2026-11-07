@@ -707,7 +707,7 @@ def record_step_check(folder: str | Path, step_id: int, request_hash: str,
 
     A short successful check proves only the selected step's acceptance test;
     it never bypasses the whole project's independent completion requirements.
-    Optional helper authority/control checks run inside the SQL transaction and
+    Optional instruction and control checks run inside the SQL transaction and
     again after updates, so rejection rolls back both unit and successor state.
     """
     if request_identity(folder) != request_hash:
@@ -717,7 +717,7 @@ def record_step_check(folder: str | Path, step_id: int, request_hash: str,
         conn.commit()
         conn.execute("BEGIN IMMEDIATE")
         if before_commit is not None and not before_commit():
-            raise ValueError('Task control or helper instructions changed; no step advanced.')
+            raise ValueError('Task control or instructions changed; no step advanced.')
         current = _step_status(conn, request_hash)
         if not current["active"] or current["active"]["id"] != step_id:
             raise ValueError("That step is no longer active; no progress was advanced.")
@@ -743,7 +743,7 @@ def record_step_check(folder: str | Path, step_id: int, request_hash: str,
                 conn.execute("UPDATE task_steps SET status='active',updated=? WHERE id=?",
                              (time.time(), next_row["id"]))
         if before_commit is not None and not before_commit():
-            raise ValueError('Task control or helper instructions changed before publication; no step advanced.')
+            raise ValueError('Task control or instructions changed before publication; no step advanced.')
         return {"passed": passed, **_step_status(conn, request_hash)}
 
 

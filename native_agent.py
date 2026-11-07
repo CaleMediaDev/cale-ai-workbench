@@ -970,8 +970,6 @@ def _execute_tool(folder: Path, name: str, arguments: dict, *, before_step_commi
                 status_result = step_exit_result(kind, unit_checked)
                 if before_step_commit is not None and not before_step_commit():
                     raise ValueError("Task control or user instructions changed during automatic acceptance; no step advanced.")
-                if structured:
-                    task_context.record_action(folder, kind, checked, check_args, request_hash=request_hash)
                 checked_helper=(json.loads(checked).get('helper') if kind=='check_expression_helper'
                                 and checked.startswith('{') else None)
                 def helper_commit_allowed():
@@ -984,7 +982,12 @@ def _execute_tool(folder: Path, name: str, arguments: dict, *, before_step_commi
                             and (before_step_commit is None or before_step_commit()))
                 value = task_context.record_step_check(folder, active["id"], request_hash, status_result,
                     unchanged=step_source_fingerprint(folder, structured) == before, expected_check=expected_check,
-                    **({'before_commit':helper_commit_allowed} if kind=='check_expression_helper' else {}))
+                    before_commit=helper_commit_allowed if kind == 'check_expression_helper' else before_step_commit)
+                if structured:
+                    try:
+                        task_context.record_action(folder, kind, checked, check_args, request_hash=request_hash)
+                    except (OSError, ValueError, sqlite3.Error):
+                        pass  # The step verdict already committed; diagnostics are optional.
                 value["checked_step_id"] = active["id"]
                 value["check_sha256"] = expected_check
                 if not structured:
@@ -5519,6 +5522,7 @@ def advance_checked_steps(project: dict, state: dict, messages: list) -> bool:
 
     folder = Path(project["folder"])
     stamp = user_request_stamp(folder)
+    instructions = None
     for _ in range(8):
         if read_state(project).get("status") in {"paused", "stopped", "done"} or user_request_stamp(folder) != stamp:
             return False
@@ -5528,6 +5532,11 @@ def advance_checked_steps(project: dict, state: dict, messages: list) -> bool:
         automatic_game = active["check_tool"] == "run_verifier" and owned_game_verifier(folder)
         if not automatic_game and active["check_tool"] not in {"check_python_function", "check_javascript_function", "check_webapp", "check_expression_helper"}:
             break  # Arbitrary shell/integration commands remain explicit tools.
+        current_instructions = planning_basis(project)
+        if instructions is not None and current_instructions != instructions:
+            state["_automatic_acceptance_superseded"] = True
+            return False
+        instructions = current_instructions
         helper_request_before=None
         try:
             if active['check_tool']=='check_expression_helper':
@@ -5543,22 +5552,37 @@ def advance_checked_steps(project: dict, state: dict, messages: list) -> bool:
                     state['_helper_reuse_superseded']=True
                     return False  # Rebuilding helper provenance can itself observe new instructions.
             break  # Keep the ordinary tools available to investigate.
+        basis["instructions"] = instructions
         if state.get("automatic_step_attempt") == basis:
             break
-        state["current"] = "Checking saved step: " + active["title"]
-        save_state(project, state)
+        superseded = False
         def allowed():
             import long_tasks
+            nonlocal superseded
 
             try:
-                return (read_state(project).get("status") not in {"paused", "stopped", "done"}
+                current = (not superseded
+                        and read_state(project).get("status") not in {"paused", "stopped", "done"}
                         and user_request_stamp(folder) == stamp
+                        and planning_basis(project) == instructions
                         and (active['check_tool']!='check_expression_helper'
                              or project_memory._helper_request_identity(folder)==basis['helper_request'])
                         and any(item.get("id") == project["id"] and item.get("folder")
+                                and item.get("brief") == project.get("brief")
                                 and Path(item["folder"]).resolve() == folder.resolve() for item in long_tasks.projects()))
+            except InstructionReadUnavailable:
+                raise
             except (OSError, ValueError, TypeError, sqlite3.Error):
-                return False  # Unavailable task control cannot authorize a progress commit.
+                current = False  # Unavailable task control cannot authorize a progress commit.
+            superseded = not current
+            return current
+
+        if not allowed():
+            if active['check_tool']=='check_expression_helper':state['_helper_reuse_superseded']=True
+            state["_automatic_acceptance_superseded"] = True
+            return False
+        state["current"] = "Checking saved step: " + active["title"]
+        save_state(project, state)
         arguments = {"action": "complete", "step_id": active["id"], "_expected_check": basis["step"]}
         if automatic_game:
             arguments["_automatic_game"] = True
@@ -5566,6 +5590,7 @@ def advance_checked_steps(project: dict, state: dict, messages: list) -> bool:
         result = execute_tool(folder, "task_steps", arguments, before_step_commit=allowed)
         if not allowed():
             if active['check_tool']=='check_expression_helper':state['_helper_reuse_superseded']=True
+            state["_automatic_acceptance_superseded"] = True
             return False
         # Checker-owned suite saves are expected. Source mutations are not:
         # retain the original source identity so a later read-only retry runs.
@@ -5726,9 +5751,12 @@ def _run_slice(project: dict, complete=None) -> dict:
             if latest.get("status") in {"paused", "stopped", "done"}:
                 return latest
             if state.pop('_helper_reuse_superseded',False):
+                state.pop('_automatic_acceptance_superseded', None)
                 state.update(status='continue',current='Helper task ownership or instructions changed; reload before acting')
                 save_state(project,state)
                 return state
+            if state.pop('_automatic_acceptance_superseded', False):
+                return _post_queue_instruction_defer(project, state, 'automatic_acceptance_superseded')
             continue  # Rebuild against the new user instruction on the next iteration.
         if int(state.get("helper_reuse_checkpoints",0))>helper_checkpoint:
             latest=read_state(project)

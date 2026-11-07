@@ -912,14 +912,16 @@ def test_automatic_acceptance_advances_real_steps_without_inference_or_handoff(t
     state = {"status": "running", "turns": 1}
     native_agent.save_state(item, state)
     messages = []
-    with patch.object(long_tasks, "projects", return_value=[item]):
+    supervisor_state = tmp_path / "state"
+    supervisor_state.mkdir()
+    with patch.object(long_tasks, "projects", return_value=[item]), patch.object(long_tasks, "STATE", supervisor_state):
         assert native_agent.advance_checked_steps(item, state, messages)
     assert task_context.step_status(folder)["done"] == 2
     assert state["turns"] == 1 and state["automatic_step_checks"] == 2
     assert state["verify_passed"] and state["status"] == "running" and len(messages) == 2
     # The accumulated verifier must still test the earlier function.
     (folder / "logic.js").write_text("function first(x){return 0}\nfunction second(x){return x*2}")
-    with patch.object(long_tasks, "projects", return_value=[item]):
+    with patch.object(long_tasks, "projects", return_value=[item]), patch.object(long_tasks, "STATE", supervisor_state):
         assert native_agent.execute_tool(folder, "run_verifier", {}).startswith("Exit code: 1")
 
 
@@ -976,7 +978,12 @@ def test_automatic_acceptance_does_not_commit_control_request_source_or_acceptan
         def intervene(root, name, arguments, **kwargs):
             if name == "task_steps":
                 allowed = kwargs["before_step_commit"]
+                intervened = False
                 def commit():
+                    nonlocal intervened
+                    if intervened:
+                        return allowed()
+                    intervened = True
                     if race == "pause":
                         native_agent.save_state(item, {**state, "status": "paused"})
                     elif race == "delete":
@@ -1013,6 +1020,59 @@ def test_automatic_acceptance_waits_for_source_and_leaves_shell_checks_explicit(
             assert native_agent.advance_checked_steps(item, state, [])
         execute.assert_not_called()
         assert task_context.step_status(folder)["done"] == 0
+
+
+@pytest.mark.parametrize("boundary", ["checker", "publication", "transaction"])
+def test_automatic_acceptance_retries_if_rules_change_after_the_check(tmp_path, boundary):
+    item = project(tmp_path / "changed-acceptance-rules")
+    folder = Path(item["folder"])
+    rules = folder / "AGENTS.md"
+    rules.write_text("Rule A", encoding="utf-8")
+    stamp = rules.stat()
+    (folder / "logic.js").write_text("function calculate(x){return x+1}", encoding="utf-8")
+    task_context.plan_steps(folder, [{"phase": "Logic", "title": "Calculate",
+        "check_tool": "check_javascript_function", "check_arguments": {
+            "path": "logic.js", "function": "calculate", "cases": [{"args": [2], "expected": 3}]}}])
+    state = {"status": "running", "turns": 1}
+    native_agent.save_state(item, state)
+    execute = native_agent.execute_tool
+    publish = task_context.record_step_check
+    step_status = task_context._step_status
+
+    def replace_rules():
+        rules.write_text("Rule B", encoding="utf-8")
+        os.utime(rules, ns=(stamp.st_atime_ns, stamp.st_mtime_ns))
+
+    def change_after_checker(root, name, arguments, **kwargs):
+        result = execute(root, name, arguments, **kwargs)
+        if name == "check_javascript_function" and boundary == "checker":
+            assert json.loads(result)["passed"] is True
+            replace_rules()
+        return result
+
+    def change_before_publication(*args, **kwargs):
+        if boundary == "publication":
+            replace_rules()
+        if boundary == "transaction":
+            def change_during_transaction(*status_args, **status_kwargs):
+                status = step_status(*status_args, **status_kwargs)
+                replace_rules()
+                return status
+            with patch.object(task_context, "_step_status", side_effect=change_during_transaction):
+                return publish(*args, **kwargs)
+        return publish(*args, **kwargs)
+
+    messages = []
+    with patch.object(long_tasks, "projects", return_value=[item]):
+        with patch.object(native_agent, "execute_tool", side_effect=change_after_checker), \
+             patch.object(task_context, "record_step_check", side_effect=change_before_publication):
+            assert native_agent.advance_checked_steps(item, state, messages) is False
+        queue = task_context.step_status(folder)
+        assert queue["done"] == 0 and queue["active"]["attempts"] == 0
+        assert not messages and not state.get("automatic_step_attempt")
+        assert native_agent.advance_checked_steps(item, native_agent.read_state(item), messages)
+    assert task_context.step_status(folder)["done"] == 1
+    assert len(messages) == 1
 
 
 def test_named_api_coverage_blocks_omissions_and_stale_suite_but_preserves_custom_checks(tmp_path):
