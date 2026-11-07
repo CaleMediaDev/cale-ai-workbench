@@ -4158,7 +4158,9 @@ def gui():
             # Wide displays keep navigation in the brand bar. A short second
             # row on narrow PCs preserves every account/donation control.
             navigation.pack_forget()
-            if content_width >= 1200:
+            # Four workspace tabs plus the brand and account controls need
+            # more space than a 1280px window's inner header provides.
+            if content_width >= 1440:
                 window.workspace_hint.pack_forget()
                 navigation.pack(in_=header, side="left", padx=(8, 0))
             else:
