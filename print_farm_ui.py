@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ipaddress
+import math
 import queue
 import re
 import threading
@@ -13,6 +14,160 @@ from urllib.parse import urlsplit
 
 from print_farm import Service, digest
 from print_farm_live import CameraTile, LiveCameras
+
+
+class PrinterCard(tk.Frame):
+    """Show printer telemetry beside its existing camera controls."""
+
+    SURFACE = "#0e1725"
+    MUTED = "#9cadc4"
+    STATUS = {
+        "printing": ("Printing", "#50eaff"),
+        "starting": ("Starting", "#50eaff"),
+        "ready": ("Standby", "#78e6ab"),
+        "complete": ("Print complete", "#78e6ab"),
+        "fault": ("Needs attention", "#ffc879"),
+        "offline": ("Offline", "#9cadc4"),
+    }
+
+    def __init__(self, parent, live, printer_id, settings):
+        super().__init__(parent, bg=self.SURFACE, highlightthickness=1,
+                         highlightbackground="#2a3d58")
+        self.last_state = None
+        self.progress = None
+        self.signal = self.STATUS["offline"][1]
+        self.accent = tk.Frame(self, height=2, bg=self.signal)
+        self.accent.pack(fill="x")
+        body = tk.Frame(self, bg=self.SURFACE)
+        body.pack(fill="both", expand=True, padx=13, pady=(11, 9))
+
+        head = tk.Frame(body, bg=self.SURFACE)
+        head.pack(fill="x")
+        self.icon = tk.Canvas(head, width=34, height=34, bg="#16263c", highlightthickness=0)
+        self.icon.pack(side="left", padx=(0, 9))
+        self.icon.create_line(8, 25, 8, 9, 26, 9, 26, 25, 8, 25,
+                              fill=self.signal, width=2, tags="printer")
+        self.icon.create_line(9, 14, 25, 14, 17, 14, 17, 20,
+                              fill=self.signal, tags="printer")
+        self.icon.create_line(12, 22, 22, 22, fill=self.signal, tags="printer")
+        self.name = tk.Label(head, bg=self.SURFACE, fg="#f0f7ff", anchor="w",
+                             font=("Segoe UI", 13, "bold"))
+        self.name.pack(side="left", fill="x", expand=True)
+        ttk.Button(head, text="⚙ Settings", command=settings).pack(side="right", padx=(5, 0))
+
+        telemetry = tk.Frame(body, bg=self.SURFACE)
+        telemetry.pack(fill="x", pady=(5, 0))
+        self.percent = tk.Label(telemetry, bg=self.SURFACE, fg=self.signal, anchor="w",
+                                font=("Segoe UI", 31, "bold"), padx=0, pady=0)
+        self.percent.pack(side="left")
+        readings = tk.Frame(telemetry, bg=self.SURFACE)
+        readings.pack(side="right")
+        self.status = tk.Label(readings, anchor="e", bg="#16263c", fg=self.signal,
+                               font=("Segoe UI", 10, "bold"), padx=8, pady=3)
+        self.status.pack(anchor="e")
+        self.material = tk.Label(readings, anchor="e", bg=self.SURFACE, fg=self.MUTED,
+                                 font=("Segoe UI", 9), padx=0)
+        self.material.pack(anchor="e")
+        self.meter = tk.Canvas(body, height=10, width=1, bg=self.SURFACE, highlightthickness=0)
+        self.meter.pack(fill="x", pady=(1, 9))
+        self.meter.bind("<Configure>", self.draw_meter)
+
+        metrics = tk.Frame(body, bg=self.SURFACE)
+        metrics.pack(fill="x", pady=(0, 8))
+        self.metrics = []
+        for index, title in enumerate(("◷  TIME LEFT", "↑  NOZZLE", "▱  BED")):
+            metrics.columnconfigure(index, weight=1, uniform="printer-metrics")
+            cell = tk.Frame(metrics, bg="#142238", padx=5, pady=3)
+            cell.grid(row=0, column=index, sticky="ew", padx=(0, 3) if index < 2 else 0)
+            tk.Label(cell, text=title, fg=self.MUTED, bg="#142238",
+                     font=("Segoe UI", 8, "bold")).pack()
+            value = tk.Label(cell, fg="#e4f5ff", bg="#142238", font=("Segoe UI", 10, "bold"))
+            value.pack()
+            self.metrics.append(value)
+
+        self.camera = CameraTile(body, live, printer_id, width=640, height=185)
+        self.camera.canvas.configure(width=240)
+        self.camera.pack(fill="x")
+        self.bed = tk.Label(body, bg="#16263c", fg=self.MUTED, anchor="w",
+                            font=("Segoe UI", 9, "bold"), padx=8, pady=4)
+        self.bed.pack(fill="x", pady=(8, 0))
+
+    def draw_meter(self, _event=None):
+        self.meter.delete("segments")
+        width = self.meter.winfo_width()
+        if width <= 1:
+            return
+        pitch = width / 20
+        for index in range(20):
+            left = index * pitch
+            right = (index + 1) * pitch - 2
+            self.meter.create_rectangle(left, 1, right, 9, fill="#233349",
+                                        width=0, tags="segments")
+            filled = min(right, width * (self.progress or 0) / 100)
+            if filled > left:
+                self.meter.create_rectangle(left, 1, filled, 9, fill=self.signal,
+                                            width=0, tags="segments")
+
+    @staticmethod
+    def read_number(raw, maximum):
+        if isinstance(raw, bool):
+            return None
+        try:
+            value = float(raw)
+        except (TypeError, ValueError, OverflowError):
+            return None
+        return value if math.isfinite(value) and 0 <= value <= maximum else None
+
+    def render(self, printer):
+        detail = printer.get("detail", "")
+        if not printer.get("online"):
+            state = "offline"
+        elif detail == "Printer error":
+            state = "fault"
+        elif detail.startswith("Finished"):
+            state = "complete"
+        elif detail == "Starting print":
+            state = "starting"
+        else:
+            state = "ready" if printer.get("idle") else "printing"
+        progress = (self.read_number(printer.get("progress"), 100)
+                    if state in {"printing", "complete"} else None)
+        seconds = (self.read_number(printer.get("seconds_remaining"), 604800)
+                   if state == "printing" else None)
+        eta = "—"
+        if seconds:
+            hours, minutes = divmod(math.ceil(seconds / 60), 60)
+            eta = f"{hours}h {minutes:02d}m" if hours else f"{minutes}m"
+        temperatures = []
+        for field in ("nozzle_c", "bed_c"):
+            temp = self.read_number(printer.get(field), 500) if printer.get("online") else None
+            temperatures.append("—" if temp is None else f"{temp:.0f}°C")
+        bed_state = (printer.get("bed") or {}).get("state")
+        bed_label, bed_color = {
+            "clear": ("✓  Build plate clear", "#78e6ab"),
+            "blocked": ("!  Build plate occupied", "#ffc879"),
+            "unknown": ("◇  Build plate unverified", self.MUTED),
+        }.get(bed_state, ("◇  Build plate · check pending", self.MUTED))
+        name = printer.get("hostname") or printer["id"]
+        color = str(printer.get("color") or "").strip()
+        readings = (eta, *temperatures)
+        shown = (state, progress, bed_label, name, color, readings)
+        if self.last_state == shown:
+            return
+        self.last_state = shown
+        self.progress = progress
+        label, self.signal = self.STATUS[state]
+        self.name.configure(text=name)
+        self.percent.configure(text="—" if progress is None else f"{progress:.0f}%",
+                               fg=self.signal)
+        self.status.configure(text="●  " + label.upper(), fg=self.signal)
+        self.accent.configure(bg=self.signal)
+        self.icon.itemconfigure("printer", fill=self.signal)
+        self.material.configure(text=(color.upper() + " FILAMENT") if color else "LOCAL PRINTER")
+        self.bed.configure(text=bed_label, fg=bed_color)
+        for label, value in zip(self.metrics, readings):
+            label.configure(text=value)
+        self.draw_meter()
 
 
 class Controls:
@@ -63,18 +218,6 @@ class Controls:
         ttk.Label(self.frame, textvariable=self.status, wraplength=1000).pack(
             fill="x", pady=(0, 8)
         )
-        ttk.Label(
-            self.frame,
-            text="Sales import automatically. File matches above 50% start when a compatible printer is clear. Matches at 50% or below wait for OK.",
-            style="Muted.TLabel",
-            wraplength=1050,
-        ).pack(fill="x")
-        ttk.Label(
-            self.frame,
-            text="After someone removes a finished print, AI checks the empty bed and starts the next queued job. Keep Cale and this PC running.",
-            style="Muted.TLabel",
-            wraplength=1050,
-        ).pack(fill="x", pady=(2, 16))
         shell = ttk.Frame(self.frame)
         shell.pack(fill="both", expand=True)
         self.canvas = tk.Canvas(shell, highlightthickness=0, background="#0b1016")
@@ -97,16 +240,12 @@ class Controls:
         self.wheel_binding = self.window.bind("<MouseWheel>", self.scroll_page, add="+")
         top = ttk.Frame(self.content)
         top.pack(fill="x")
-        ttk.Label(top, text="PRINTERS", font=("Segoe UI", 10, "bold")).pack(side="left")
+        self.fleet_status = ttk.Label(top, text="PRINTERS", font=("Segoe UI", 10, "bold"))
+        self.fleet_status.pack(side="left")
         ttk.Button(top, text="Add printer", command=self.add_printer).pack(side="right")
         ttk.Button(top, text="Refresh files", command=self.refresh_files).pack(
             side="right", padx=8
         )
-        ttk.Label(
-            self.content,
-            text="LIVE CAMERAS · AI adapts to scene changes. AI overlay shows the inspected frame.",
-            style="Muted.TLabel",
-        ).pack(anchor="w", pady=(8, 0))
         self.printers_frame = ttk.Frame(self.content)
         self.printers_frame.pack(fill="x", pady=(8, 14))
         self.no_printers = ttk.Label(
@@ -279,7 +418,7 @@ class Controls:
             return "break"
 
     def layout_printers(self, width):
-        columns = 1 if width < 680 else 2 if width < 1450 else 4
+        columns = 1 if width < 680 else 2 if width < 1280 else 4
         self.grid_columns = columns
         for i in range(4):
             self.printers_frame.columnconfigure(
@@ -288,7 +427,7 @@ class Controls:
                 uniform="cameras" if i < columns else "",
             )
         for index, pid in enumerate(self.printer_data):
-            card = self.printer_cards[pid][0]
+            card = self.printer_cards[pid]
             card.grid(
                 row=index // columns,
                 column=index % columns,
@@ -299,11 +438,14 @@ class Controls:
 
     def render(self, snapshot):
         printers = snapshot.get("printers", [])
+        online = sum(bool(printer.get("online")) for printer in printers)
+        busy = sum(bool(printer.get("online") and not printer.get("idle")) for printer in printers)
+        self.fleet_status.configure(text=f"PRINTERS    ● {online}/{len(printers)} ONLINE    ◇ {busy} BUSY")
         previous_ids = tuple(self.printer_data)
         self.printer_data = {p["id"]: p for p in printers}
         for pid in list(self.printer_cards):
             if pid not in self.printer_data:
-                self.printer_cards.pop(pid)[0].destroy()
+                self.printer_cards.pop(pid).destroy()
                 self.camera_tiles.pop(pid, None)
         if not printers:
             self.no_printers.grid(row=0, column=0, sticky="w", pady=16)
@@ -312,36 +454,11 @@ class Controls:
         for printer in printers:
             pid = printer["id"]
             if pid not in self.printer_cards:
-                card = ttk.LabelFrame(
-                    self.printers_frame, style="PrintFarm.TLabelframe", padding=10
-                )
-                detail = ttk.Label(card, font=("Segoe UI", 11, "bold"))
-                detail.pack(anchor="w")
-                tile = CameraTile(card, self.live, pid, width=640, height=240)
-                tile.pack(fill="x", pady=(8, 4))
-                self.camera_tiles[pid] = tile
-                bed = ttk.Label(card)
-                bed.pack(anchor="w", pady=(4, 0))
-                ttk.Button(
-                    card,
-                    text="Settings",
-                    command=lambda key=pid: self.add_printer(
-                        self.printer_data.get(key)
-                    ),
-                ).pack(anchor="w", pady=(8, 0))
-                self.printer_cards[pid] = (card, detail, bed)
-            card, detail, bed = self.printer_cards[pid]
-            card.configure(text=printer.get("hostname", pid))
-            progress = (
-                f" · {printer.get('progress', 0):.0f}%"
-                if printer.get("online") and not printer.get("idle")
-                else ""
-            )
-            detail.configure(text=printer.get("detail", "Checking…") + progress)
-            bed.configure(
-                text="Start check: "
-                + printer.get("bed", {}).get("state", "unchecked").replace("_", " ")
-            )
+                card = PrinterCard(self.printers_frame, self.live, pid,
+                                   lambda key=pid: self.add_printer(self.printer_data.get(key)))
+                self.printer_cards[pid] = card
+                self.camera_tiles[pid] = card.camera
+            self.printer_cards[pid].render(printer)
         if previous_ids != tuple(self.printer_data):
             self.layout_printers(self.canvas.winfo_width())
         rows = snapshot.get("orders", [])

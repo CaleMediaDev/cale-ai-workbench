@@ -550,7 +550,10 @@ class Service:
                     **p,
                     "online": True,
                     "idle": ready_state(state) and not fault,
-                    "progress": state.get("printProgress", 0),
+                    "progress": state.get("printProgress"),
+                    "nozzle_c": state.get("nozzleTemp"),
+                    "bed_c": state.get("bedTemp0"),
+                    "seconds_remaining": state.get("printLeftTime"),
                     "detail": "Printer error"
                     if fault
                     else (

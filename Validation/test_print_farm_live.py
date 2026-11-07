@@ -78,7 +78,7 @@ class LiveObservationTests(unittest.TestCase):
             page = Controls(parent, window, Path("."), service=service)
             data = {
                 "printers": [
-                    {"id": str(i), "hostname": str(i), "detail": "Idle"}
+                    {"id": str(i), "hostname": str(i), "detail": "Idle", "online": True, "idle": True}
                     for i in range(4)
                 ],
                 "orders": [],
@@ -86,14 +86,28 @@ class LiveObservationTests(unittest.TestCase):
             page.render(data)
             tile = page.camera_tiles["0"]
             tile.overlay.set(True)
-            data["printers"][0]["detail"] = "Printing"
+            self.assertEqual(page.printer_cards["0"].percent.cget("text"), "—")
+            data["printers"][0].update(detail="Printing / busy", progress="78.4", idle=False,
+                                       seconds_remaining=982, nozzle_c="220.02", bed_c="50.21",
+                                       bed={"state": "clear"})
             page.render(data)
             self.assertIs(tile, page.camera_tiles["0"])
             self.assertTrue(tile.overlay.get())
+            card = page.printer_cards["0"]
+            self.assertEqual(card.percent.cget("text"), "78%")
+            self.assertIn("PRINTING", card.status.cget("text"))
+            self.assertIn("clear", card.bed.cget("text"))
+            self.assertEqual([value.cget("text") for value in card.metrics],
+                             ["17m", "220°C", "50°C"])
+            data["printers"][0].update(detail="Offline", online=False, progress=78)
+            page.render(data)
+            self.assertEqual(card.percent.cget("text"), "—")
+            self.assertIn("OFFLINE", card.status.cget("text"))
+            self.assertEqual([value.cget("text") for value in card.metrics], ["—"] * 3)
             page.layout_printers(1100)
-            self.assertEqual(page.printer_cards["3"][0].grid_info()["row"], 1)
-            page.layout_printers(1600)
-            self.assertEqual(page.printer_cards["3"][0].grid_info()["column"], 3)
+            self.assertEqual(page.printer_cards["3"].grid_info()["row"], 1)
+            page.layout_printers(1320)
+            self.assertEqual(page.printer_cards["3"].grid_info()["column"], 3)
         finally:
             window.destroy()
 
@@ -261,6 +275,8 @@ class LiveObservationTests(unittest.TestCase):
             tile.refresh(force=True)
             self.assertIsNone(tile.photo)
             self.assertIn("waiting for a live camera", tile.detected.cget("text"))
+            self.assertEqual(tile.canvas.coords(tile.canvas.find_all()[0]),
+                             [tile.canvas.winfo_width() / 2, tile.canvas.winfo_height() / 2])
         finally:
             window.destroy()
 

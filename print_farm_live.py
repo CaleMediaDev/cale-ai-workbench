@@ -542,8 +542,8 @@ class CameraTile(ttk.Frame):
                 self.image_item = None
                 self.canvas.delete("all")
                 self.canvas.create_text(
-                    self.size[0] / 2,
-                    self.size[1] / 2,
+                    self.canvas.winfo_width() / 2,
+                    self.canvas.winfo_height() / 2,
                     text="Camera unavailable"
                     if not live_ok
                     else "Waiting for AI inspection…",
