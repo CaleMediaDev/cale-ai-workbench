@@ -93,14 +93,12 @@ class LiveObservationTests(unittest.TestCase):
             self.assertIn("Bed out of view", card.bed.cget("text"))
             card.check_bed.invoke()
             service.request_bed_check.assert_called_once_with("0")
-            tile.overlay.set(True)
             self.assertEqual(page.printer_cards["0"].percent.cget("text"), "—")
             data["printers"][0].update(detail="Printing / busy", progress="78.4", idle=False,
                                        seconds_remaining=982, nozzle_c="220.02", bed_c="50.21",
                                        bed={"state": "clear"}, color="black")
             page.render(data)
             self.assertIs(tile, page.camera_tiles["0"])
-            self.assertTrue(tile.overlay.get())
             self.assertTrue(card.check_bed.instate(["disabled"]))
             self.assertEqual(card.percent.cget("text"), "78%")
             self.assertIn("PRINTING", card.status.cget("text"))
@@ -305,7 +303,7 @@ class LiveObservationTests(unittest.TestCase):
         self.assertNotIn("bytes", live.frames["p"])
         self.assertIn("error", live.frames["p"])
 
-    def test_overlay_draws_only_on_inspected_frame_and_stale_camera_is_hidden(self):
+    def test_automatic_overlay_uses_inspected_frame_and_falls_back_when_scene_changes(self):
         import tkinter as tk
 
         window = tk.Tk()
@@ -313,14 +311,15 @@ class LiveObservationTests(unittest.TestCase):
         live = LiveCameras(lambda: {})
         now = time.time()
         raw, analyzed = picture("blue"), picture("red")
-        live.frames["p"] = {"bytes": raw, "at": now, "changed_at": now}
-        live.results["p"] = {
+        live.frames["p"] = {"bytes": raw, "at": now, "changed_at": now, "signature": bytes(576)}
+        analysis = {
             "frame": analyzed,
             "captured_at": now,
             "checked_at": now,
             "state": "occupied",
             "confidence": 0.9,
             "objects": [{"label": "part", "box": [0, 0, 500, 500]}],
+            "signature": bytes(576),
         }
         try:
             tile = CameraTile(window, live, "p")
@@ -331,12 +330,18 @@ class LiveObservationTests(unittest.TestCase):
                 any(tile.canvas.type(i) == "rectangle" for i in tile.canvas.find_all())
             )
             tile.after_cancel(tile.timer)
-            tile.overlay.set(True)
+            live.results["p"] = analysis
             tile.refresh(force=True)
             self.assertEqual(tile.last_key[0], hash(analyzed))
             self.assertTrue(
                 any(tile.canvas.type(i) == "rectangle" for i in tile.canvas.find_all())
             )
+            tile.after_cancel(tile.timer)
+            live.frames["p"]["signature"] = bytes([255]) * 576
+            tile.refresh(force=True)
+            self.assertEqual(tile.last_key[0], hash(raw))
+            self.assertFalse(tile.canvas.find_withtag("detection"))
+            self.assertIn("waiting for an updated scan", tile.detected.cget("text"))
             tile.after_cancel(tile.timer)
             live.frames["p"]["changed_at"] = now - 20
             tile.refresh(force=True)

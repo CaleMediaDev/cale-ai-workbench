@@ -380,7 +380,6 @@ class CameraTile(ttk.Frame):
     def __init__(self, parent, live, pid, width=330, height=185):
         super().__init__(parent)
         self.live, self.pid, self.size = live, pid, (width, height)
-        self.overlay = tk.BooleanVar(value=False)
         self.photo = None
         self.image_item = None
         self.last_key = None
@@ -406,12 +405,6 @@ class CameraTile(ttk.Frame):
         self.reason.pack(anchor="w", pady=(2, 4))
         buttons = ttk.Frame(self)
         buttons.pack(fill="x")
-        self.mode_button = ttk.Button(
-            buttons,
-            text="AI overlay",
-            command=lambda: self.overlay.set(not self.overlay.get()),
-        )
-        self.mode_button.pack(side="left")
         ttk.Button(buttons, text="Enlarge", command=self.enlarge).pack(side="right")
         self.timer = self.after(100, self.refresh)
         self.bind("<Destroy>", self.cleanup, add="+")
@@ -434,7 +427,6 @@ class CameraTile(ttk.Frame):
         window.configure(background="#0b1016")
         tile = CameraTile(window, self.live, self.pid, 960, 540)
         tile.pack(fill="both", expand=True, padx=16, pady=16)
-        tile.overlay.set(self.overlay.get())
 
     def refresh(self, force=False):
         if not self.winfo_exists():
@@ -451,8 +443,16 @@ class CameraTile(ttk.Frame):
             and now - frame.get("at", 0) < 15
             and now - frame.get("changed_at", 0) < 15
         )
-        overlay = self.overlay.get()
-        self.mode_button.configure(text="Live camera" if overlay else "AI overlay")
+        analysis_age = now - result.get("captured_at", 0)
+        overlay = (
+            live_ok
+            and bool(result.get("frame"))
+            and 0 <= analysis_age <= 60
+            and not (
+                result.get("signature") and frame.get("signature")
+                and scene_changed(result["signature"], frame["signature"])
+            )
+        )
         raw = (
             result.get("frame")
             if overlay and live_ok
@@ -544,26 +544,23 @@ class CameraTile(ttk.Frame):
                 self.canvas.create_text(
                     self.canvas.winfo_width() / 2,
                     self.canvas.winfo_height() / 2,
-                    text="Camera unavailable"
-                    if not live_ok
-                    else "Waiting for AI inspection…",
+                    text="Camera unavailable",
                     fill="#aebccc",
                 )
         state = result.get("state", "waiting")
-        age_ai = max(0, int(now - result.get("captured_at", now)))
         if not live_ok:
             text, color = "AI: waiting for a live camera", "#aebccc"
-        elif result.get("frame"):
+        elif overlay:
             labels = {
                 "clear": "Bed looks clear",
                 "occupied": "Object on bed",
                 "obstructed": "View obstructed",
                 "uncertain": "Uncertain",
             }
-            text = f"AI: {labels.get(state, state)} · {result.get('confidence', 0):.0%} · {age_ai}s ago"
-            if age_ai > 60:
-                text = "AI: previous observation · " + str(age_ai) + "s ago"
-            color = "#49d5b6" if state == "clear" and age_ai <= 60 else "#ffc65c"
+            text = f"AI: {labels.get(state, state)} · {result.get('confidence', 0):.0%} · {int(analysis_age)}s ago"
+            color = "#49d5b6" if state == "clear" else "#ffc65c"
+        elif result.get("frame"):
+            text, color = "AI: waiting for an updated scan", "#aebccc"
         else:
             text, color = (
                 "AI: " + result.get("reason", "Waiting for first scan"),
@@ -572,5 +569,5 @@ class CameraTile(ttk.Frame):
         if analyzing:
             text += " · analyzing…"
         self.detected.configure(text=text, foreground=color)
-        self.reason.configure(text=result.get("reason", "") if live_ok else "")
+        self.reason.configure(text=result.get("reason", "") if overlay else "")
         self.timer = self.after(250, self.refresh)

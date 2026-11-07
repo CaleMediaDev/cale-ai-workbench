@@ -98,9 +98,9 @@ class PrinterCard(tk.Frame):
         bed_row.pack(fill="x", pady=(8, 0))
         self.bed = tk.Label(bed_row, bg="#16263c", fg=self.MUTED, anchor="w",
                             font=("Segoe UI", 9, "bold"), padx=8, pady=4)
-        self.bed.pack(side="left", fill="x", expand=True)
         self.check_bed = ttk.Button(bed_row, text="◎ Check bed", command=check_bed, state="disabled")
         self.check_bed.pack(side="right", padx=(4, 0))
+        self.bed.pack(side="left", fill="x", expand=True)
 
     def draw_meter(self, _event=None):
         self.meter.delete("segments")
@@ -163,7 +163,7 @@ class PrinterCard(tk.Frame):
             "blocked": ("!  Build plate occupied", "#ffc879"),
             "out_of_view": ("◇  Bed out of view", "#ffc879"),
             "unknown": ("◇  Build plate unverified", self.MUTED),
-        }.get(bed_state, ("◇  Build plate · check pending", self.MUTED))
+        }.get(bed_state, ("◇  Bed check pending", self.MUTED))
         name = printer.get("hostname") or printer["id"]
         color = str(printer.get("color") or "").strip()
         readings = (eta, *temperatures)
