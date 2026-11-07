@@ -487,6 +487,33 @@ class Production(unittest.TestCase):
         self.dispatch()
         self.machine.start_order.assert_called_once()
 
+    def test_ebay_outage_keeps_saved_progress_visible_and_dispatch_waits_for_recovery(self):
+        self.proposal["reason"] = "Saved file match"
+        self.store.decision(self.key, self.proposal)
+        jid = farm.job_id(self.item, 0)
+        self.store.reserve(jid, self.key, 0, self.recipe)
+        self.store.outcome(jid, "completed")
+        self.client.orders.side_effect = [TimeoutError("Fixture eBay timeout"), []]
+        with (patch.object(self.service, "account_client", return_value=self.client),
+              patch.object(self.service, "scan_printers", return_value=[self.printer]),
+              patch.object(self.service, "catalog", return_value=[self.recipe]) as catalog,
+              patch.object(self.service, "dispatch", return_value={"status": "printing"}) as dispatch):
+            self.service.cycle(self.store)
+            self.assertIn("showing saved orders", self.service.snapshot["status"])
+            self.assertEqual(self.service.snapshot["orders"][0]["completed"], 1)
+            self.assertEqual(self.service.snapshot["orders"][0]["status"], "queued")
+            self.service.cycle(self.store)
+            self.client.orders.assert_called_once()
+            catalog.assert_not_called()
+            dispatch.assert_not_called()
+            self.assertIsNone(self.store.db.execute("SELECT 1 FROM meta WHERE key='checkpoint'").fetchone())
+
+            self.service.last_poll = 0
+            self.service.cycle(self.store)
+            self.assertEqual(self.service.snapshot["status"], "Automatic printing on")
+            dispatch.assert_called_once()
+            self.assertIsNotNone(self.store.db.execute("SELECT 1 FROM meta WHERE key='checkpoint'").fetchone())
+
     def test_expiry_during_order_refresh_leaves_job_queued_for_fresh_camera_check(self):
         now = [100]
 

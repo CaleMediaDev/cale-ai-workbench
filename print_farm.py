@@ -25,7 +25,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from print_farm_ebay import hold_reason, normalized, stamp
+from print_farm_ebay import IntakeError, hold_reason, normalized, stamp
 from print_farm_observe import observe, release_after_bed_check
 from print_farm_transport import (
     K1,
@@ -353,6 +353,7 @@ class Service:
         self.thread = None
         self.beds = BedWatcher()
         self.last_poll = 0
+        self.ebay_poll_failed = False
         self.last_inventory = 0
         self.inventory = []
         self.client = None
@@ -543,6 +544,7 @@ class Service:
                 (until.isoformat(),),
             )
         self.snapshot["ebay_checked_at"] = time.time()
+        self.ebay_poll_failed = False
 
     def scan_printers(self, settings):
         configured = settings.get("printers", [])
@@ -938,9 +940,14 @@ class Service:
                 orders=[],
             )
             return
-        self.import_sales(store, client, settings)
+        try:
+            self.import_sales(store, client, settings)
+        except (IntakeError, OSError, ValueError):
+            # Keep showing the local queue and reconciled jobs while order
+            # intake is unavailable. The next successful poll releases it.
+            self.ebay_poll_failed = True
         self.snapshot["connected"] = True
-        candidates = self.catalog(settings, printers)
+        candidates = self.catalog(settings, printers) if not self.ebay_poll_failed else []
         rows = []
         for saved in store.db.execute(
             "SELECT * FROM orders ORDER BY id DESC"
@@ -960,7 +967,7 @@ class Service:
             if reason:
                 continue  # Fulfilled/cancelled/unpaid sales never enter the print queue.
             proposal = json.loads(saved["decision"]) if saved["decision"] else None
-            if proposal and not all(
+            if proposal and not self.ebay_poll_failed and not all(
                 any(
                     c["id"] == r["id"]
                     and c["file_fingerprint"] == r["file_fingerprint"]
@@ -969,7 +976,8 @@ class Service:
                 for r in proposal["recipes"]
             ):
                 proposal = None
-            if not proposal and time.time() >= self.proposal_retry.get(saved["id"], 0):
+            if (not proposal and not self.ebay_poll_failed
+                    and time.time() >= self.proposal_retry.get(saved["id"], 0)):
                 self.proposal_retry[saved["id"]] = time.time() + 300
                 try:
                     proposal = self.propose(row, candidates, settings)
@@ -1017,7 +1025,8 @@ class Service:
                     status="held",
                     reason="An earlier attempt needs inspection; it will not be retried automatically",
                 )
-            elif approved and settings.get("enabled") and not self._update_draining.is_set():
+            elif (approved and settings.get("enabled") and not self.ebay_poll_failed
+                  and not self._update_draining.is_set()):
                 unit = next((i for i, s in enumerate(states) if s is None), None)
                 if unit is not None:
                     result = self.dispatch(
@@ -1044,7 +1053,9 @@ class Service:
             rows.append(view)
         self.snapshot.update(
             orders=rows,
-            status="Automatic printing on"
+            status="eBay unavailable · showing saved orders"
+            if self.ebay_poll_failed
+            else "Automatic printing on"
             if settings.get("enabled")
             else "Printing paused · eBay sales still import",
             checked_at=time.time(),
