@@ -10,6 +10,7 @@ import pytest
 from camera_presence import selected_enrollment_feature
 from webcam_tracking import (
     AutoEnrollment,
+    JsonCache,
     ObjectMemory,
     SceneTracker,
     Tracks,
@@ -31,6 +32,115 @@ def test_restoring_panel_requires_existing_camera_permission(tmp_path, monkeypat
     camera_active = True
     view.restore()
     assert opened == [True]
+
+
+def test_memory_cache_reuses_json_and_forget_invalidates(tmp_path, monkeypatch):
+    import webcam_tracking as tracking
+    path = tmp_path/"names.json"
+    write_json(path, {"Cale": [1]})
+    calls = []
+    original = tracking.read_json
+    monkeypatch.setattr(tracking, "read_json", lambda p: (calls.append(p), original(p))[1])
+    cache = JsonCache()
+    for _ in range(10):
+        assert cache.get(path) == {"Cale": [1]}
+    assert len(calls) == 1
+    write_json(path, {})
+    assert cache.get(path) == {} and len(calls) == 2
+
+
+def test_object_id_survives_a_brief_missed_detection_but_not_an_absence():
+    tracks = Tracks()
+    def item():
+        return {"class": "cup", "box": [.1, .2, .2, .3]}
+    first = tracks.update([item()], 1)[0]["id"]
+    tracks.update([], 1.4)
+    assert tracks.update([item()], 1.8)[0]["id"] == first
+    tracks.update([], 2)
+    assert tracks.update([item()], 4)[0]["id"] != first
+
+
+def test_face_alignment_uses_native_pixels_with_scaled_landmarks():
+    from face_identity import FaceModel
+    model = FaceModel.__new__(FaceModel)
+    face = np.array([10, 20, 30, 40, 15, 25, 25, 25, 20, 30, 16, 40, 24, 40, .97], np.float32)
+    detected, aligned = [], []
+    model.detector = SimpleNamespace(setInputSize=lambda value: detected.append(value), detect=lambda frame: (None, [face]))
+    model.recognizer = SimpleNamespace(alignCrop=lambda frame, points: (aligned.append((frame, points.copy())), frame)[1], feature=lambda _: np.array([3., 4.]))
+    model.cv2 = SimpleNamespace(error=RuntimeError)
+    native = np.zeros((400, 600, 3), np.uint8)
+    small = np.zeros((200, 300, 3), np.uint8)
+    result = model.observations_native(native, small)
+    assert detected == [(300, 200)]
+    assert aligned[0][0] is native
+    np.testing.assert_allclose(aligned[0][1][:14], face[:14]*2)
+    assert aligned[0][1][14] == face[14]
+    np.testing.assert_allclose(result[0]["box"], [10/300, 20/200, 30/300, 40/200])
+    assert result[0]["feature"] == [.6, .8]
+
+
+def test_teaching_another_face_angle_retains_old_examples(tmp_path, monkeypatch):
+    import face_identity
+    monkeypatch.setattr(face_identity, "EMBEDDINGS", tmp_path/"faces.json")
+    old, new = [[1., 0.]]*5, [[.8, .6]]*5
+    assert face_identity.enroll("Cale", old)
+    assert face_identity.enroll("Cale", new)
+    assert face_identity._known()["Cale"] == old[-3:]+new
+
+
+def test_object_fingerprints_are_lazy_and_teach_uses_exact_old_frame(tmp_path, monkeypatch):
+    pytest.importorskip("cv2")
+    import webcam_tracking as tracking
+    class Detector:
+        def __init__(self, *_):
+            pass
+        def detect(self, _):
+            return [{"kind": "object", "class": "book", "label": "book", "score": .9, "box": [0., 0., 1., 1.]}]
+    monkeypatch.setattr(tracking, "ObjectDetector", Detector)
+    engine = SceneTracker(tmp_path)
+    calls, learned = [], []
+    monkeypatch.setattr(engine.memory, "signature", lambda frame, box: (calls.append(frame), {"marker": int(frame[0, 0, 0])})[1])
+    monkeypatch.setattr(engine.memory, "learn", lambda *args: learned.append(args))
+    old = np.zeros((100, 100, 3), np.uint8)
+    shown = engine.process(old, [], None)
+    engine.process(np.ones_like(old), [], None)
+    assert calls == []
+    write_json(tmp_path/"Media/webcam-learn-request.json", {"frame_id": shown["frame_id"], "id": shown["items"][0]["id"], "name": "My book"})
+    assert "Remembered" in engine.handle_request()
+    assert calls[0] is old and learned == [("My book", "book", {"marker": 0})]
+
+
+def test_webcam_image_surface_is_reused_across_new_frames(tmp_path):
+    import base64
+    import io
+    import tkinter as tk
+
+    from PIL import Image
+    root = tk.Tk()
+    root.withdraw()
+    try:
+        view = TrackingView(root, tmp_path, lambda: 1, lambda: True)
+        view.dialog = tk.Toplevel(root)
+        view.dialog.withdraw()
+        view.canvas = tk.Canvas(view.dialog, width=320, height=180)
+        view.status = tk.StringVar(root)
+        def result(color, token):
+            raw = io.BytesIO()
+            Image.new("RGB", (320, 180), color).save(raw, format="JPEG")
+            return {"image": base64.b64encode(raw.getvalue()).decode(), "frame_id": token, "items": []}
+        view.result = result("red", "first")
+        view.draw()
+        photo, canvas_item, decoded = view.photo, view.image_item, view.decoded
+        view.draw()
+        assert view.decoded is decoded
+        view.result = result("blue", "second")
+        view.draw()
+        assert view.photo is photo and view.image_item == canvas_item
+        assert len(view.canvas.find_all()) == 1
+        view.clear()
+        assert view.photo is None and view.image_item is None
+    finally:
+        root.destroy()
 
 
 def test_automatic_zeb_enrollment_requires_cale_and_same_new_face():

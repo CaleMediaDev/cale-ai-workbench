@@ -49,6 +49,24 @@ def write_json(path, value):
         temp.unlink(missing_ok=True)
 
 
+class JsonCache:
+    """Reload named memories immediately after an atomic save or forget."""
+    def __init__(self):
+        self.entries = {}
+
+    def get(self, path):
+        path = Path(path)
+        try:
+            stat = path.stat()
+            stamp = (stat.st_mtime_ns, stat.st_size, stat.st_ino)
+        except OSError:
+            stamp = None
+        previous = self.entries.get(path)
+        if previous is None or previous[0] != stamp:
+            self.entries[path] = (stamp, read_json(path))
+        return self.entries[path][1]
+
+
 def clean_name(value):
     name = " ".join(str(value).split())[:60]
     if not name or any(ord(char) < 32 for char in name):
@@ -91,8 +109,10 @@ class ObjectDetector:
         left, top = (416-nw)//2, (416-nh)//2
         image = np.zeros((416, 416, 3), dtype=np.uint8)
         image[top:top+nh, left:left+nw] = cv.resize(cv.cvtColor(frame, cv.COLOR_BGR2RGB), (nw, nh))
-        image = (image.astype(np.float32)-[103.53, 116.28, 123.675])/[57.375, 57.12, 58.395]
-        self.net.setInput(cv.dnn.blobFromImage(image.astype(np.float32)))
+        image = image.astype(np.float32)
+        image -= np.asarray([103.53, 116.28, 123.675], dtype=np.float32)
+        image /= np.asarray([57.375, 57.12, 58.395], dtype=np.float32)
+        self.net.setInput(cv.dnn.blobFromImage(image))
         outputs = self.net.forward(self.net.getUnconnectedOutLayersNames())
         boxes, scores, labels = [], [], []
         for level, stride in enumerate((8, 16, 32, 64)[:len(outputs)//2]):
@@ -105,17 +125,16 @@ class ObjectDetector:
             distribution = np.exp(logits-logits.max(axis=2, keepdims=True))
             distances = (distribution/distribution.sum(axis=2, keepdims=True) @ np.arange(8))*stride
             size = 416//stride
-            for index, distance in zip(chosen, distances):
-                cx, cy = (index % size)*stride+(stride-1)/2, (index//size)*stride+(stride-1)/2
-                x1 = float(np.clip((cx-distance[0]-left)/nw, 0, 1))
-                y1 = float(np.clip((cy-distance[1]-top)/nh, 0, 1))
-                x2 = float(np.clip((cx+distance[2]-left)/nw, 0, 1))
-                y2 = float(np.clip((cy+distance[3]-top)/nh, 0, 1))
-                if x2 <= x1 or y2 <= y1:
-                    continue
-                boxes.append([x1, y1, x2-x1, y2-y1])
-                scores.append(float(probs[index].max()))
-                labels.append(int(probs[index].argmax()))
+            cx = (chosen % size)*stride+(stride-1)/2
+            cy = (chosen//size)*stride+(stride-1)/2
+            x1 = np.clip((cx-distances[:, 0]-left)/nw, 0, 1)
+            y1 = np.clip((cy-distances[:, 1]-top)/nh, 0, 1)
+            x2 = np.clip((cx+distances[:, 2]-left)/nw, 0, 1)
+            y2 = np.clip((cy+distances[:, 3]-top)/nh, 0, 1)
+            valid = (x2 > x1) & (y2 > y1)
+            boxes.extend(np.column_stack((x1, y1, x2-x1, y2-y1))[valid].tolist())
+            scores.extend(probs[chosen[valid]].max(axis=1).tolist())
+            labels.extend(probs[chosen[valid]].argmax(axis=1).tolist())
         found = []
         for category in sorted(set(labels)):
             candidates = [i for i, label in enumerate(labels) if label == category]
@@ -148,12 +167,14 @@ class Tracks:
             match = max(choices, key=lambda pair: pair[0], default=(0, None))
             if match[0] >= .3:
                 item["id"] = match[1]["id"]
+                item["hits"] = match[1].get("hits", 1)+1
             else:
                 self.counter += 1
                 item["id"] = str(self.counter)
+                item["hits"] = 1
             used.add(item["id"])
             item["at"] = now
-        self.previous = [dict(item) for item in objects]
+        self.previous = [dict(item) for item in objects] + [old for old in previous if old["id"] not in used]
         return objects
 
 
@@ -163,6 +184,14 @@ class ObjectMemory:
         self.cv = cv2
         self.path = Path(root)/"Media/object-memories.json"
         self.orb = cv2.ORB_create(nfeatures=350)
+        self.saved = JsonCache()
+
+    def known(self):
+        return self.saved.get(self.path)
+
+    def has_category(self, category):
+        return any(example.get("class") == category for examples in self.known().values()
+                   if isinstance(examples, list) for example in examples[:4] if isinstance(example, dict))
 
     def signature(self, frame, box):
         h, w = frame.shape[:2]
@@ -193,7 +222,7 @@ class ObjectMemory:
         import numpy as np
         cv = self.cv
         ranked = []
-        for name, examples in read_json(self.path).items():
+        for name, examples in self.known().items():
             best = 0
             for example in examples[:4]:
                 if example.get("class") != category:
@@ -261,14 +290,19 @@ class SceneTracker:
         self.tracks = Tracks()
         self.cache = {}
         self.auto = AutoEnrollment()
+        self.saved = JsonCache()
 
     def process(self, frame, faces, face_model):
         import cv2
+        h, w = frame.shape[:2]
+        scale = min(1., 960/w, 720/h)
+        if scale < 1:
+            frame = cv2.resize(frame, (max(1, round(w*scale)), max(1, round(h*scale))))
         now = time.monotonic()
-        known_people = read_json(self.root/"Media/face-embeddings.json")
+        known_people = self.saved.get(self.root/"Media/face-embeddings.json")
         named_faces = [{**face, "name": face_model.identify(face["feature"]) if face_model else None} for face in faces]
         config_path = self.root/"Media/webcam-tracking.json"
-        config = read_json(config_path)
+        config = dict(self.saved.get(config_path))
         request = config.get("learn_other", {})
         enrollment = self.auto.observe(named_faces, request, known_people, time.time()) if isinstance(request, dict) else None
         learning = ""
@@ -284,12 +318,16 @@ class SceneTracker:
         elif request and request.get("name") not in known_people and time.time() < request.get("until", 0):
             learning = "Learning " + request["name"] + " automatically beside " + request["alongside"] + f" · {len(self.auto.samples)}/5 samples"
         items = self.tracks.update(self.detector.detect(frame), now)
+        # Suppress weak single-frame guesses without hiding strong detections.
+        items = [item for item in items if item.get("hits", 1) >= 2 or item.get("score", 0) >= .65]
         private = {}
         for item in items:
             if item["class"] != "person":
-                signature = self.memory.signature(frame, item["box"])
-                private[item["id"]] = {"signature": signature, "class": item["class"]}
-                name = self.memory.identify(item["class"], signature)
+                private[item["id"]] = {"box": item["box"], "class": item["class"]}
+                name = None
+                if self.memory.has_category(item["class"]):
+                    signature = self.memory.signature(frame, item["box"])
+                    name = self.memory.identify(item["class"], signature)
                 if name:
                     item["label"], item["remembered"] = name, True
         for index, face in enumerate(named_faces):
@@ -302,7 +340,8 @@ class SceneTracker:
             private[key] = {"feature": face["feature"], "class": "face"}
         token = uuid.uuid4().hex
         self.cache = {key: value for key, value in self.cache.items() if now-value["at"] < 20}
-        self.cache[token] = {"at": now, "items": private}
+        self.cache[token] = {"at": now, "items": private,
+                             "frame": frame if any(item["class"] != "face" for item in private.values()) else None}
         while len(self.cache) > 32:
             self.cache.pop(next(iter(self.cache)))
         h, w = frame.shape[:2]
@@ -312,7 +351,7 @@ class SceneTracker:
                 "image": base64.b64encode(raw.tobytes()).decode("ascii") if ok else "",
                 "learning": learning,
                 "known_people": list(known_people),
-                "known_objects": list(read_json(self.memory.path))}
+                "known_objects": list(self.memory.known())}
 
     def handle_request(self):
         path = self.root/"Media/webcam-learn-request.json"
@@ -332,7 +371,8 @@ class SceneTracker:
                 from face_identity import request_enrollment
                 request_enrollment(name, reference=item["feature"])
                 return "Learning " + name + ": keep that face in view for a few seconds."
-            self.memory.learn(name, item["class"], item["signature"])
+            signature = self.memory.signature(scene["frame"], item["box"])
+            self.memory.learn(name, item["class"], signature)
             return "Remembered " + name + " locally. Teach another angle to improve matching."
         except (OSError, ValueError, TypeError) as error:
             return str(error)

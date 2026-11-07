@@ -65,7 +65,15 @@ class FaceModel:
         """Return one normalized embedding per visible face, up to eight."""
         return [item['feature'] for item in self.observations(frame)]
 
-    def observations(self, frame):
+    def observations_native(self, frame, detection_frame=None):
+        """Bound detection cost but align faces using the original camera pixels."""
+        h, w = frame.shape[:2]
+        small = detection_frame
+        if small is None:
+            small = self.cv2.resize(frame, (960, max(1, round(h*960/w)))) if w > 960 else frame
+        return self.observations(small, native_frame=frame)
+
+    def observations(self, frame, native_frame=None):
         """Keep valid embeddings aligned with optional, RAM-only normalized boxes.
 
         Geometry is presentation-continuity evidence, never a name or an
@@ -81,7 +89,14 @@ class FaceModel:
         results = []
         for face in faces[:8]:
             try:
-                aligned = self.recognizer.alignCrop(frame, face)
+                source, landmarks = frame, face
+                if native_frame is not None and len(face) >= 14:
+                    source = native_frame
+                    landmarks = face.copy()
+                    sx, sy = source.shape[1]/width, source.shape[0]/height
+                    landmarks[:14:2] *= sx
+                    landmarks[1:14:2] *= sy
+                aligned = self.recognizer.alignCrop(source, landmarks)
                 vector = self.recognizer.feature(aligned).flatten().astype(float)
                 norm = np.linalg.norm(vector)
             except (self.cv2.error, ValueError):
@@ -133,7 +148,9 @@ def enroll(name, features):
     if len(examples) < 3:
         return False
     known = _known()
-    known[str(name)] = examples[-8:]
+    previous = known.get(str(name), [])
+    previous = [item for item in previous if isinstance(item, list) and len(item) == len(examples[0])] if isinstance(previous, list) else []
+    known[str(name)] = (previous+examples)[-8:]
     EMBEDDINGS.parent.mkdir(exist_ok=True)
     temp = EMBEDDINGS.with_suffix(".tmp")
     temp.write_text(json.dumps(known), encoding="utf-8")

@@ -33,6 +33,15 @@ names** provides a forget control with one local previous-version recovery file.
 Camera permission retains the app's existing one-hour limit. Restoring a saved
 panel after launch requires an active raw camera session and does not renew it.
 
+The optimized view reuses its image surface and decoded selected frame. Object
+fingerprints are computed only for taught categories or an explicit teaching
+request, using the exact selected frame retained in a bounded RAM cache. Saved
+memories are reloaded when the file changes, including when a name is forgotten.
+Short gaps keep object IDs; weak single-frame object guesses are suppressed.
+Face detection stays bounded to 960 pixels wide, while face alignment uses the
+original camera pixels. Teaching another face angle keeps up to eight recent
+examples, so earlier angles are not all discarded.
+
 The 3.8 MB OpenCV Zoo NanoDet model is downloaded only when this feature is
 enabled and verified with SHA-256
 `4b82da9944b88577175ee23a459dce2e26e6e4be573def65b1055dc2d9720186`.

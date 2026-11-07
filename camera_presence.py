@@ -930,7 +930,9 @@ def watch(device=0, parent_pid=None, parent_started=None, avatar=False, virtual_
             face_frame = recognition_frame(frame, cv2) if face_model else frame
             boxes=None
             observe=getattr(face_model,'observations',None) if face_model else None
-            observations=observe(face_frame) if callable(observe) else None
+            observe_native=getattr(type(face_model),'observations_native',None) if face_model else None
+            observations=(observe_native(face_model,frame,face_frame) if callable(observe_native)
+                          else observe(face_frame) if callable(observe) else None)
             if isinstance(observations,list) and all(isinstance(item,dict) and 'feature' in item for item in observations):
                 features=[item['feature'] for item in observations]
                 boxes=[item.get('box') for item in observations]

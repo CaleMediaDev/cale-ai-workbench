@@ -22,6 +22,9 @@ class TrackingView:
         self.result = None
         self.selected = None
         self.photo = None
+        self.decoded = None
+        self.decoded_id = None
+        self.image_item = None
         self.notice_until = 0
         self.config = self.root/"Media/webcam-tracking.json"
         self.was_enabled = read_json(self.config).get("enabled") is True
@@ -50,6 +53,7 @@ class TrackingView:
 
     def clear(self):
         self.result, self.selected, self.photo = None, None, None
+        self.decoded, self.decoded_id, self.image_item = None, None, None
         if self.dialog and self.dialog.winfo_exists():
             self.canvas.delete("all")
             self.status.set("Waiting for a fresh camera frame…")
@@ -58,6 +62,7 @@ class TrackingView:
         if self.dialog and self.dialog.winfo_exists():
             self.dialog.lift()
             return
+        self.clear()
         config = read_json(self.config)
         write_json(self.config, {**config, "enabled": True})
         dialog = self.dialog = tk.Toplevel(self.parent)
@@ -127,27 +132,38 @@ class TrackingView:
         if not self.result or not self.dialog or not self.dialog.winfo_exists():
             return
         try:
-            raw = base64.b64decode(self.result.get("image", ""), validate=True)
-            with Image.open(io.BytesIO(raw)) as original:
-                image = original.convert("RGB")
+            token = self.result.get("frame_id")
+            if self.decoded is None or self.decoded_id != token:
+                raw = base64.b64decode(self.result.get("image", ""), validate=True)
+                with Image.open(io.BytesIO(raw)) as original:
+                    self.decoded = original.convert("RGB")
+                self.decoded_id = token
+            image = self.decoded
             cw, ch = max(1, self.canvas.winfo_width()), max(1, self.canvas.winfo_height())
             scale = min(cw/image.width, ch/image.height)
             width, height = max(1, round(image.width*scale)), max(1, round(image.height*scale))
             image = image.resize((width, height), Image.Resampling.BILINEAR)
-            self.photo = ImageTk.PhotoImage(image)
+            if self.photo is not None and (self.photo.width(), self.photo.height()) == (width, height):
+                self.photo.paste(image)
+            else:
+                self.photo = ImageTk.PhotoImage(image)
             self.origin = ((cw-width)/2, (ch-height)/2, width, height)
-            self.canvas.delete("all")
+            self.canvas.delete("overlay")
             ox, oy, _, _ = self.origin
-            self.canvas.create_image(ox, oy, anchor="nw", image=self.photo)
+            if self.image_item is None:
+                self.image_item = self.canvas.create_image(ox, oy, anchor="nw", image=self.photo)
+            else:
+                self.canvas.coords(self.image_item, ox, oy)
+                self.canvas.itemconfigure(self.image_item, image=self.photo)
             for item in self.result.get("items", []):
                 x, y, w, h = item["box"]
                 color = "#ffe27b" if self.selected == item["id"] else "#55e1b4" if item.get("remembered") else "#75c9ff"
                 x1, y1, x2, y2 = ox+x*width, oy+y*height, ox+(x+w)*width, oy+(y+h)*height
-                self.canvas.create_rectangle(x1, y1, x2, y2, outline=color, width=3)
+                self.canvas.create_rectangle(x1, y1, x2, y2, outline=color, width=3, tags="overlay")
                 label = item["label"] + (" · face" if item["kind"] == "face" else f" #{item['id']}")
-                text = self.canvas.create_text(x1+4, max(oy+2, y1-22), text=label, fill="#071018", anchor="nw", font=("Segoe UI", 11, "bold"))
+                text = self.canvas.create_text(x1+4, max(oy+2, y1-22), text=label, fill="#071018", anchor="nw", font=("Segoe UI", 11, "bold"), tags="overlay")
                 box = self.canvas.bbox(text)
-                rect = self.canvas.create_rectangle(box[0]-3, box[1]-1, box[2]+3, box[3]+1, fill=color, outline="")
+                rect = self.canvas.create_rectangle(box[0]-3, box[1]-1, box[2]+3, box[3]+1, fill=color, outline="", tags="overlay")
                 self.canvas.tag_raise(text, rect)
         except (ValueError, OSError, KeyError, TypeError):
             self.status.set("Waiting for a valid camera frame…")
