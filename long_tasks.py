@@ -6211,7 +6211,7 @@ def gui():
 
     threading.Thread(target=answer_worker, daemon=True).start()
 
-    def submit_chat_text(value=None, *, use_attachments=True, intent=None):
+    def submit_chat_text(value=None, *, use_attachments=True, intent=None, project_id=None):
         nonlocal pending_followup
         from_home_composer = value is None
         donation_service.activity()
@@ -6261,6 +6261,21 @@ def gui():
         )
         save_chat("user", displayed, private=private_question)
         show_chat("user", displayed)
+        # Create owns an explicit project selection. Keep edits attached to it,
+        # including finished games, instead of routing them as a fresh build.
+        if project_id is not None:
+            selected = next((p for p in projects() if p["id"] == project_id), None)
+            if selected is None:
+                assistant_reply("That project was removed. Choose another project or New project.")
+                return False
+            try:
+                request(selected["id"], "note", value)
+                assistant_reply("Added your changes to " + selected["title"] + ".")
+                render_cards()
+            except Exception as exc:
+                assistant_reply("I couldn't add those changes: " + str(exc))
+                return False
+            return True
         replay = chat_assistant.spoken_replay_target(raw_value, chat_history(100))
         if replay is not None:
             if replay:
@@ -6478,18 +6493,24 @@ def gui():
     create_body.rowconfigure(0, weight=1)
     create_chat = ttk.Frame(create_body, style="Card.TFrame", padding=20)
     create_chat.grid(row=0, column=0, sticky="nsew", padx=(0, 14))
+    create_chat.columnconfigure(0, weight=1)
+    create_chat.rowconfigure(4, weight=1)
     ttk.Label(create_chat, text="Build with Cale", style="Card.TLabel",
-              font=("Segoe UI", 18, "bold")).pack(anchor="w")
+              font=("Segoe UI", 18, "bold")).grid(row=0, column=0, sticky="w")
     ttk.Label(create_chat, text="Describe it. Watch it take shape.",
-              style="CardMuted.TLabel").pack(anchor="w", pady=(4, 16))
+              style="CardMuted.TLabel").grid(row=1, column=0, sticky="w", pady=(4, 12))
     create_status = tk.StringVar(value="Your next idea starts here.")
-    ttk.Label(create_chat, textvariable=create_status, style="CardMuted.TLabel",
-              wraplength=270, justify="left").pack(fill="x", pady=(0, 16))
+    # Keep verbose setup/build status from consuming the conversation/composer.
+    create_status_host = ttk.Frame(create_chat, style="Card.TFrame", height=60)
+    create_status_host.grid(row=2, column=0, sticky="ew", pady=(0, 8))
+    create_status_host.pack_propagate(False)
+    ttk.Label(create_status_host, textvariable=create_status, style="CardMuted.TLabel",
+              wraplength=270, justify="left").pack(fill="both", expand=True)
     create_history = ttk.Frame(create_chat, style="Card.TFrame")
-    create_history.pack(fill="both", expand=True)
+    create_history.grid(row=4, column=0, sticky="nsew")
     create_phase = tk.StringVar(value="Build  /  Test  /  Finished")
     ttk.Label(create_chat, textvariable=create_phase, style="CardMuted.TLabel",
-              font=("Segoe UI", 10, "bold")).pack(anchor="w", before=create_history, pady=(0, 8))
+              font=("Segoe UI", 10, "bold")).grid(row=3, column=0, sticky="w", pady=(0, 8))
     create_conversation = tk.Text(create_history, state="disabled", height=5, width=28,
         background=card, foreground=text, relief="flat", wrap="word",
         font=("Segoe UI", 11), padx=4, pady=8, highlightthickness=0)
@@ -6508,7 +6529,7 @@ def gui():
     create_prompt = tk.Text(create_chat, height=3, width=28, wrap="word", relief="flat",
         background=field, foreground=text, insertbackground=text,
         font=("Segoe UI", 11), padx=12, pady=12, highlightthickness=0)
-    create_prompt.pack(side="bottom", fill="x", pady=(12, 8), before=create_history)
+    create_prompt.grid(row=5, column=0, sticky="ew", pady=(12, 8))
 
     def submit_creation():
         prompt = create_prompt.get("1.0", "end-1c").strip()
@@ -6519,17 +6540,31 @@ def gui():
         if not ready:
             create_status.set(explanation)
             return
-        accepted = submit_chat_text("Build a " + create_kind.get().lower() + ": " + prompt,
-                                    use_attachments=False, intent="task")
+        # The preview identifies the game/app being edited; only New project
+        # starts another build. Notes resume finished projects through the queue.
+        target_id = preview_task_id
+        message = prompt if target_id is not None else "Build a " + create_kind.get().lower() + ": " + prompt
+        accepted = submit_chat_text(message, use_attachments=False,
+                                    intent="task", project_id=target_id)
         if accepted:
             create_prompt.delete("1.0", "end")
+            if target_id is None:
+                create_project_selection.set("Current project")
             create_status.set("Request sent. Cale will report progress here and in Home.")
         else:
             create_status.set("Cale could not start that request. Your prompt is still here; check the chat for details.")
 
-    create_build_button = ttk.Button(create_chat, text="Build it", command=submit_creation,
+    create_build_button = ttk.Button(create_chat, text="Send", command=submit_creation,
                                     style="Accent.TButton")
-    create_build_button.pack(side="bottom", fill="x", before=create_prompt)
+    create_build_button.grid(row=6, column=0, sticky="ew")
+
+    def create_return(event):
+        if event.state & 0x0001:
+            return None  # Shift+Enter retains normal multiline editing.
+        submit_creation()
+        return "break"
+
+    create_prompt.bind("<Return>", create_return)
     create_preview_host = ttk.Frame(create_body, style="Card.TFrame", padding=18)
     create_preview_host.grid(row=0, column=1, sticky="nsew")
     create_empty = ttk.Frame(create_preview_host, style="Card.TFrame")
@@ -7618,22 +7653,23 @@ def gui():
                    for item in build_candidates}
         create_project_choices.clear()
         create_project_choices.update(choices)
-        create_project_picker.configure(values=("Current project", *choices))
-        if create_project_selection.get() not in ("Current project", *choices):
+        create_project_picker.configure(values=("Current project", "New project", *choices))
+        if create_project_selection.get() not in ("Current project", "New project", *choices):
             create_project_selection.set("Current project")
         selected_id = choices.get(create_project_selection.get())
         project = next((item for item in build_candidates if item["id"] == selected_id), None)
-        if project is None:
+        new_project = create_project_selection.get() == "New project"
+        if project is None and not new_project:
             project = next((item for item in candidates
                 if item["status"] in ("working", "checking", "queued")
                 and (project_preview.wants_preview(item)
                      or project_preview.browser_screenshot_path(item["folder"]).is_file())), None)
-        if project is None:
+        if project is None and not new_project:
             project = next(
                 (item for item in candidates if project_preview.wants_preview(item)),
                 None,
             )
-        if project is None:
+        if project is None and not new_project:
             project = next(iter(build_candidates), None)
         if project is None:
             if preview_window is not None:
@@ -7649,7 +7685,8 @@ def gui():
                          else "Build  /  TEST  /  Finished" if project["status"] == "checking"
                          else "BUILD  /  Test  /  Finished")
         create_open_button.configure(state="normal")
-        create_status.set(project["title"] + "\n" + str(project.get("detail") or project["status"]))
+        # Full build reports belong in scrollable chat, never above its input.
+        create_status.set(str(project["title"])[:100] + "\nTell Cale what to add or change.")
         pid = project["id"]
         if pid != preview_task_id:
             preview_image_signature = None

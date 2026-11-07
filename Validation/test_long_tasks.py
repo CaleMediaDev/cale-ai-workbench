@@ -3426,6 +3426,7 @@ def test_create_page_routes_selected_kind_and_keeps_prompt_until_setup_ready():
         tree = ast.parse((ROOT / "long_tasks.py").read_text(encoding="utf-8-sig"))
         node = next(n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name == "submit_creation")
         namespace = {"create_prompt": prompt, "create_kind": kind, "create_status": status,
+                     "preview_task_id": None, "create_project_selection": tk.StringVar(master=window),
                      "STATE": Path("unused"), "first_launch_readiness": lambda _: (False, "Downloading tools"),
                      "submit_chat_text": lambda value, **options: (sent.append((value, options)) or True)}
         exec(compile(ast.Module(body=[node], type_ignores=[]), "real-create-submit", "exec"), namespace)
@@ -3435,7 +3436,7 @@ def test_create_page_routes_selected_kind_and_keeps_prompt_until_setup_ready():
         namespace["first_launch_readiness"] = lambda _: (True, "")
         namespace["submit_creation"]()
         assert sent == [("Build a website: A booking page for my business",
-                         {"use_attachments": False, "intent": "task"})]
+                         {"use_attachments": False, "intent": "task", "project_id": None})]
         assert prompt.get("1.0", "end-1c") == ""
         namespace["submit_creation"]()
         assert len(sent) == 1
@@ -3477,6 +3478,7 @@ def test_create_failure_keeps_prompt_and_never_inherits_home_private_attachments
             "setup_blocks_tasks": lambda _: False, "add_project": add_project,
             "render_cards": lambda: None,
             "create_prompt": prompt, "create_kind": tk.StringVar(master=window, value="Website"),
+            "preview_task_id": None, "create_project_selection": tk.StringVar(master=window),
             "create_status": tk.StringVar(master=window),
             "chat_assistant": SimpleNamespace(
                 attach_request=lambda value, paths: (attached.append(list(paths)) or value),
