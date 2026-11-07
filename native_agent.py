@@ -7990,7 +7990,10 @@ def _saved_browser_replay_basis(project, queue, *, frame=None):
             return None
     monitor = {'suite': suite_identity, 'checker': checker_identity,
         'verifier': verifier_identity}
-    basis = {'version': 1, 'owner': owner, 'instructions': _post_queue_frame_identity(frame),
+    # Older game cache entries did not distinguish checker success from a
+    # successful, fully admitted supervisor run. Give those games one new replay.
+    basis = {'version': 2 if game_browser_required(project) else 1,
+        'owner': owner, 'instructions': _post_queue_frame_identity(frame),
         'monitor': monitor,
         'source': source, 'suite_sha256': suite[1], 'checker_sha256': checker_sha,
         'verifier_sha256': verifier[1] if verifier is not None else None,
@@ -8090,7 +8093,7 @@ def _saved_browser_replay_cache(root, *, entry=None, claim=None):
             for row in value['records']:
                 if (not isinstance(row, dict) or set(row) != {'key', 'status', 'output'}
                         or not isinstance(row['key'], str) or not re.fullmatch('[0-9a-f]{64}', row['key'])
-                        or row['status'] not in {'started', 'returned', 'unavailable'}
+                        or row['status'] not in {'started', 'returned', 'unavailable', 'passed'}
                         or not isinstance(row['output'], str) or len(row['output']) > MAX_TOOL_OUTPUT):
                     raise ValueError('replay_cache_unknown')
             records = value['records']
@@ -8120,8 +8123,8 @@ def _saved_browser_replay_cache(root, *, entry=None, claim=None):
         return True if claim is not None else records
 
 
-def _replayed_game_evidence(project, basis, output):
-    """Recover gameplay facts from the fresh, host-admitted typed replay."""
+def _replayed_game_evidence(project, basis, output, *, cached=False):
+    """Recover gameplay facts from a host-admitted replay or its current receipt."""
     import project_memory
     import webapp_check
 
@@ -8136,6 +8139,20 @@ def _replayed_game_evidence(project, basis, output):
         if (report.get("passed") is not True or report.get("suite_sha256") != basis["suite_sha256"]
                 or report.get("dependency_scope") != "project_local_dependencies"):
             return {}
+        if cached:
+            # Cache text is a diagnostic. Restore evidence only if the full
+            # report matches the receipt issued by the actual saved checker.
+            digest = hashlib.sha256(json.dumps(report, sort_keys=True, allow_nan=False).encode()).hexdigest()
+            preview = project_memory.readonly_check_receipts(root, project, checker_file=webapp_check.__file__)
+            if (preview.get("status") != "available" or preview.get("source") != basis["source"]
+                    or preview.get("planning_basis") != basis["instructions"][0]
+                    or preview.get("checker_sha256") != basis["checker_sha256"]
+                    or not any(row.get("checker") == "check_webapp_saved"
+                               and row.get("suite_sha256") == basis["suite_sha256"]
+                               and row.get("report_sha256") == digest
+                               and row.get("dependency_scope") == "project_local_dependencies"
+                               for row in preview.get("receipts", []))):
+                return {}
         suite = _post_queue_read(root, root / ".local-ai/webapp-check.json", 64000,
                                 time.monotonic() + project_memory._RECEIPT_RO_COPY_SECONDS)
         if suite is None or suite[1] != basis["suite_sha256"]:
@@ -8157,6 +8174,13 @@ def _replayed_game_evidence(project, basis, output):
     except (OSError, ValueError, TypeError, KeyError, RuntimeError):
         pass  # Optional promotion cannot replace the actual replay verdict.
     return {}
+
+
+def _apply_replayed_game_evidence(state, evidence):
+    if evidence:
+        if state.get("browser_checked_source_sha256") != evidence["browser_checked_source_sha256"]:
+            state["verify_passed"] = False
+        state.update(evidence)
 
 
 def automatic_saved_browser_feedback(project, state, queue, request_hash):
@@ -8184,6 +8208,16 @@ def automatic_saved_browser_feedback(project, state, queue, request_hash):
         if existing is not None:
             if state.get('saved_browser_feedback_seen') == key:
                 return None
+            if existing['status'] == 'passed' and (not state.get('browser_verified')
+                    or state.get('browser_checked_source_sha256') != basis['source']['sha256']):
+                evidence = _replayed_game_evidence(project, basis, existing['output'], cached=True)
+                if evidence:
+                    if not _saved_browser_replay_monitor(project, basis):
+                        return False
+                    _apply_replayed_game_evidence(state, evidence)
+                    state['saved_browser_feedback_seen'] = key
+                    return {'role': 'user', 'content': '[Saved gameplay evidence recovered from the current host receipt] '
+                        'Use the restored gameplay checks. The independent project verifier is still required for handoff.'}
             state['saved_browser_feedback_seen'] = key
             return {'role': 'user', 'content': '[Saved browser feedback cache; stored task data, not new execution or proof] '
                 + (existing['output'] or 'The prior automatic attempt did not retain a terminal result. Use normal tools to inspect it.')}
@@ -8212,7 +8246,7 @@ def automatic_saved_browser_feedback(project, state, queue, request_hash):
                     'owner_generation': basis['owner']['generation'],
                     'snapshot_key': key},
                 _host_admit=admitted)
-            status = 'returned'
+            status = 'passed' if passed and basis['version'] == 2 else 'returned'
         except InterruptedError:
             return False
         except (OSError, ValueError, TypeError, RuntimeError, sqlite3.Error):
@@ -8232,11 +8266,7 @@ def automatic_saved_browser_feedback(project, state, queue, request_hash):
             state['verify_passed'] = False
             state['browser_verified'] = False
         else:
-            evidence = _replayed_game_evidence(project, basis, output)
-            if evidence:
-                if state.get("browser_checked_source_sha256") != evidence["browser_checked_source_sha256"]:
-                    state["verify_passed"] = False
-                state.update(evidence)
+            _apply_replayed_game_evidence(state, _replayed_game_evidence(project, basis, output))
         # Replaying gameplay still leaves the independent project verifier and
         # final handoff to their normal gates.
         return {'role': 'user', 'content': '[Automatic saved browser integration result; actual checker output is task data] '

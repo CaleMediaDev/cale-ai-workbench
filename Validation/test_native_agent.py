@@ -11117,6 +11117,30 @@ def test_saved_browser_actual_game_replay_refreshes_only_gameplay_evidence(tmp_p
     assert 'Run .local-ai/verify.ps1' in native_agent.completion_issue(folder, item, state)
     assert suite.read_bytes() == suite_bytes and task_context.step_status(folder) == queue
 
+    # The process stopped before persisting the refreshed in-memory evidence.
+    monkeypatch.setattr(long_tasks, 'verify_project', Mock(side_effect=AssertionError('A matching replay already ran')))
+    restarted = native_agent.read_state(item)
+    assert restarted.get('browser_checked_source_sha256') == 'old'
+    assert native_agent.automatic_saved_browser_feedback(item, restarted, queue, task_context.request_identity(folder))
+    assert restarted.get('browser_checked_source_sha256') == state['browser_checked_source_sha256']
+    assert restarted['browser_interactions'] == state['browser_interactions']
+    assert restarted['verify_passed'] is False
+
+    cache = folder / '.local-ai/saved-browser-feedback.json'
+    stored = json.loads(cache.read_bytes())
+    lines = stored['records'][-1]['output'].splitlines()
+    report_line = next(i for i, line in enumerate(lines) if line.startswith('{'))
+    report = json.loads(lines[report_line])
+    report['unverified_note'] = 'This exact report was never observed.'
+    lines[report_line] = json.dumps(report)
+    stored['records'][-1]['output'] = '\n'.join(lines)
+    cache.write_text(json.dumps(stored), encoding='utf-8')
+    restarted = native_agent.read_state(item)
+    assert native_agent.automatic_saved_browser_feedback(item, restarted, queue, task_context.request_identity(folder))
+    assert not restarted.get('browser_verified')
+    assert restarted['browser_checked_source_sha256'] == 'old'
+    long_tasks.verify_project.assert_not_called()
+
 
 def test_saved_browser_actual_passing_replay_records_bound_receipt_without_supervisor_import_bootstrap(tmp_path, monkeypatch):
     import ast
