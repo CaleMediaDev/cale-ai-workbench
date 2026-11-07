@@ -41,6 +41,8 @@ def test_held_object_scan_is_bounded_and_deduplicates():
     crops = []
     def region(frame, box):
         crops.append(box)
+        # Test region detection logic, ensure the crop box is valid
+        assert valid_region(box)
         return [{"class": "spoon", "score": .9, "box": [.3, .4, .1, .2]},
                 {"class": "laptop", "score": .9, "box": [.1, .1, .8, .8]}]
     detector.detect_region = region
