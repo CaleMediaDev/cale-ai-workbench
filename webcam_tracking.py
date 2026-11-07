@@ -271,9 +271,11 @@ class ObjectMemory:
         cv = self.cv
         ranked = []
         for name, examples in self.known().items():
+            if not isinstance(examples, list):
+                continue
             best = 0
             for example in examples[:4]:
-                if example.get("class") != category:
+                if not isinstance(example, dict) or example.get("class") != category:
                     continue
                 try:
                     pairs = cv.BFMatcher(cv.NORM_HAMMING).knnMatch(

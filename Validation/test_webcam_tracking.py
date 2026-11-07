@@ -335,6 +335,21 @@ def test_people_cannot_be_taught_as_objects_and_plain_objects_stay_unknown(tmp_p
         memory.learn("cup", "cup", None)
 
 
+def test_malformed_object_memory_does_not_hide_valid_match(tmp_path):
+    pytest.importorskip("cv2")
+    memory = ObjectMemory(tmp_path)
+    frame = np.random.default_rng(42).integers(0, 255, (320, 320, 3), dtype=np.uint8)
+    signature = memory.signature(frame, [0, 0, 1, 1])
+    memory.learn("Notebook", "book", signature)
+    saved = json.loads(memory.path.read_text(encoding="utf-8"))
+    saved["Notebook"].insert(0, None)
+    memory.path.write_text(
+        json.dumps({"Invalid record": None, **saved}), encoding="utf-8"
+    )
+
+    assert ObjectMemory(tmp_path).identify("book", signature) == "Notebook"
+
+
 def test_ambiguous_object_names_do_not_claim_identity(tmp_path):
     pytest.importorskip("cv2")
     memory = ObjectMemory(tmp_path)
