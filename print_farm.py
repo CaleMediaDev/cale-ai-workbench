@@ -388,8 +388,12 @@ class Service:
 
     def request_bed_check(self, printer_id):
         with self._bed_checks_lock:
-            self._bed_checks.setdefault(printer_id, None)
+            self._bed_checks.setdefault(printer_id, "queued")
         self.wake.set()
+
+    def bed_check_states(self):
+        with self._bed_checks_lock:
+            return self._bed_checks.copy()
 
     def inspect_requested_bed(self, printers, settings, store):
         if self._update_draining.is_set():
@@ -398,22 +402,29 @@ class Service:
             printer_id = next(iter(self._bed_checks), None)
             if printer_id is None:
                 return
-            del self._bed_checks[printer_id]
-        printer = next((item for item in printers if item["id"] == printer_id), None)
-        if not printer or not printer.get("online") or not printer.get("idle"):
-            return
-        if store.db.execute(
-            "SELECT 1 FROM jobs WHERE printer_id=? AND status IN "
-            "('dispatching','printing','submission_uncertain') LIMIT 1",
-            (printer_id,),
-        ).fetchone():
-            return
-        bed = self.beds.check(printer, settings.get("vision_model", "cale-vision:latest"))
-        # Manual inspection is for the display. Dispatch always obtains its
-        # own clearance and never consumes a result from this button.
-        bed = {key: value for key, value in bed.items() if key != "ticket_id"}
-        self.beds.last[printer_id] = bed
-        printer["bed"] = bed
+            self._bed_checks[printer_id] = "checking"
+        try:
+            printer = next((item for item in printers if item["id"] == printer_id), None)
+            if printer is None:
+                return
+            if not printer.get("online"):
+                bed = {"state": "skipped_offline"}
+            elif not printer.get("idle") or store.db.execute(
+                "SELECT 1 FROM jobs WHERE printer_id=? AND status IN "
+                "('dispatching','printing','submission_uncertain') LIMIT 1",
+                (printer_id,),
+            ).fetchone():
+                bed = {"state": "skipped_busy"}
+            else:
+                bed = self.beds.check(printer, settings.get("vision_model", "cale-vision:latest"))
+                # Manual checks are for display. Dispatch always gets its own
+                # clearance and never consumes a result from this button.
+                bed = {key: value for key, value in bed.items() if key != "ticket_id"}
+            self.beds.last[printer_id] = bed
+            printer["bed"] = bed
+        finally:
+            with self._bed_checks_lock:
+                del self._bed_checks[printer_id]
 
     def start(self):
         if not self.thread or not self.thread.is_alive():

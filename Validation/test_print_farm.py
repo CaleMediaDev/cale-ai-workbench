@@ -499,13 +499,22 @@ class Production(unittest.TestCase):
 
     def test_manual_bed_check_is_read_only_and_coalesces_requests(self):
         self.printer.update(online=True, camera_url="http://camera")
+
+        def inspect(printer, _model):
+            self.assertEqual(self.service.bed_check_states(), {"p": "checking"})
+            self.service.request_bed_check(printer["id"])
+            return {"state": "clear", "ticket_id": "fixture"}
+
+        self.service.beds.check.side_effect = inspect
         for _ in range(2):
             self.service.request_bed_check(self.printer["id"])
+        self.assertEqual(self.service.bed_check_states(), {"p": "queued"})
         self.service.inspect_requested_bed([self.printer], self.settings, self.store)
         self.service.inspect_requested_bed([self.printer], self.settings, self.store)
         self.service.beds.check.assert_called_once()
         self.assertEqual(self.printer["bed"]["state"], "clear")
         self.assertNotIn("ticket_id", self.printer["bed"])
+        self.assertEqual(self.service.bed_check_states(), {})
         self.assertIsNone(self.store.db.execute("SELECT 1 FROM jobs").fetchone())
         self.machine.start_order.assert_not_called()
 
@@ -513,6 +522,7 @@ class Production(unittest.TestCase):
         self.service.request_bed_check(self.printer["id"])
         self.service.inspect_requested_bed([self.printer], self.settings, self.store)
         self.service.beds.check.assert_called_once()
+        self.assertEqual(self.printer["bed"]["state"], "skipped_busy")
 
     def test_ebay_outage_keeps_saved_progress_visible_and_dispatch_waits_for_recovery(self):
         self.proposal["reason"] = "Saved file match"
@@ -713,6 +723,7 @@ class Page(unittest.TestCase):
             start=Mock(),
             stop=Mock(),
             approve=Mock(),
+            bed_check_states=lambda: {},
         )
         try:
             parent = tk.Frame(window)

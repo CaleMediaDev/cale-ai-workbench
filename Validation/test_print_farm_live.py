@@ -74,6 +74,7 @@ class LiveObservationTests(unittest.TestCase):
             start=Mock(),
             stop=Mock(),
             request_bed_check=Mock(),
+            bed_check_states=lambda: {},
         )
         try:
             page = Controls(parent, window, Path("."), service=service)
@@ -93,6 +94,11 @@ class LiveObservationTests(unittest.TestCase):
             self.assertIn("Bed out of view", card.bed.cget("text"))
             card.check_bed.invoke()
             service.request_bed_check.assert_called_once_with("0")
+            page.render(data, bed_checks={"0": "queued"})
+            self.assertIn("Check queued", card.bed.cget("text"))
+            self.assertTrue(card.check_bed.instate(["disabled"]))
+            page.render(data, bed_checks={"0": "checking"})
+            self.assertIn("Checking bed", card.bed.cget("text"))
             self.assertEqual(page.printer_cards["0"].percent.cget("text"), "—")
             data["printers"][0].update(detail="Printing / busy", progress="78.4", idle=False,
                                        seconds_remaining=982, nozzle_c="220.02", bed_c="50.21",

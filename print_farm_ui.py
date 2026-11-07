@@ -128,7 +128,7 @@ class PrinterCard(tk.Frame):
             return None
         return value if math.isfinite(value) and 0 <= value <= maximum else None
 
-    def render(self, printer, *, telemetry_stale=False):
+    def render(self, printer, *, telemetry_stale=False, bed_check=None):
         detail = printer.get("detail", "")
         if telemetry_stale:
             state = "stale"
@@ -163,11 +163,18 @@ class PrinterCard(tk.Frame):
             "blocked": ("!  Build plate occupied", "#ffc879"),
             "out_of_view": ("◇  Bed out of view", "#ffc879"),
             "unknown": ("◇  Build plate unverified", self.MUTED),
-        }.get(bed_state, ("◇  Bed check pending", self.MUTED))
+            "queued": ("◇  Check queued", self.MUTED),
+            "checking": ("◎  Checking bed…", "#50eaff"),
+            "skipped_busy": ("◇  Skipped · printer busy", self.MUTED),
+            "skipped_offline": ("◇  Skipped · offline", self.MUTED),
+        }.get(bed_check or bed_state, ("◇  Bed check pending", self.MUTED))
         name = printer.get("hostname") or printer["id"]
         color = str(printer.get("color") or "").strip()
         readings = (eta, *temperatures)
-        can_check = state in {"ready", "complete"} and bool(printer.get("idle") and printer.get("camera_url"))
+        can_check = (
+            not bed_check and state in {"ready", "complete"}
+            and bool(printer.get("idle") and printer.get("camera_url"))
+        )
         shown = (state, progress, bed_label, name, color, readings, can_check)
         if self.last_state == shown:
             return
@@ -459,7 +466,7 @@ class Controls:
                 pady=(0, 8),
             )
 
-    def render(self, snapshot, *, telemetry_stale=False):
+    def render(self, snapshot, *, telemetry_stale=False, bed_checks=None):
         printers = snapshot.get("printers", [])
         online = sum(bool(printer.get("online")) for printer in printers)
         busy = sum(bool(printer.get("online") and not printer.get("idle")) for printer in printers)
@@ -487,7 +494,9 @@ class Controls:
                 )
                 self.printer_cards[pid] = card
                 self.camera_tiles[pid] = card.camera
-            self.printer_cards[pid].render(printer, telemetry_stale=telemetry_stale)
+            self.printer_cards[pid].render(
+                printer, telemetry_stale=telemetry_stale, bed_check=(bed_checks or {}).get(pid)
+            )
         if previous_ids != tuple(self.printer_data):
             self.layout_printers(self.canvas.winfo_width())
         rows = snapshot.get("orders", [])
@@ -598,6 +607,7 @@ class Controls:
         telemetry_stale = bool(snapshot.get("printers")) and not (
             0 <= time.time() - snapshot.get("printer_telemetry_at", 0) <= PRINTER_TELEMETRY_MAX_AGE
         )
+        bed_checks = self.service.bed_check_states()
         signature = digest([
             {
                 k: v
@@ -605,9 +615,10 @@ class Controls:
                 if k not in ("checked_at", "ebay_checked_at", "printer_telemetry_at")
             },
             telemetry_stale,
+            bed_checks,
         ])
         if signature != self.last_render:
-            self.render(snapshot, telemetry_stale=telemetry_stale)
+            self.render(snapshot, telemetry_stale=telemetry_stale, bed_checks=bed_checks)
             self.last_render = signature
             if not self.busy:
                 self.status.set(snapshot.get("status", ""))
