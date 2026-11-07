@@ -20,6 +20,7 @@ import time
 import traceback
 import uuid
 from contextlib import contextmanager
+from contextvars import ContextVar
 from pathlib import Path
 from urllib.error import HTTPError
 from urllib.parse import urlsplit
@@ -38,6 +39,325 @@ JOBS = ROOT / "LongTasks" / "music-jobs"
 AUDIO_REFERENCES = frozenset({".wav", ".mp3", ".flac"})
 TRANSCODE_AUDIO_REFERENCES = frozenset({".m4a", ".aac", ".ogg", ".opus"})
 VIDEO_REFERENCES = frozenset({".mp4", ".mov", ".m4v", ".webm", ".mkv"})
+_MUSIC_API = ContextVar("owned_music_api", default=None)
+
+
+class _MusicJob:
+    """One Windows process family; no handles to pre-existing engines.
+
+    The model process enrolls itself BEFORE importing ACE/torch, then closes
+    its enrollment handle. Only its parent retains the kill-on-close handle.
+    Parent death therefore retires the model rather than leaving GPU/RAM work
+    orphaned. This is normal child-process containment, not a security sandbox.
+    """
+    def __init__(self, name, *, create):
+        import ctypes as C
+        from ctypes import wintypes as W
+        if not re.fullmatch(r"Local\\CaleMusic-[0-9a-f]{32}", name):
+            raise ValueError("Invalid managed music job name")
+        class Basic(C.Structure):
+            _fields_=[('process_time',C.c_longlong),('job_time',C.c_longlong),('flags',W.DWORD),
+                ('minimum_ws',C.c_size_t),('maximum_ws',C.c_size_t),('processes',W.DWORD),
+                ('affinity',C.c_size_t),('priority',W.DWORD),('scheduling',W.DWORD)]
+        class IO(C.Structure):
+            _fields_=[(n,C.c_ulonglong) for n in ('reads','writes','other','read_bytes','write_bytes','other_bytes')]
+        class Extended(C.Structure):
+            _fields_=[('basic',Basic),('io',IO),('process_memory',C.c_size_t),('job_memory',C.c_size_t),
+                      ('peak_process',C.c_size_t),('peak_job',C.c_size_t)]
+        self.C=C;self.k=C.WinDLL('kernel32',use_last_error=True);k=self.k;self.handle=None
+        k.CreateJobObjectW.argtypes=[C.c_void_p,W.LPCWSTR];k.CreateJobObjectW.restype=W.HANDLE
+        k.OpenJobObjectW.argtypes=[W.DWORD,W.BOOL,W.LPCWSTR];k.OpenJobObjectW.restype=W.HANDLE
+        k.SetInformationJobObject.argtypes=[W.HANDLE,C.c_int,C.c_void_p,W.DWORD];k.SetInformationJobObject.restype=W.BOOL
+        k.QueryInformationJobObject.argtypes=[W.HANDLE,C.c_int,C.c_void_p,W.DWORD,C.POINTER(W.DWORD)];k.QueryInformationJobObject.restype=W.BOOL
+        k.AssignProcessToJobObject.argtypes=[W.HANDLE,W.HANDLE];k.AssignProcessToJobObject.restype=W.BOOL
+        k.TerminateJobObject.argtypes=[W.HANDLE,W.UINT];k.TerminateJobObject.restype=W.BOOL
+        k.CloseHandle.argtypes=[W.HANDLE];k.CloseHandle.restype=W.BOOL
+        k.GetCurrentProcess.restype=W.HANDLE
+        k.IsProcessInJob.argtypes=[W.HANDLE,W.HANDLE,C.POINTER(W.BOOL)];k.IsProcessInJob.restype=W.BOOL
+        self.handle=self.check(k.CreateJobObjectW(None,name) if create else k.OpenJobObjectW(5,False,name))
+        try:
+            if create:
+                if C.get_last_error()==183:raise RuntimeError("Managed music job name already exists")
+                limits=Extended();limits.basic.flags=0x2000
+                self.check(k.SetInformationJobObject(self.handle,9,C.byref(limits),C.sizeof(limits)))
+            observed=Extended()
+            self.check(k.QueryInformationJobObject(self.handle,9,C.byref(observed),C.sizeof(observed),None))
+            if not observed.basic.flags & 0x2000:raise RuntimeError("Music job must retire children on parent exit")
+        except BaseException:
+            self.close();raise
+
+    def check(self, value):
+        if not value:raise self.C.WinError(self.C.get_last_error())
+        return value
+
+    def enroll_self(self):
+        self._assign(self.k.GetCurrentProcess())
+
+    def assign_launcher(self, handle):
+        self._assign(int(handle))
+
+    def _assign(self, handle):
+        if self.k.AssignProcessToJobObject(self.handle,handle):return
+        error=self.C.get_last_error()
+        # A native interpreter may already have enrolled while its parent was
+        # assigning the launcher. Accept only membership in THIS exact job.
+        inside=self.C.c_int()
+        if self.k.IsProcessInJob(handle,self.handle,self.C.byref(inside)) and inside.value:return
+        raise self.C.WinError(error)
+
+    def members(self):
+        C=self.C;buffer=C.create_string_buffer(8+256*C.sizeof(C.c_size_t))
+        self.check(self.k.QueryInformationJobObject(self.handle,3,buffer,len(buffer),None))
+        assigned=C.c_ulong.from_buffer(buffer,0).value;count=C.c_ulong.from_buffer(buffer,4).value
+        if assigned!=count or count>256:raise RuntimeError("Incomplete music process family")
+        return list((C.c_size_t*count).from_buffer(buffer,8))
+
+    def retire(self):
+        self.check(self.k.TerminateJobObject(self.handle,0))
+        deadline=time.monotonic()+10
+        while self.members():
+            if time.monotonic()>=deadline:raise RuntimeError("Music process family has not exited")
+            time.sleep(.02)
+
+    def close(self):
+        if self.handle:
+            self.k.CloseHandle(self.handle);self.handle=None
+
+
+def _music_api_base():
+    session=_MUSIC_API.get()
+    if session is None:return BASE
+    session.validate()
+    return session.base
+
+
+def _music_api_headers():
+    session=_MUSIC_API.get()
+    return {"Content-Type":"application/json",**({"Authorization":"Bearer "+session.token} if session else {})}
+
+
+def _managed_music_bootstrap(config_path):
+    """Enroll before models, verify the parent, then start one private API."""
+    import hashlib
+    import psutil
+    global ROOT,ENGINE
+    path=Path(config_path).resolve(strict=True)
+    if path.stat().st_size>8192:raise ValueError("Music bootstrap exceeds its budget")
+    config=json.loads(path.read_text(encoding='utf-8'))
+    if set(config)!={'version','nonce','root','engine','parent_pid','parent_birth','wrapper_sha256','port'}:
+        raise ValueError("Unknown music bootstrap")
+    if (type(config['version']) is not int or config['version']!=1
+            or not isinstance(config['nonce'],str) or not re.fullmatch('[0-9a-f]{32}',config['nonce'])):
+        raise ValueError("Invalid music bootstrap nonce")
+    root=Path(config['root']).resolve(strict=True)
+    if path!=root/'Temp/music-sessions'/config['nonce']/'bootstrap.json':
+        raise ValueError("Music bootstrap escaped its owned session")
+    if type(config['port']) is not int or not 1024<=config['port']<=65535:
+        raise ValueError("Invalid private music port")
+    if (type(config['parent_pid']) is not int or config['parent_pid']<=0
+            or type(config['parent_birth']) not in (int,float)
+            or not math.isfinite(config['parent_birth']) or config['parent_birth']<=0):
+        raise ValueError("Invalid music parent identity")
+    if hashlib.sha256(Path(__file__).read_bytes()).hexdigest()!=config['wrapper_sha256']:
+        raise RuntimeError("Music wrapper changed during startup")
+    parent=psutil.Process(config['parent_pid'])
+    if parent.create_time()!=config['parent_birth']:raise RuntimeError("Music parent changed")
+    ancestors=psutil.Process().parents()[:2]
+    if not any(p.pid==parent.pid and p.create_time()==config['parent_birth'] for p in ancestors):
+        raise RuntimeError('The acknowledged music parent is not this worker\'s creator')
+    job=_MusicJob('Local\\CaleMusic-'+config['nonce'],create=False)
+    try:job.enroll_self()
+    finally:job.close()  # Never keep the parent's kill-on-close job alive.
+    ROOT=root;ENGINE=Path(config['engine']).resolve(strict=True)
+    receipt={'version':1,'nonce':config['nonce'],'pid':os.getpid(),
+             'birth':psutil.Process().create_time(),'wrapper_sha256':config['wrapper_sha256']}
+    (path.parent/'ready.json').write_text(json.dumps(receipt),encoding='utf-8')
+    _run_engine(['--host','127.0.0.1','--port',str(config['port'])],
+                capsule_cache=path.parent/'cache')
+
+
+def _music_launch_command(config):
+    return [str(ENGINE/'.venv/Scripts/python.exe'),'-B',str(Path(__file__).resolve()),
+            '--run-managed-engine',str(config)]
+
+
+class _ManagedMusicAPI:
+    """Private authenticated API, kept only until its one result is saved.
+
+    ACE's native allocations can survive tensor deletion and cache purges.
+    A fresh process per render bounds that retained state without terminating
+    an existing shared API or losing another client's queued/result state.
+    """
+    def __init__(self):
+        import secrets
+        import socket
+        self.nonce=uuid.uuid4().hex;self.token=secrets.token_urlsafe(32)
+        self.job=None;self.launcher=None;self.process=None
+        self.folder=(ROOT/'Temp/music-sessions'/self.nonce).resolve()
+        with socket.socket() as listener:
+            listener.bind(('127.0.0.1',0));self.port=listener.getsockname()[1]
+        self.base='http://127.0.0.1:'+str(self.port)
+
+    def start(self):
+        import hashlib
+        import psutil
+        self.folder.mkdir(parents=True,exist_ok=False)
+        self.job=_MusicJob('Local\\CaleMusic-'+self.nonce,create=True)
+        config={'version':1,'nonce':self.nonce,'root':str(ROOT.resolve()),
+                'engine':str(ENGINE.resolve()),'parent_pid':os.getpid(),
+                'parent_birth':psutil.Process().create_time(),
+                'wrapper_sha256':hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),'port':self.port}
+        path=self.folder/'bootstrap.json'
+        path.write_text(json.dumps(config),encoding='utf-8')
+        self.wrapper_sha256=config['wrapper_sha256']
+        env=os.environ.copy();env.update(_music_memory_environment())
+        env.update(ACESTEP_API_HOST='127.0.0.1',ACESTEP_API_PORT=str(self.port),
+            ACESTEP_API_KEY=self.token,ACESTEP_NO_INIT='false',ACESTEP_API_WORKERS='1',
+            ACESTEP_INIT_LLM='auto',ACESTEP_LM_BACKEND='pt',
+            ACESTEP_OFFLOAD_TO_CPU='true',ACESTEP_OFFLOAD_DIT_TO_CPU='true',
+            ACESTEP_TMPDIR=str(self.folder/'cache/tmp'),
+            TRITON_CACHE_DIR=str(self.folder/'cache/triton'),
+            TORCHINDUCTOR_CACHE_DIR=str(self.folder/'cache/torchinductor'),
+            HF_HOME=str(ROOT/'Media/music/huggingface'))
+        with (self.folder/'server.log').open('ab') as log:
+            self.launcher=subprocess.Popen(_music_launch_command(path),cwd=ENGINE,env=env,
+                stdout=log,stderr=subprocess.STDOUT,creationflags=HIDE)
+        # Cover the venv redirector too. The actual interpreter separately
+        # self-enrolls before torch, eliminating the redirector's launch race.
+        self.job.assign_launcher(self.launcher._handle)
+        end=time.monotonic()+360
+        while time.monotonic()<end:
+            ready=self.folder/'ready.json'
+            if ready.is_file() and ready.stat().st_size<=8192:
+                try:receipt=json.loads(ready.read_text(encoding='utf-8'))
+                except (OSError,ValueError):receipt=None
+                if receipt is not None:
+                    if (receipt.get('nonce')!=self.nonce or receipt.get('version')!=1
+                            or receipt.get('wrapper_sha256')!=self.wrapper_sha256):
+                        raise RuntimeError('Music worker startup identity differs')
+                    try:
+                        process=psutil.Process(receipt['pid'])
+                        birth=process.create_time()
+                    except psutil.NoSuchProcess as exc:
+                        raise RuntimeError('The private music worker exited; its log was preserved') from exc
+                    if birth!=receipt['birth']:
+                        raise RuntimeError('Music worker process changed during startup')
+                    self.process=process;self.birth=receipt['birth']
+                    if self.validate(starting=True):
+                        try:
+                            request=Request(self.base+'/health',headers={'Authorization':'Bearer '+self.token})
+                            with self._opener().open(request,timeout=2) as response:data=json.load(response)
+                            if data.get('code')==200 and data.get('data',{}).get('models_initialized') is True:
+                                return
+                        except (OSError,ValueError):pass
+            if self.launcher.poll() is not None:
+                raise RuntimeError('The private music worker exited; its log was preserved')
+            time.sleep(.2)
+        raise TimeoutError('The private music worker did not finish preparing')
+
+    @staticmethod
+    def _opener():
+        from urllib.request import build_opener,ProxyHandler,HTTPRedirectHandler
+        class NoRedirect(HTTPRedirectHandler):
+            def redirect_request(self,*args,**kwargs):
+                raise RuntimeError('Private music API redirects are not allowed')
+        return build_opener(ProxyHandler({}),NoRedirect())
+
+    def validate(self, *, starting=False):
+        import psutil
+        if self.process is None:raise RuntimeError('No owned music process was acknowledged')
+        try:
+            current=psutil.Process(self.process.pid)
+            birth=current.create_time()
+        except psutil.NoSuchProcess as exc:
+            raise RuntimeError('The private music worker exited; its log was preserved') from exc
+        if birth!=self.birth or current.pid not in self.job.members():
+            raise RuntimeError('The private music process identity changed')
+        owners={c.pid for c in psutil.net_connections('tcp')
+                if c.status==psutil.CONN_LISTEN and c.laddr.port==self.port}
+        if starting and not owners:return False
+        if owners!={current.pid}:raise RuntimeError('The private music port has another owner')
+        return True
+
+    def close(self):
+        try:
+            if self.job:self.job.retire()
+            # Job membership can drain just before Windows finishes process
+            # teardown. Wait for the acknowledged interpreter as well before
+            # deleting its cache or reporting that its model memory is gone.
+            if self.process:self.process.wait(10)
+            if self.launcher:
+                try:self.launcher.wait(5)
+                except subprocess.TimeoutExpired:
+                    self.launcher.terminate();self.launcher.wait(5)
+        finally:
+            if self.job:self.job.close()
+
+    def remove_consumed_cache(self):
+        """Delete only this fresh session after its output copy is committed."""
+        root=(ROOT/'Temp/music-sessions').resolve()
+        if self.folder.resolve().parent!=root or self.folder.name!=self.nonce:
+            return False
+        # Uploaded references are copies. Reparse points are unexpected and
+        # preserved, never followed into a user's model or project folders.
+        pending=[self.folder];visited=0
+        while pending:
+            path=pending.pop();visited+=1
+            if visited>10000:return False
+            info=path.lstat()
+            if path.is_symlink() or getattr(info,'st_file_attributes',0)&1024:return False
+            if not path.resolve().is_relative_to(self.folder):return False
+            if path.is_dir():pending.extend(path.iterdir())
+        shutil.rmtree(self.folder)
+        return True
+
+
+@contextmanager
+def _music_render_lock():
+    """Serialize music across desktop/radio workers without keeping models."""
+    import msvcrt
+    path=ENGINE.parent/'render.lock';path.parent.mkdir(parents=True,exist_ok=True)
+    with path.open('a+b') as stream:
+        if stream.seek(0,os.SEEK_END)==0:stream.write(b'0');stream.flush()
+        for _ in range(7200):
+            stream.seek(0)
+            try:msvcrt.locking(stream.fileno(),msvcrt.LK_NBLCK,1);break
+            except OSError:time.sleep(1)
+        else:raise TimeoutError('Another local song is still rendering')
+        try:yield
+        finally:
+            stream.seek(0);msvcrt.locking(stream.fileno(),msvcrt.LK_UNLCK,1)
+
+
+@contextmanager
+def _isolated_music_api(existing_task_id=''):
+    # Legacy requests may still have an owned queued/completed result in the
+    # existing shared service. Adopt that result without controlling its API.
+    adopt=False
+    if existing_task_id and healthy():
+        try:
+            response=_request('/query_result',{'task_id_list':[existing_task_id]},timeout=2)
+            rows=response.get('data') or []
+            if rows and (rows[0].get('status') in (1,2) or rows[0].get('progress_text')
+                         or rows[0].get('result') not in ('[]',[],None)):
+                adopt=True
+        except (OSError,ValueError,RuntimeError):pass
+    if adopt:
+        yield existing_task_id
+        return
+    with _music_render_lock():
+        with _setup_lock():install()
+        session=_ManagedMusicAPI();token=None;consumed=False
+        try:
+            session.start();token=_MUSIC_API.set(session)
+            yield ''  # A new API cannot resume a dead process's in-memory ID.
+            consumed=True
+        finally:
+            if token is not None:_MUSIC_API.reset(token)
+            session.close()
+            if consumed:
+                try:session.remove_consumed_cache()
+                except OSError:pass  # Preserve a locked private cache; saved audio is complete.
 
 
 @contextmanager
@@ -158,12 +478,14 @@ def _tool(name: str) -> str:
 
 def _request(path: str, data: dict | None = None, timeout: int = 30):
     request = Request(
-        BASE + path,
+        _music_api_base() + path,
         data=json.dumps(data).encode("utf-8") if data is not None else None,
-        headers={"Content-Type": "application/json"},
+        headers=_music_api_headers(),
     )
     try:
-        with urlopen(request, timeout=timeout) as response:
+        session=_MUSIC_API.get()
+        open_url=session._opener().open if session else urlopen
+        with open_url(request, timeout=timeout) as response:
             return json.load(response)
     except HTTPError as exc:
         detail = exc.read(1024).decode("utf-8", errors="replace")
@@ -177,10 +499,14 @@ def _upload_cover(request: dict, source: Path, field: str = "src_audio") -> dict
     fields = {key: json.dumps(value) if isinstance(value, bool) else str(value)
               for key, value in request.items()}
     with source.open("rb") as audio:
-        response = requests.post(
-            BASE + "/release_task", data=fields,
-            files={field: (source.name, audio)}, timeout=300,
-        )
+        session=_MUSIC_API.get();base=_music_api_base()
+        kwargs={"data":fields,"files":{field:(source.name,audio)},"timeout":300}
+        if session:
+            with requests.Session() as http:
+                http.trust_env=False
+                response=http.post(base+"/release_task",headers={"Authorization":"Bearer "+session.token},
+                                   allow_redirects=False,**kwargs)
+        else:response=requests.post(base+"/release_task",**kwargs)
     if not response.ok:
         raise RuntimeError(
             f"Local music API error {response.status_code}: {response.text[:300]}"
@@ -319,6 +645,16 @@ def _music_memory_environment() -> dict[str, str]:
 
 def start_server() -> bool:
     """Start the local API and report whether its music-planning LM is ready."""
+    if _MUSIC_API.get() is not None:
+        # A private worker was already created and authenticated by start().
+        # Its failure must propagate; starting a second legacy API would hide
+        # the cause and could compete for models, memory or another's port.
+        result=_request('/health',timeout=2)
+        data=result.get('data') if isinstance(result,dict) else None
+        if (not isinstance(data,dict) or data.get('service')!='ACE-Step API'
+                or data.get('models_initialized') is not True):
+            raise RuntimeError('The private music worker is not ready; its log was preserved')
+        return data.get('llm_initialized') is True
     if healthy():
         return music_lm_ready()
     with _setup_lock():
@@ -375,6 +711,14 @@ def _generate_music(
                    AUDIO_REFERENCES | TRANSCODE_AUDIO_REFERENCES | VIDEO_REFERENCES):
         raise ValueError("Choose an existing WAV, MP3, FLAC, MP4, MOV, M4V, WebM or MKV reference.")
     reference_mode = effective_reference_mode(source, duration_seconds, reference_mode)
+    with _isolated_music_api(existing_task_id) as resume_task_id:
+        return _render_music(prompt,target,lyrics,duration_seconds,instrumental,source,
+                             resume_task_id,on_task_submitted,on_progress,reference_mode)
+
+
+def _render_music(prompt,target,lyrics,duration_seconds,instrumental,source,
+                  existing_task_id,on_task_submitted,on_progress,reference_mode):
+    """Existing render/result protocol, with transport scoped to this worker."""
     lm_ready = start_server()
     request = {
         "prompt": music_style.enhance(prompt.strip(), instrumental),
@@ -458,7 +802,11 @@ def _generate_music(
         target.parent.mkdir(parents=True, exist_ok=True)
         temporary = target.with_name(target.name + ".part")
         try:
-            with urlopen(BASE + audio_url, timeout=300) as response, temporary.open("wb") as output:
+            session=_MUSIC_API.get();base=_music_api_base()
+            audio_request=(Request(base+audio_url,headers={"Authorization":"Bearer "+session.token})
+                           if session else base+audio_url)
+            open_url=session._opener().open if session else urlopen
+            with open_url(audio_request, timeout=300) as response, temporary.open("wb") as output:
                 shutil.copyfileobj(response, output)
             if temporary.stat().st_size == 0:
                 raise RuntimeError("The music engine returned an empty file.")
@@ -1464,7 +1812,7 @@ def _ace_code_matches(actual, expected):
     return actual.__code__ == code
 
 
-def _run_engine(argv=None):
+def _run_engine(argv=None, *, capsule_cache=None):
     """Apply the CPU compatibility method in THIS fresh process only.
 
     Existing healthy APIs are never changed. Upstream runs one uvicorn worker
@@ -1531,6 +1879,31 @@ def _run_engine(argv=None):
         'mode': 'process_only', 'disk_modified': False,
     }), flush=True)
     previous = sys.argv
+    initializer=None
+    if capsule_cache is not None:
+        # Keep temporary uploads, API result metadata and audio copies inside
+        # this one owned session. Model checkpoint resolution remains upstream.
+        relative='acestep/api/lifespan_runtime.py'
+        path=ENGINE/relative
+        raw=path.read_bytes()
+        if hashlib.sha256(raw.replace(b'\r\n',b'\n')).hexdigest()!=\
+                '33fc937c1a6e3c35421789ceccb38e07cc9991ff6276fd74b2233414efbda623':
+            raise ValueError('ACE lifespan source differs; refusing private cache override.')
+        lifecycle=importlib.import_module('acestep.api.lifespan_runtime')
+        if Path(lifecycle.__file__).resolve()!=path.resolve():
+            raise ValueError('ACE lifespan module origin differs.')
+        expected=_ace_function_from_source(raw,lifecycle,'initialize_lifespan_runtime')
+        initializer=entry.initialize_lifespan_runtime
+        if (initializer is not lifecycle.initialize_lifespan_runtime
+                or not _ace_code_matches(initializer,expected)):
+            raise ValueError('ACE lifespan initialization binding differs.')
+        cache=Path(capsule_cache).resolve()
+        if not cache.is_relative_to((ROOT/'Temp/music-sessions').resolve()):
+            raise ValueError('Music cache escaped its owned session.')
+        def isolated_lifespan(**kwargs):
+            kwargs['get_project_root']=lambda:str(cache)
+            return initializer(**kwargs)
+        entry.initialize_lifespan_runtime=isolated_lifespan
     try:
         # The wrapper flag is not an ACE argparse option. Preserve upstream
         # arguments exactly after it; normal owned startup supplies none.
@@ -1539,9 +1912,12 @@ def _run_engine(argv=None):
         entry.main()
     finally:
         sys.argv = previous
+        if initializer is not None:entry.initialize_lifespan_runtime=initializer
 
 
 if __name__ == "__main__" and len(sys.argv) == 3 and sys.argv[1] == "--run-job":
     _run_job(sys.argv[2])
 elif __name__ == "__main__" and sys.argv[1:2] == ["--run-engine"]:
     _run_engine(sys.argv[2:])
+elif __name__ == "__main__" and len(sys.argv)==3 and sys.argv[1]=='--run-managed-engine':
+    _managed_music_bootstrap(sys.argv[2])

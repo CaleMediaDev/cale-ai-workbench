@@ -10,10 +10,12 @@ Created by [Cale Media](https://calemedia.com).
 2. Click **Install** and watch the progress bar. Accounts are optional; you can connect them while models download.
 3. Click **Open Cale AI** and describe what you want in chat.
 
-Release 0.5.557 keeps donation pull-request descriptions focused on the proposed changes and their validation. Draft status, test limitations and maintainer review remain explicit. [Validation and limits](benchmarks/results/donation-pr-format-557-20261106.json).
+Release 0.5.558 releases music-model memory after each song using a private worker. Three provided-lyric, three-minute vocal songs rendered in 119–159 seconds on the test PC, with model startup included. Existing song results remain recoverable. [Validation and limits](benchmarks/results/managed-music-memory-558-20261106.json).
 
 <details>
 <summary>Feature history and validation</summary>
+
+Release 0.5.557 keeps donation pull-request descriptions focused on the proposed changes and their validation. Draft status, test limitations and maintainer review remain explicit. [Validation and limits](benchmarks/results/donation-pr-format-557-20261106.json).
 
 Release 0.5.556 changes the Windows music engine to decommit freed CPU tensor buffers immediately. The policy applies at music-engine startup. Repeated full-song checks subsequently found additional native memory growth, which remains under investigation. [Validation and limits](benchmarks/results/music-allocator-556-20261106.json).
 

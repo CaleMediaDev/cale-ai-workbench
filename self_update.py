@@ -312,6 +312,18 @@ def active_tasks():
                     and Path(command[1]).resolve() == install / "music_backend.py"
                     and command[2] == "--run-job"):
                 return True
+            # The per-song interpreter can be a Windows venv's base Python
+            # outside the install. Its exact script and private bootstrap path
+            # identify this install even when no project row remains active.
+            arguments=command[1:]
+            if arguments[:1]==['-B']:arguments=arguments[1:]
+            if (len(arguments)==3 and arguments[1]=='--run-managed-engine'
+                    and Path(arguments[0]).resolve()==install/'music_backend.py'):
+                bootstrap=Path(arguments[2]).resolve()
+                if (bootstrap.name=='bootstrap.json'
+                        and bootstrap.parent.parent==install/'Temp/music-sessions'
+                        and re.fullmatch('[0-9a-f]{32}',bootstrap.parent.name)):
+                    return True
             if (executable and len(command) >= 4
                     and Path(executable).resolve().is_relative_to(install)
                     and Path(command[1]).resolve() == install / "media_worker.py"

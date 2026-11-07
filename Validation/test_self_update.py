@@ -17,6 +17,26 @@ import self_update
 
 
 class SelfUpdateTests(unittest.TestCase):
+    def test_owned_private_music_blocks_update_with_external_base_python(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root=Path(folder)
+            external=root.parent/'system-python/python.exe'
+            bootstrap=root/'Temp/music-sessions'/('a'*32)/'bootstrap.json'
+            for flags in ([],['-B']):
+                worker=MagicMock(info={'exe':str(external),'cmdline':[
+                    str(external),*flags,str(root/'music_backend.py'),'--run-managed-engine',str(bootstrap)]})
+                with (patch.object(self_update,'ROOT',root),
+                      patch('long_tasks.projects',return_value=[]),
+                      patch('psutil.process_iter',return_value=[worker])):
+                    self.assertTrue(self_update.active_tasks())
+                    worker.info['cmdline'][-1]=str(root.parent/'other/Temp/music-sessions'/('a'*32)/'bootstrap.json')
+                    self.assertFalse(self_update.active_tasks())
+                    worker.info['cmdline'][-1]=str(root/'Temp/music-sessions/not-a-nonce/bootstrap.json')
+                    self.assertFalse(self_update.active_tasks())
+                    worker.info['cmdline'][-1]=str(bootstrap)
+                    worker.info['cmdline'][-3]=str(root.parent/'other/music_backend.py')
+                    self.assertFalse(self_update.active_tasks())
+
     def test_live_3d_worker_blocks_update_but_another_install_does_not(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)

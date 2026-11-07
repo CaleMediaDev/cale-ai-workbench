@@ -22,6 +22,7 @@ missing_tests = sorted(
 if missing_tests:
     raise ValueError("Release manifest omits validation files: " + ", ".join(missing_tests))
 extras = [
+    "benchmarks/results/managed-music-memory-558-20261106.json",
     "benchmarks/results/donation-pr-format-557-20261106.json",
     "benchmarks/results/music-allocator-556-20261106.json",
     "benchmarks/test_installer_window.py",

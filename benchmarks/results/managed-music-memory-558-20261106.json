@@ -1,0 +1,88 @@
+{
+  "release": "0.5.558",
+  "status": "qualified_focused_and_three_real_songs",
+  "behavior": "Use a fresh authenticated loopback model process per song and retire its owned Windows family after saving audio. Preserve legacy results and failed diagnostics. Prevent source updates during a private song worker.",
+  "host": {
+    "os": "Windows",
+    "gpu": "NVIDIA GeForce RTX 3060 (12 GB)"
+  },
+  "focused_tests": {
+    "passed": 286,
+    "failed": 0,
+    "skipped": 0,
+    "scope": "Music backend, radio sequencing, updater and music-related task integration; not a full-app suite"
+  },
+  "private_cpu_protocol_cases": 151,
+  "real_songs": [
+    {
+      "case": 4,
+      "task_id": "4452c699-cb83-4c5a-a497-966ad65f9cc5",
+      "audio_seconds": 180.02,
+      "render_seconds_including_model_startup": 119.39,
+      "model_startup_seconds": 38.65,
+      "vocal_check_seconds": 10.05,
+      "recognized_words": 362,
+      "required_words": 153,
+      "matched_lyric_terms": 102,
+      "required_lyric_terms": 15,
+      "last_vocal_second": 178.0,
+      "audio_sha256": "2dc02cecd281904e9c407eaa9d36398cbd31861ba49eb71146881265467734e4",
+      "owned_model_process_gone": true,
+      "consumed_cache_removed": true,
+      "system_commit_before_bytes": 75203768320,
+      "system_commit_after_bytes": 75330695168
+    },
+    {
+      "case": 5,
+      "task_id": "0a4f7500-fb23-490b-b76e-bb5c9b663408",
+      "audio_seconds": 180.02,
+      "render_seconds_including_model_startup": 158.52,
+      "model_startup_seconds": 52.88,
+      "vocal_check_seconds": 11.64,
+      "recognized_words": 370,
+      "required_words": 153,
+      "matched_lyric_terms": 99,
+      "required_lyric_terms": 15,
+      "last_vocal_second": 173.0,
+      "audio_sha256": "94f09fdda3a3677112354a54f379dd664e642839cf4c39fe5aa929c556ac9367",
+      "owned_model_process_gone": true,
+      "consumed_cache_removed": true,
+      "system_commit_before_bytes": 75316256768,
+      "system_commit_after_bytes": 75129651200
+    },
+    {
+      "case": 6,
+      "task_id": "8d6ebd0d-4afc-4984-99ee-2eae8e2d4033",
+      "audio_seconds": 180.02,
+      "render_seconds_including_model_startup": 120.61,
+      "model_startup_seconds": 40.37,
+      "vocal_check_seconds": 9.57,
+      "recognized_words": 358,
+      "required_words": 153,
+      "matched_lyric_terms": 101,
+      "required_lyric_terms": 15,
+      "last_vocal_second": 175.0,
+      "audio_sha256": "59b6847d992a1c5e69ed5ec66165135e297a9697c3e63371869863ef03a83c8d",
+      "owned_model_process_gone": true,
+      "consumed_cache_removed": true,
+      "system_commit_before_bytes": 75321458688,
+      "system_commit_after_bytes": 75277713408
+    }
+  ],
+  "safety_and_lifecycle": [
+    "One inference submission per case; no ambiguous POST replay",
+    "Exact owned process identity, random per-session API authentication and listener ownership",
+    "Parent-death and interruption cleanup exercised with actual Windows child processes",
+    "Temporary cache cleanup exercises actual successful real-song paths and preserves target hashes",
+    "Shared music API, its existing jobs and user files were not terminated or deleted"
+  ],
+  "limits": [
+    "Provided lyrics and installed checkpoints; times exclude lyric drafting and first-time downloads",
+    "Three songs on one PC, not long-term or all-hardware endurance validation",
+    "Whole-track offline speech recognition supports vocal presence and lyric matches, not subjective musical quality",
+    "System commit includes other applications and temporary diagnostic reader processes",
+    "An already-running legacy shared API may retain earlier memory until it exits normally",
+    "Model loading repeats per song; measured 38.65 to 52.88 seconds on this host"
+  ],
+  "source_music_backend_sha256": "b6a536062bbb13564748156be5742179ed314d23d076e331caec741ede883198"
+}

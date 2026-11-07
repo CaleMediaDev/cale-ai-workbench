@@ -18,11 +18,13 @@ import pytest
 import music_backend
 
 REAL_GPU_LEASE = music_backend._music_gpu_lease
+REAL_ISOLATED_MUSIC_API = music_backend._isolated_music_api
 
 
 @pytest.fixture(autouse=True)
 def avoid_touching_the_live_gpu():
-    with patch.object(music_backend, "_music_gpu_lease", return_value=nullcontext()):
+    with (patch.object(music_backend, "_music_gpu_lease", return_value=nullcontext()),
+          patch.object(music_backend, "_isolated_music_api", side_effect=lambda task='':nullcontext(task))):
         yield
 
 
@@ -1992,3 +1994,308 @@ assert m._ace_code_matches(actual,expected)
     assert child.returncode==0,(child.stdout,child.stderr)
     evidence=json.loads(child.stdout)
     assert evidence['strict_expected_matches_actual'] and evidence['isolated_ast_bytecode_differs']
+
+
+@pytest.fixture
+def managed_music_host(tmp_path,monkeypatch):
+    """Actual Windows Job/authenticated HTTP protocol; zero model/GPU work."""
+    import sys,sysconfig
+    root=tmp_path/'app';root.mkdir();engine=tmp_path/'engine';engine.mkdir()
+    driver=tmp_path/'music-server-fixture.py'
+    driver.write_text('''import sys,site,json,os
+from pathlib import Path
+site.addsitedir(sys.argv[2]);sys.path.insert(0,sys.argv[1])
+import music_backend as m
+from http.server import HTTPServer,BaseHTTPRequestHandler
+config=Path(sys.argv[3]);scenario=sys.argv[4];data=json.loads(config.read_text())
+def serve(argv,**kwargs):
+ if scenario=='startup-fail':os._exit(23)
+ class Handler(BaseHTTPRequestHandler):
+  def log_message(self,*a):pass
+  def do_GET(self):self.respond(None)
+  def do_POST(self):
+   body=json.loads(self.rfile.read(int(self.headers.get('Content-Length','0'))))
+   self.respond(body)
+  def respond(self,body):
+   authorized=self.headers.get('Authorization')=='Bearer '+os.environ['ACESTEP_API_KEY']
+   with (Path(data['root'])/'http-fixture.jsonl').open('a') as f:
+    f.write(json.dumps({'path':self.path,'authorized':authorized,'body':body})+'\\n')
+   if not authorized:
+    self.send_response(401);self.end_headers();return
+   if self.path=='/health':value={'code':200,'data':{'status':'ok','service':'ACE-Step API','models_initialized':True,'llm_initialized':True}}
+   elif self.path=='/release_task':value={'code':200,'data':{'task_id':'fixture-task'}}
+   elif self.path=='/query_result':value={'code':200,'data':[{'status':2 if scenario=='fail' else 1,'result':json.dumps([{'file':'/v1/audio?owned=1'}])}]}
+   elif self.path.startswith('/v1/audio'):
+    self.send_response(200);self.end_headers();self.wfile.write(b'owned-protocol-fixture');return
+   else:self.send_response(404);self.end_headers();return
+   raw=json.dumps(value).encode();self.send_response(200);self.send_header('Content-Type','application/json');self.send_header('Content-Length',str(len(raw)));self.end_headers();self.wfile.write(raw)
+ cache=Path(kwargs['capsule_cache']);cache.mkdir(parents=True,exist_ok=True)
+ (cache/'temporary-output.mp3').write_bytes(b'owned-protocol-fixture')
+ HTTPServer(('127.0.0.1',data['port']),Handler).serve_forever()
+m._run_engine=serve
+m._managed_music_bootstrap(config)
+''',encoding='utf-8')
+    monkeypatch.setattr(music_backend,'ROOT',root);monkeypatch.setattr(music_backend,'ENGINE',engine)
+    monkeypatch.setattr(music_backend,'install',lambda:engine)
+    monkeypatch.setattr(music_backend,'_setup_lock',lambda:nullcontext())
+    monkeypatch.setattr(music_backend,'_isolated_music_api',REAL_ISOLATED_MUSIC_API)
+    configs=[]
+    def launch(*,native=False,scenario='ok'):
+        def command(config):
+            configs.append(config)
+            executable=sys._base_executable if native else sys.executable
+            return [str(executable),'-I','-B',str(driver),str(Path(music_backend.__file__).parent),
+                    sysconfig.get_path('purelib'),str(config),scenario]
+        monkeypatch.setattr(music_backend,'_music_launch_command',command)
+    return type('Host',(),{'root':root,'engine':engine,'launch':staticmethod(launch),'configs':configs,
+        'driver':driver,'source':Path(music_backend.__file__).parent,'site':sysconfig.get_path('purelib'),
+        'python':sys.executable,'base_python':sys._base_executable})()
+
+
+@pytest.mark.skipif(os.name!='nt',reason='Actual Windows process-family contract')
+@pytest.mark.parametrize('native',[False,True])
+def test_managed_music_commits_audio_then_retires_whole_owned_family(managed_music_host,native,monkeypatch):
+    import psutil
+    host=managed_music_host;host.launch(native=native)
+    original_base=music_backend.BASE;seen=[]
+    def submitted(task):
+        config=host.configs[-1]
+        seen.append((task,json.loads((config.parent/'ready.json').read_text()),json.loads(config.read_text())))
+    target=host.root/'project/song.mp3'
+    result=music_backend.generate_music('dance pop',str(target),lyrics='Cale Media lights the way',
+                                      on_task_submitted=submitted)
+    assert result['path']==str(target) and target.read_bytes()==b'owned-protocol-fixture'
+    task,receipt,config=seen[0]
+    assert task=='fixture-task' and music_backend.BASE==original_base and music_backend._MUSIC_API.get() is None
+    assert 'token' not in config and 'api_key' not in config
+    assert not psutil.pid_exists(receipt['pid'])
+    assert not host.configs[0].parent.exists()  # Only consumed private cache was removed.
+    calls=[json.loads(line) for line in (host.root/'http-fixture.jsonl').read_text().splitlines()]
+    assert all(call['authorized'] for call in calls)
+    release=next(call['body'] for call in calls if call['path']=='/release_task')
+    assert release['thinking'] is True and release['batch_size']==1
+
+
+@pytest.mark.skipif(os.name!='nt',reason='Actual Windows process-family contract')
+def test_managed_music_failure_retires_family_and_preserves_own_diagnostics(managed_music_host):
+    import psutil
+    host=managed_music_host;host.launch(scenario='fail');seen=[]
+    def submitted(task):seen.append(json.loads((host.configs[-1].parent/'ready.json').read_text()))
+    target=host.root/'project/song.mp3'
+    with pytest.raises(RuntimeError,match='could not finish'):
+        music_backend.generate_music('dance pop',str(target),on_task_submitted=submitted)
+    assert not target.exists() and host.configs[-1].parent.is_dir()
+    assert not psutil.pid_exists(seen[0]['pid']) and music_backend._MUSIC_API.get() is None
+
+
+@pytest.mark.skipif(os.name!='nt',reason='Actual Windows startup failure contract')
+def test_managed_music_dead_startup_is_reported_without_a_six_minute_wait(managed_music_host):
+    import time
+    host=managed_music_host;host.launch(scenario='startup-fail');started=time.monotonic()
+    with pytest.raises(RuntimeError,match='private music worker exited'):
+        music_backend.generate_music('dance pop',str(host.root/'project/song.mp3'))
+    assert time.monotonic()-started<15 and host.configs[0].parent.is_dir()
+    assert music_backend._MUSIC_API.get() is None
+
+
+@pytest.mark.skipif(os.name!='nt',reason='Actual Windows cancellation lifecycle')
+def test_managed_music_interruption_retires_worker_and_preserves_diagnostics(managed_music_host):
+    import psutil
+    host=managed_music_host;host.launch();seen=[]
+    def cancel(task):
+        seen.append(json.loads((host.configs[-1].parent/'ready.json').read_text()))
+        raise KeyboardInterrupt('Caller cancelled the render')
+    target=host.root/'project/cancelled.mp3'
+    with pytest.raises(KeyboardInterrupt,match='Caller cancelled'):
+        music_backend.generate_music('dance pop',str(target),on_task_submitted=cancel)
+    assert len(seen)==1 and not psutil.pid_exists(seen[0]['pid'])
+    assert not target.exists() and not target.with_name(target.name+'.part').exists()
+    assert host.configs[-1].parent.is_dir() and music_backend._MUSIC_API.get() is None
+
+
+@pytest.mark.skipif(os.name!='nt',reason='Actual Windows cross-process render lock')
+def test_music_render_lock_serializes_separate_workers(tmp_path,monkeypatch):
+    import subprocess,sys,time
+    monkeypatch.setattr(music_backend,'ENGINE',tmp_path/'engine')
+    script=tmp_path/'contender.py'
+    script.write_text('''import sys
+from pathlib import Path
+sys.path.insert(0,sys.argv[1])
+import music_backend as m
+m.ENGINE=Path(sys.argv[2])/'engine'
+root=Path(sys.argv[2])
+(root/'attempted').write_text('ready')
+with m._music_render_lock():
+    (root/'acquired').write_text('held')
+''')
+    child=None
+    try:
+        with music_backend._music_render_lock():
+            child=subprocess.Popen([sys.executable,'-B',str(script),
+                str(Path(music_backend.__file__).parent),str(tmp_path)],
+                stdout=subprocess.PIPE,stderr=subprocess.PIPE)
+            deadline=time.monotonic()+8
+            while not (tmp_path/'attempted').exists() and time.monotonic()<deadline:
+                assert child.poll() is None
+                time.sleep(.02)
+            assert (tmp_path/'attempted').exists()
+            time.sleep(.3)
+            assert child.poll() is None and not (tmp_path/'acquired').exists()
+        stdout,stderr=child.communicate(timeout=8)
+        assert child.returncode==0,(stdout,stderr)
+        assert (tmp_path/'acquired').read_text()=='held'
+    finally:
+        if child is not None and child.poll() is None:
+            child.terminate();child.wait(5)
+
+
+def test_adopted_legacy_result_does_not_swallow_render_failure_or_spawn_replacement(monkeypatch):
+    monkeypatch.setattr(music_backend,'healthy',lambda:True)
+    monkeypatch.setattr(music_backend,'_request',lambda *a,**k:{'data':[{'status':1,'result':'saved'}]})
+    with patch.object(music_backend,'_ManagedMusicAPI') as created:
+        with pytest.raises(RuntimeError,match='preserve exact failure'):
+            with REAL_ISOLATED_MUSIC_API('already-submitted') as task:
+                assert task=='already-submitted'
+                raise RuntimeError('preserve exact failure')
+    created.assert_not_called()
+
+
+@pytest.mark.parametrize('reply',[None,{'data':{'service':'other','models_initialized':True}},
+    {'data':{'service':'ACE-Step API','models_initialized':False}}])
+def test_private_readiness_failure_never_installs_or_launches_a_shared_api(monkeypatch,reply):
+    token=music_backend._MUSIC_API.set(object())
+    try:
+        monkeypatch.setattr(music_backend,'_request',lambda *a,**kw:reply)
+        with patch.object(music_backend,'install',side_effect=AssertionError('No legacy repair')):
+            with patch.object(music_backend.subprocess,'Popen',side_effect=AssertionError('No second API')):
+                with pytest.raises(RuntimeError,match='private music worker is not ready'):
+                    music_backend.start_server()
+    finally:music_backend._MUSIC_API.reset(token)
+
+
+def test_private_rpc_failure_propagates_without_legacy_fallback(monkeypatch):
+    token=music_backend._MUSIC_API.set(object())
+    failure=RuntimeError('Fresh native admission declined')
+    try:
+        def declined(*a,**kw):raise failure
+        monkeypatch.setattr(music_backend,'_request',declined)
+        with patch.object(music_backend,'install',side_effect=AssertionError('No legacy repair')):
+            with patch.object(music_backend.subprocess,'Popen',side_effect=AssertionError('No second API')):
+                with pytest.raises(RuntimeError) as raised:music_backend.start_server()
+        assert raised.value is failure
+    finally:music_backend._MUSIC_API.reset(token)
+
+
+@pytest.mark.skipif(os.name!='nt',reason='Actual Windows kill-on-close contract')
+def test_managed_music_parent_death_retires_model_without_python_finally(managed_music_host,tmp_path):
+    import psutil,time
+    host=managed_music_host;owner=tmp_path/'crashing-owner.py'
+    owner.write_text('''import sys,site,json,time,os
+from pathlib import Path
+site.addsitedir(sys.argv[2]);sys.path.insert(0,sys.argv[1]);import music_backend as m
+m.ROOT=Path(sys.argv[3]);m.ENGINE=Path(sys.argv[4])
+m._music_launch_command=lambda config:[sys.argv[6],'-I','-B',sys.argv[5],sys.argv[1],sys.argv[2],str(config),'ok']
+session=m._ManagedMusicAPI();session.start()
+receipt=json.loads((session.folder/'ready.json').read_text())
+(m.ROOT/'owner-ready.json').write_text(json.dumps(receipt))
+while not (m.ROOT/'crash-owner').exists():time.sleep(.02)
+os._exit(17)
+''',encoding='utf-8')
+    process=subprocess.Popen([host.base_python,'-I','-B',str(owner),str(host.source),host.site,
+        str(host.root),str(host.engine),str(host.driver),host.python],creationflags=music_backend.HIDE,
+        stdout=subprocess.PIPE,stderr=subprocess.PIPE)
+    receipt=None
+    try:
+        deadline=time.monotonic()+15
+        while time.monotonic()<deadline:
+            ready=host.root/'owner-ready.json'
+            if ready.is_file():
+                try:receipt=json.loads(ready.read_text());break
+                except ValueError:pass
+            if process.poll() is not None:raise AssertionError(process.communicate())
+            time.sleep(.02)
+        assert receipt and process.poll() is None
+        model=psutil.Process(receipt['pid']);assert model.create_time()==receipt['birth']
+        (host.root/'crash-owner').write_text('simulate abrupt owner exit')
+        process.communicate(timeout=10);assert process.returncode==17
+        model.wait(10)
+        assert not psutil.pid_exists(receipt['pid'])
+    finally:
+        if process.poll() is None:
+            (host.root/'crash-owner').write_text('finish owned fixture')
+            process.communicate(timeout=10)
+
+
+@pytest.mark.parametrize('field,value',[
+    ('version',True),('port',True),('port',1023),('parent_birth',1),
+    ('wrapper_sha256','0'*64),('nonce','not-a-session')])
+def test_managed_bootstrap_rejects_unbound_identity_before_job_or_models(tmp_path,monkeypatch,field,value):
+    import psutil,hashlib,uuid
+    root=tmp_path/'app';nonce=uuid.uuid4().hex
+    path=root/'Temp/music-sessions'/nonce/'bootstrap.json';path.parent.mkdir(parents=True)
+    data={'version':1,'nonce':nonce,'root':str(root),'engine':str(tmp_path),
+          'parent_pid':os.getpid(),'parent_birth':psutil.Process().create_time(),
+          'wrapper_sha256':hashlib.sha256(Path(music_backend.__file__).read_bytes()).hexdigest(),'port':32123}
+    data[field]=value;path.write_text(json.dumps(data))
+    with (patch.object(music_backend,'_MusicJob',side_effect=AssertionError('No process control')),
+          patch.object(music_backend,'_run_engine',side_effect=AssertionError('No model startup'))):
+        with pytest.raises((ValueError,RuntimeError)):
+            music_backend._managed_music_bootstrap(path)
+
+
+# Exact MIT lifecycle source at REVISION, compressed below during preparation.
+_ACE_LIFESPAN_FIXTURE = 'c-oa%OK;;g5WeeI5IV_)V_+@xV!%ZMueULpO}t(gZ4m?nBhfJvSyV|nS#Qz*-XTSblq@^h91?N(&4cseFmW7TvkjFMDbWMxN-9Arw53Hwg+v=J(B*Q0Bo!}IAh9nM+fgJHQ53O~DMkwRohZi3Q5?rnv=MxVFy8FdUQmn?+f`gBM9PvY1CvqYX!1~IjJqY5?n@qIEhpneK{LbU1m*OfJ$1WfwikkyYE-LhK<llbBwun~%)ilWuehi=a-v995Gg&hA=L<FI9d7V_OE&NY_|?oK));xLo_2rK^_VkMbWQbkok?AQ&+XiCJ}-kaFJaj{_q4xlSoi7y`(uJ8wDONTr5tzSPRNXwxw7=ye5DYhNgB^hq5JQUQjX7)*3=l?C=rM62?cA)KkFM8}^7RqPAl%KcJ?bO0CZ)eQ}7QoNf?q&P8#-Gg4r4poCP_q;_rRfCF^#3%cQ@_v50GfQ*Ei1F&3B^tz=b;+6Ip?BukfWlqcNfS5$&g)kE}?@c8RwOsvUf=x0i6|F{raW3+YRE0K24P!vWITL6KDLvA@89i}UCjLZ26xUcmb0*_KBLR*-GI4L|opx0w9Zdu4_Ka2vEsT|OAs_&63f3OAAqgX5a}e8dPmG+OhLIIjhsdmqyMr|p=bqvn`6fZo1cWNf_40^cS()?KfM``>z4^o+u%wVsxtyR)!HLD_qgR6KTCv&Sitg_2eyCI9z9mfC4;>6v<s&vn#+x!^0#kucAKWrRs9jCqtdJcA2HvfmlQ@&6rz$_lSU3?Rm_)REVS<-C=wU;&<2fx{?a3kZ%-jdAX}udpi(LBL)g2ndeLLV6BESpiF5W6tVMB`{)$~gG<<)w<#LLy~Uw^yRSHHZxzP5{dpFEJo*3MDItE5p@dvQ>k5yr@7Y)DE5own7jjt~rnj0{qnWGm5DiR*E|o&Z0n0n?KBayI|Eo-gtG^YY_j6%P<N<#h3Zka#cvzY11a!{Af#61VIN6|7f__3aIwUCyrN_&q9&ysj1~fPDrP)6vs-x~1`UHM?5eeEeeuUq7Iji)`!kboCE{lmT{=Eg`q_?(o<j!#?AKBx$u!n>9P~3=K}mL@OIYgJM!){ybfaJ@rk`_N}@30}Z<^rqVZR?Ys>-6Y;)uy^HPcJ$Tujtsgi4ynF|$4@3(|duv5f1$~w53zaxKyoU#Ga%hWw1mA&2=dj&m?uqx{tbh}_*_$NR7TedreVvADb2DhKfax^brhb^Y2%oi-dU_n`0nKjvTP~O{a=?Bf5Trf`ruv?A7hxa3YHPlu4(g=YU1@sj9acHmS<4!bwXWX>8dZ?*2SAY=<^-uPE3ddU`-O_!^cT{?`LAx>-9nt*-h5j8hL@M?tFi9eal7?|qvD$a(jEa&{;eUjDTv?*{h8I~OpiFzUe1m;11;{eACY=QdL}E!=hD(*(zjE0d@gqlB0Yf!T=Hf-f_wPl<-^Yx@M3x3@!*U|ZCAKF15Mk|wDvrVkoc90XZ;A(<)`|tdw7}RKW|sR&sSfyi67v;YrQ~#^Y{sp1fr+G_fg38NNVQUpxb=W>%`8t)7G@xb%%a)=pmHl`UK|Pnw-MCr>ALi6om%AVFlG9|NZYQ;$1@Z@An}E&0tE!`Cin|_~uM-{DPKKKjC*dJLA3WragoIiJJ2T)!7fi>^^%uQojhN^;4yrht)xC;ohs+b$`^rgB*Fnn~w|qXg$gu69%%+8Si@v`Z+5m6{~S^bK^E+(<yPiqtuxvb@-aLme&7u=ss2aB<dNa!3^l9J$ry@bCPaTo!Y;CBe)x<!S@m8*s+d}wo<p1`mM0bOv6PlBn=^f6qi3!_c62s^Z(HVK;8'
+
+
+def managed_lifespan_fixture(tmp_path,monkeypatch):
+    import base64,zlib,types,asyncio,os,sys
+    from collections import deque
+    from threading import Lock
+    engine,sources,modules,calls,observed=process_engine_fixture(tmp_path,monkeypatch)
+    root=tmp_path/'app';root.mkdir(exist_ok=True);monkeypatch.setattr(music_backend,'ROOT',root)
+    relative='acestep/api/lifespan_runtime.py';raw=zlib.decompress(base64.b85decode(_ACE_LIFESPAN_FIXTURE))
+    path=engine/relative;path.parent.mkdir(parents=True,exist_ok=True);path.write_bytes(raw)
+    lifecycle=types.ModuleType('acestep.api.lifespan_runtime');lifecycle.__file__=str(path)
+    env={};cache_calls=[]
+    lifecycle.__dict__.update(asyncio=asyncio,os=types.SimpleNamespace(path=os.path,environ=env,
+        getenv=lambda key,default=None:env.get(key,default),makedirs=os.makedirs),sys=sys,deque=deque,Lock=Lock,
+        ThreadPoolExecutor=lambda **kw:types.SimpleNamespace(**kw),
+        LifespanRuntime=lambda **kw:types.SimpleNamespace(**kw),
+        _initialize_local_cache=lambda app,cache:cache_calls.append(cache))
+    original=loaded_ace_fixture_function(raw,lifecycle,'initialize_lifespan_runtime')
+    lifecycle.initialize_lifespan_runtime=original;modules[lifecycle.__name__]=lifecycle
+    entry=modules['acestep.api_server'];entry.initialize_lifespan_runtime=original
+    cli=modules['acestep.api.server_cli'];previous=cli.uvicorn.run;initialized=[]
+    def run(*args,**kwargs):
+        app=types.SimpleNamespace(state=types.SimpleNamespace())
+        result=entry.initialize_lifespan_runtime(app=app,store=object(),queue_maxsize=2,avg_window=3,
+            initial_avg_job_seconds=5,get_project_root=lambda:str(tmp_path/'shared-cache-must-not-change'),
+            initialize_training_state_fn=lambda app:None,ace_handler_cls=lambda:object(),llm_handler_cls=lambda:object())
+        initialized.append((result,app));return previous(*args,**kwargs)
+    cli.uvicorn.run=run
+    return engine,path,raw,lifecycle,entry,original,initialized,observed,cache_calls
+
+
+def test_managed_engine_changes_only_owned_cache_root_then_restores_initializer(tmp_path,monkeypatch):
+    engine,path,raw,lifecycle,entry,original,initialized,observed,caches=managed_lifespan_fixture(tmp_path,monkeypatch)
+    cache=music_backend.ROOT/'Temp/music-sessions'/('a'*32)/'cache'
+    music_backend._run_engine(['--host','127.0.0.1','--port','8002'],capsule_cache=cache)
+    assert len(initialized)==len(observed)==1
+    result,app=initialized[0]
+    assert Path(result.cache_root)==cache/'.cache/acestep'
+    assert Path(app.state.temp_audio_dir).is_relative_to(cache)
+    assert caches==[str(cache/'.cache/acestep')]
+    assert entry.initialize_lifespan_runtime is original
+    assert not (tmp_path/'shared-cache-must-not-change').exists() and path.read_bytes()==raw
+
+
+@pytest.mark.parametrize('bad',['source','origin','binding','escape'])
+def test_managed_engine_refuses_unknown_lifespan_or_cache_before_api_main(tmp_path,monkeypatch,bad):
+    engine,path,raw,lifecycle,entry,original,initialized,observed,caches=managed_lifespan_fixture(tmp_path,monkeypatch)
+    cache=music_backend.ROOT/'Temp/music-sessions'/('b'*32)/'cache'
+    if bad=='source':path.write_bytes(raw+b'\n# changed')
+    if bad=='origin':lifecycle.__file__=str(tmp_path/'other.py')
+    if bad=='binding':entry.initialize_lifespan_runtime=lambda **kw:None
+    if bad=='escape':cache=tmp_path/'outside'
+    with pytest.raises(ValueError):music_backend._run_engine([],capsule_cache=cache)
+    assert not initialized and not observed and not caches
