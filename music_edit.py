@@ -155,3 +155,284 @@ def mix_music(background_path: str, foreground_path: str, output_path: str,
           "-map", "[mix]", "-vn"], output)
     return {"background": str(background), "foreground": str(foreground),
             "path": str(output), "edit": "mix"}
+
+# The integrated DJ player uses the unmodified, separately downloaded LibVLC
+# runtime. Audio stays inside Cale: no external player, account or cloud route.
+DJ_VERSION = "3.0.24"
+DJ_ARCHIVE_SHA256 = "fcf30850371ad10c9373cc4f0f4501e7dee49e3e9ae9f20c72fb2661a1ca6323"
+DJ_ARCHIVE_BYTES = 82765861
+DJ_URL = "https://download.videolan.org/pub/videolan/vlc/3.0.24/win64/vlc-3.0.24-win64.zip"
+_DJ_ENGINES = {}
+
+
+def _finite(value, name, minimum, maximum):
+    if isinstance(value,bool) or not isinstance(value,(int,float)) or not math.isfinite(value) or not minimum<=value<=maximum:
+        raise ValueError(f"{name} must be between {minimum} and {maximum}.")
+    return float(value)
+
+
+def dj_directory(root):
+    return Path(root).resolve() / "Media/dj" / ("vlc-" + DJ_VERSION)
+
+
+def dj_runtime_ready(root, *, full=False):
+    import hashlib, json
+    folder = dj_directory(root)
+    try:
+        record = json.loads((folder / ".cale-runtime.json").read_text(encoding="utf-8"))
+        if record["version"] != DJ_VERSION or record["archive_sha256"] != DJ_ARCHIVE_SHA256:
+            return False
+        files=record["files"]
+        if not isinstance(files,dict) or not {"libvlc.dll","libvlccore.dll"}<=files.keys():return False
+        for name in files if full else ("libvlc.dll", "libvlccore.dll"):
+            path=(folder/name).resolve()
+            if not path.is_relative_to(folder) or hashlib.sha256(path.read_bytes()).hexdigest() != files[name]:
+                return False
+        return (folder/"plugins").is_dir()
+    except (OSError, ValueError, KeyError, TypeError):
+        return False
+
+
+def _extract_dj_archive(archive, destination):
+    """The caller verifies the pinned archive before this bounded extraction."""
+    import stat, zipfile
+    from pathlib import PurePosixPath
+    destination = Path(destination).resolve()
+    if destination.name != "vlc-"+DJ_VERSION:raise ValueError("Unexpected DJ extraction directory.")
+    with zipfile.ZipFile(archive) as source:
+        entries=source.infolist()
+        if len(entries)>10000 or sum(e.file_size for e in entries)>1024**3:
+            raise ValueError("DJ runtime archive exceeds its file/size limits.")
+        seen=set()
+        for entry in entries:
+            parts=PurePosixPath(entry.filename).parts
+            if (not parts or parts[0] != "vlc-"+DJ_VERSION or ".." in parts
+                    or "\\" in entry.filename or ":" in entry.filename
+                    or stat.S_ISLNK(entry.external_attr >> 16)):
+                raise ValueError("Unexpected DJ runtime archive path.")
+            relative=Path(*parts[1:])
+            target=(destination/relative).resolve()
+            if not target.is_relative_to(destination) or str(relative).casefold() in seen:
+                raise ValueError("Duplicate or escaping DJ runtime archive path.")
+            seen.add(str(relative).casefold())
+        source.extractall(destination.parent)
+        # extractall uses the verified archive's single versioned root name.
+
+
+def ensure_dj_runtime(root, progress=lambda percent, message: None):
+    """Install one pinned portable audio runtime, without elevation or a console."""
+    import hashlib, json, os, shutil, tempfile, time, uuid
+    folder=dj_directory(root);base=folder.parent;base.mkdir(parents=True,exist_ok=True)
+    with (base/"setup.lock").open("a+b") as lock:
+        if lock.tell()==0:lock.write(b"0");lock.flush()
+        lock.seek(0)
+        if os.name=="nt":
+            import msvcrt
+            try:msvcrt.locking(lock.fileno(),msvcrt.LK_NBLCK,1)
+            except OSError:raise RuntimeError("DJ sound setup is already running. It will finish in the background.")
+        else:
+            import fcntl
+            fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
+        if dj_runtime_ready(root,full=True):
+            progress(100,"DJ sound ready")
+            return str(folder)
+        if (Path(root)/"LongTasks/offline-network.json").is_file():
+            raise RuntimeError("DJ sound will install when Internet is back on. Basic playback is ready.")
+        if os.name!="nt":raise RuntimeError("This DJ sound package needs 64-bit Windows.")
+        if shutil.disk_usage(base).free<1024**3:raise RuntimeError("DJ sound setup needs 1 GB of free space.")
+        staging=Path(tempfile.mkdtemp(prefix=".dj-setup-",dir=base)).resolve()
+        archive=staging/"runtime.zip"
+        try:
+            progress(2,"Downloading DJ sound · no account needed")
+            curl=Path(os.environ.get("SystemRoot",r"C:\Windows"))/"System32/curl.exe"
+            args=[str(curl),"--disable","--fail","--location","--proto","=https","--proto-redir","=https",
+                "--connect-timeout","20","--max-time","600","--max-filesize",str(DJ_ARCHIVE_BYTES),
+                "--silent","--show-error","--output",str(archive),DJ_URL]
+            with tempfile.TemporaryFile() as errors:
+                process=subprocess.Popen(args,stdout=subprocess.DEVNULL,stderr=errors,creationflags=HIDE)
+                try:
+                    while process.poll() is None:
+                        size=archive.stat().st_size if archive.exists() else 0
+                        progress(min(75,2+int(size/DJ_ARCHIVE_BYTES*73)),"Downloading DJ sound")
+                        time.sleep(.25)
+                    if process.returncode:
+                        errors.seek(0)
+                        raise RuntimeError("DJ sound download failed. "+errors.read(500).decode(errors="replace"))
+                finally:
+                    if process.poll() is None:process.kill();process.wait(timeout=10)
+            with archive.open("rb") as stream: digest=hashlib.file_digest(stream,"sha256").hexdigest()
+            if archive.stat().st_size!=DJ_ARCHIVE_BYTES or digest!=DJ_ARCHIVE_SHA256:
+                raise RuntimeError("DJ sound download did not match the verified official release.")
+            progress(80,"Installing DJ sound")
+            unpack=staging/("vlc-"+DJ_VERSION)
+            _extract_dj_archive(archive,unpack)
+            files={p.relative_to(unpack).as_posix():hashlib.sha256(p.read_bytes()).hexdigest()
+                for p in unpack.rglob("*.dll")}
+            if not {"libvlc.dll","libvlccore.dll"}<=files.keys() or not (unpack/"plugins").is_dir():
+                raise RuntimeError("DJ sound runtime is incomplete.")
+            (unpack/".cale-runtime.json").write_text(json.dumps({"version":DJ_VERSION,
+                "archive_sha256":DJ_ARCHIVE_SHA256,"files":files},indent=2),encoding="utf-8")
+            if folder.exists():
+                backup=base/(folder.name+"-repair-"+uuid.uuid4().hex[:8])
+                if folder.is_symlink() or folder.resolve().parent!=base.resolve() or backup.resolve().parent!=base.resolve():
+                    raise RuntimeError("Unexpected DJ installation location; existing files were preserved.")
+                folder.replace(backup)
+            unpack.replace(folder)
+            progress(100,"DJ sound ready")
+            return str(folder)
+        finally:
+            if staging.parent==base.resolve() and staging.name.startswith(".dj-setup-") and not staging.is_symlink():
+                shutil.rmtree(staging)
+
+
+class _DJEngine:
+    """Small typed binding to LibVLC3's public C API; no Qt/player window."""
+    def __init__(self, root):
+        import ctypes as C, hashlib, json, os
+        folder=dj_directory(root)
+        if not dj_runtime_ready(root):raise RuntimeError("DJ sound is still being installed.")
+        record=json.loads((folder/".cale-runtime.json").read_text(encoding="utf-8"))
+        for name,digest in record['files'].items():
+            path=(folder/name).resolve()
+            if not path.is_relative_to(folder) or hashlib.sha256(path.read_bytes()).hexdigest()!=digest:
+                raise RuntimeError("DJ sound files need repair.")
+        self.search=os.add_dll_directory(str(folder))
+        os.environ['VLC_PLUGIN_PATH']=str(folder/"plugins")
+        self.lib=C.CDLL(str(folder/"libvlc.dll"))
+        pointer=C.c_void_p;integer=C.c_int;wide=C.c_int64;number=C.c_float
+        specs={
+            'libvlc_new':(pointer,[integer,C.POINTER(C.c_char_p)]),
+            'libvlc_release':(None,[pointer]),
+            'libvlc_media_new_path':(pointer,[pointer,C.c_char_p]),
+            'libvlc_media_parse':(None,[pointer]),
+            'libvlc_media_get_duration':(wide,[pointer]),
+            'libvlc_media_release':(None,[pointer]),
+            'libvlc_media_player_new':(pointer,[pointer]),
+            'libvlc_media_player_set_media':(None,[pointer,pointer]),
+            'libvlc_media_player_play':(integer,[pointer]),
+            'libvlc_media_player_stop':(None,[pointer]),
+            'libvlc_media_player_release':(None,[pointer]),
+            'libvlc_media_player_set_pause':(None,[pointer,integer]),
+            'libvlc_media_player_get_state':(integer,[pointer]),
+            'libvlc_media_player_get_time':(wide,[pointer]),
+            'libvlc_media_player_get_length':(wide,[pointer]),
+            'libvlc_media_player_set_time':(None,[pointer,wide]),
+            'libvlc_media_player_set_rate':(integer,[pointer,number]),
+            'libvlc_audio_set_volume':(integer,[pointer,integer]),
+            'libvlc_audio_equalizer_new':(pointer,[]),
+            'libvlc_audio_equalizer_release':(None,[pointer]),
+            'libvlc_audio_equalizer_set_amp_at_index':(integer,[pointer,number,C.c_uint]),
+            'libvlc_audio_equalizer_set_preamp':(integer,[pointer,number]),
+            'libvlc_media_player_set_equalizer':(integer,[pointer,pointer]),
+        }
+        for name,(result,arguments) in specs.items():
+            function=getattr(self.lib,name);function.restype=result;function.argtypes=arguments
+        options=[b'--no-video',b'--no-osd',b'--no-media-library',b'--no-metadata-network-access',b'--audio-time-stretch']
+        argv=(C.c_char_p*len(options))(*options)
+        self.instance=self.lib.libvlc_new(len(options),argv)
+        if not self.instance:raise RuntimeError("DJ sound could not initialize the audio device.")
+
+
+def _dj_engine(root):
+    key=str(Path(root).resolve())
+    if key not in _DJ_ENGINES:_DJ_ENGINES[key]=_DJEngine(root)
+    return _DJ_ENGINES[key]
+
+
+class DJDeck:
+    """A local audio deck with live equalization, pitch-preserving rate and cue."""
+    def __init__(self, root, *, _engine=None):
+        import uuid
+        self.engine=_engine or _dj_engine(root);self.api=self.engine.lib
+        self.alias='cale_dj_'+uuid.uuid4().hex;self.path=None;self.opened=False
+        self.player=None;self.equalizer=None;self.volume=65.;self.speed=1.;self.tone=(0.,0.,0.)
+        self.duration=0;self.started_at=None
+
+    def open(self,path):
+        self.stop();source=_source(str(path));self.path=str(source)
+        media=self.api.libvlc_media_new_path(self.engine.instance,str(source).encode('utf-8'))
+        if not media:raise RuntimeError("DJ sound could not open this song.")
+        try:
+            self.api.libvlc_media_parse(media)
+            self.duration=max(0,self.api.libvlc_media_get_duration(media)/1000)
+            self.player=self.api.libvlc_media_player_new(self.engine.instance)
+            self.equalizer=self.api.libvlc_audio_equalizer_new()
+            if not self.player or not self.equalizer:raise RuntimeError("DJ sound could not create this deck.")
+            self.api.libvlc_media_player_set_media(self.player,media)
+            self.opened=True
+            self.set_volume(self.volume);self.set_tone(*self.tone);self.set_speed(self.speed)
+        except Exception:
+            self.stop();raise
+        finally:self.api.libvlc_media_release(media)
+
+    def start(self):
+        import time
+        if not self.player or self.api.libvlc_media_player_play(self.player)!=0:
+            self.stop()
+            raise RuntimeError("DJ sound could not start this song.")
+        self.started_at=time.monotonic()
+        self.set_speed(self.speed)
+        # Native playback starts asynchronously. Keep the outgoing song at
+        # its current gain until the new deck has actually started playing.
+        deadline=self.started_at+2
+        while time.monotonic()<deadline:
+            state=self.api.libvlc_media_player_get_state(self.player)
+            if state==3:return
+            if state in (5,6,7):break
+            time.sleep(.01)
+        self.stop()
+        raise RuntimeError("DJ sound could not start this song.")
+
+    def play(self,path):self.open(path);self.start()
+
+    def busy(self):
+        import time
+        if not self.player:return False
+        state=self.api.libvlc_media_player_get_state(self.player)
+        if state==7:raise RuntimeError("DJ sound could not decode this song.")
+        return state in (1,2,3,4) or state==0 and self.started_at is not None and time.monotonic()-self.started_at<2
+
+    def clock(self):
+        if not self.player:return 0,0
+        return max(0,self.api.libvlc_media_player_get_time(self.player)/1000),max(self.duration,self.api.libvlc_media_player_get_length(self.player)/1000)
+
+    def pause(self):
+        if self.player:self.api.libvlc_media_player_set_pause(self.player,1)
+
+    def resume(self):
+        if self.player:self.api.libvlc_media_player_set_pause(self.player,0)
+
+    def set_volume(self,value):
+        import time
+        self.volume=_finite(value,'Volume',0,100)
+        if self.player and self.api.libvlc_audio_set_volume(self.player,round(self.volume))<0:
+            # The incoming deck already has its zero gain set before playback.
+            # VLC may temporarily refuse updates while creating the audio output;
+            # the next fade tick retries without interrupting the outgoing deck.
+            if self.started_at is None or time.monotonic()-self.started_at>=1:
+                raise RuntimeError("DJ volume could not be changed.")
+
+    def set_tone(self,bass,mid,treble):
+        self.tone=tuple(_finite(v,'Equalizer',-12,12) for v in (bass,mid,treble))
+        if self.player:
+            for band in range(10):
+                gain=self.tone[0 if band<3 else 1 if band<7 else 2]
+                if self.api.libvlc_audio_equalizer_set_amp_at_index(self.equalizer,gain,band)<0:raise RuntimeError("DJ equalizer could not be changed.")
+            self.api.libvlc_audio_equalizer_set_preamp(self.equalizer,-max(0,*self.tone))
+            if self.api.libvlc_media_player_set_equalizer(self.player,self.equalizer)<0:raise RuntimeError("DJ equalizer could not be applied.")
+
+    def set_speed(self,value):
+        self.speed=_finite(value,'Playback speed',.8,1.2)
+        if self.player and self.api.libvlc_media_player_set_rate(self.player,self.speed)<0:raise RuntimeError("This song cannot change playback speed.")
+
+    def seek(self,seconds):
+        seconds=_finite(seconds,'Cue position',0,max(0,self.clock()[1]))
+        if self.player:self.api.libvlc_media_player_set_time(self.player,round(seconds*1000))
+
+    def stop(self):
+        try:
+            if self.player:
+                self.api.libvlc_media_player_stop(self.player)
+                self.api.libvlc_media_player_release(self.player)
+            if self.equalizer:self.api.libvlc_audio_equalizer_release(self.equalizer)
+        finally:self.player=self.equalizer=None;self.path=None;self.opened=False;self.started_at=None

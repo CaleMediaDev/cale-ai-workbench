@@ -35,6 +35,31 @@ DEFAULT_STATIONS = (
 )
 
 
+def completed_songs(root=ROOT):
+    """Expose completed maker audio to the same decks; never copy or re-render it."""
+    folder=Path(root)/"LongTasks/music-jobs"
+    if not folder.is_dir():return []
+    songs=[];seen=set()
+    receipts=[]
+    for path in folder.glob("*.json"):
+        try:receipts.append((path.stat().st_mtime,path))
+        except OSError:continue
+    recent=[path for _,path in sorted(receipts,reverse=True)[:128]]
+    for receipt in recent:
+        try:
+            if receipt.stat().st_size>256000:continue
+            value=json.loads(receipt.read_text(encoding="utf-8"))
+            if not isinstance(value,dict) or value.get("status")!="complete" or str(value.get("task_id","")).startswith("radio-"):continue
+            path=Path(value["output_path"]).resolve()
+            if path in seen or not path.is_file() or path.suffix.lower() not in {".wav",".mp3",".flac",".m4a",".ogg"}:continue
+            seen.add(path)
+            title=" ".join(str(value.get("prompt") or path.stem).split())[:70]
+            songs.append({"id":receipt.stem,"path":str(path),"title":title})
+            if len(songs)>=12:break
+        except (OSError,ValueError,KeyError,TypeError):continue
+    return songs
+
+
 def database(root=ROOT):
     path = Path(root) / "LongTasks/radio.sqlite3"
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -218,6 +243,8 @@ class Player:
         self.volume = 65
         self.paused_at = None
         self.fade_start = self.fade_seconds = 0
+        self.dj_settings = [{"tone": (0.,0.,0.), "speed": 1.} for _ in range(2)]
+        self.loops = {}
 
     @property
     def mixing(self):
@@ -233,6 +260,7 @@ class Player:
     def play(self, path):
         self.stop()
         self.active.set_volume(self.volume * self.deck_levels[self.active.channel] / 100)
+        self._apply_dj(self.active)
         self.active.play(path)
 
     def prepare(self, path):
@@ -247,6 +275,7 @@ class Player:
         try:
             self.prepared.channel = 1 - self.active.channel
             self.prepared.set_volume(0)
+            self._apply_dj(self.prepared)
             self.prepared.open(path)
         except Exception:
             try:
@@ -289,7 +318,54 @@ class Player:
             raise
         return True
 
+    def enable_dj(self, root):
+        from music_edit import DJDeck
+        replacement=DJDeck(root)
+        if not self.active.path:
+            channel=self.active.channel
+            self.active.stop();self.active=replacement;self.active.channel=channel
+            self._apply_dj(self.active)
+        self.factory=lambda:DJDeck(root)
+
+    def _apply_dj(self, deck):
+        settings=self.dj_settings[deck.channel]
+        if hasattr(deck,"set_tone"):
+            deck.set_tone(*settings["tone"]);deck.set_speed(settings["speed"])
+
+    def dj_control(self, channel, action, value=None):
+        if channel not in (0,1):raise ValueError("Choose deck A or B.")
+        from music_edit import _finite
+        decks=[d for d in (self.active,self.outgoing,self.prepared) if d is not None and d.channel==channel]
+        if action=="tone":
+            if not isinstance(value,(tuple,list)) or len(value)!=3:raise ValueError("Choose bass, mid and high settings.")
+            self.dj_settings[channel]["tone"]=tuple(_finite(v,"Equalizer",-12,12) for v in value)
+            for deck in decks:
+                if hasattr(deck,"set_tone"):deck.set_tone(*self.dj_settings[channel]["tone"])
+        elif action=="speed":
+            self.dj_settings[channel]["speed"]=_finite(value,"Playback speed",.8,1.2)
+            for deck in decks:
+                if hasattr(deck,"set_speed"):deck.set_speed(self.dj_settings[channel]["speed"])
+        elif action=="cue":
+            for deck in decks:
+                if hasattr(deck,"seek"):deck.seek(0)
+        elif action=="loop":
+            if channel in self.loops:self.loops.pop(channel)
+            else:
+                deck=next((d for d in decks if d.path and hasattr(d,"seek")),None)
+                if deck:
+                    position,duration=deck.clock()
+                    if duration-position>1:self.loops[channel]=(deck.path,position,min(duration-.1,position+8))
+        else:raise ValueError("Unknown DJ control.")
+
+    def advance_loops(self):
+        if self.paused_at is not None:return
+        for channel,(path,start,end) in list(self.loops.items()):
+            deck=next((d for d in (self.active,self.outgoing) if d is not None and d.channel==channel and d.path==path),None)
+            if deck is None:self.loops.pop(channel,None)
+            elif deck.clock()[0]>=end:deck.seek(start)
+
     def advance_mix(self):
+        self.advance_loops()
         if not self.mixing or self.paused_at is not None:
             return
         fraction = max(0, min(1, (self.now()-self.fade_start)/self.fade_seconds))
@@ -380,6 +456,7 @@ class Player:
         self.set_volume(self.volume)
 
     def stop(self):
+        self.loops.clear()
         error = None
         for deck in (self.active, self.outgoing, self.prepared):
             if deck is not None:
@@ -418,11 +495,67 @@ class Service:
         self.commands = queue.SimpleQueue()
         self.auto_blend = True
         self.waveforms = {}
+        self.dj_setup = {"status":"idle","percent":0,"message":"Preparing DJ sound"}
+        self.dj_thread = None
+        self.dj_attempts = 0
+        self.dj_retry_at = 0
+        self.dj_enabled = False
+        self.manual_mode = False
+        self.pending_song = None
+        self.song_library = []
         self.view = {"message": self.message, "ready": 0, "progress": 0, "playing": False, "paused": False}
         ensure_stations(self.root)
         self.station_catalog = stations(self.root)
         with closing(database(self.root)) as conn, conn:
             conn.execute("UPDATE tracks SET status='played' WHERE status='playing'")
+
+    def enable_dj(self):
+        if self.dj_thread is not None and self.dj_thread.is_alive():return
+        if self.dj_setup["status"]=="ready":return
+        self.dj_attempts+=1
+        def setup():
+            from music_edit import ensure_dj_runtime
+            def progress(percent,message):self.dj_setup={"status":"working","percent":percent,"message":message}
+            try:
+                ensure_dj_runtime(self.root,progress)
+                self.dj_setup={"status":"ready","percent":100,"message":"DJ mixer ready · local sound"}
+            except Exception as exc:
+                self.dj_retry_at=time.monotonic()+30
+                self.dj_setup={"status":"error","percent":0,"message":str(exc)}
+        self.dj_thread=threading.Thread(target=setup,daemon=True);self.dj_thread.start()
+
+    def dj_control(self,channel,action,value=None):self.commands.put(("dj_control",(channel,action,value)))
+
+    def play_song(self,job_id):self.commands.put(("play_song",job_id))
+
+    def _song_library(self):
+        return completed_songs(self.root)
+
+    def _load_song(self,job_id):
+        song=next((song for song in self._song_library() if song["id"]==job_id),None)
+        if song is None:raise ValueError("That song is no longer available. Choose another finished song.")
+        return self._mix_saved_track(song)
+
+    def _mix_saved_track(self,song):
+        track={"id":"song-"+song["id"],"path":song["path"],"title":song["title"]}
+        if self.enabled and (self.current or {}).get("path")==track["path"]:
+            if self.paused:self.player.resume();self.paused=False
+            return "playing"
+        if self.enabled and self.current and self.player.busy():
+            if self.paused:self.player.resume();self.paused=False
+            if getattr(self.player,"mixing",False):
+                self.pending_song=song;self.message="Queued your song after this blend"
+                return "queued_after_transition"
+            self.player.set_auto_mix(True);self.auto_blend=True
+            if not self.player.blend(track["path"],FADE_SECONDS):raise ValueError("This deck is not ready to mix yet.")
+            self._update(self.current["id"],"played")
+            self.current=track
+        else:
+            self.player.play(track["path"]);self.current=track;self.enabled=True;self.paused=False
+            self.manual_mode=True;self.pending_song=None
+            self.station={"id":"saved-songs","name":"Your songs","prompt":"","instrumental":False}
+        self.repeating=False;self.message="Playing your song · "+song["title"]
+        return "playing"
 
     def start(self):
         if self.thread is None:
@@ -440,6 +573,7 @@ class Service:
 
     def _choose(self, station):
         with self.lock:
+            self.manual_mode=False;self.pending_song=None
             if self.current:
                 self._update(self.current["id"], "played")
             try:
@@ -460,6 +594,9 @@ class Service:
     def _toggle(self):
         with self.lock:
             if not self.enabled:
+                if self.manual_mode:
+                    self.message="Choose another finished song or pick a radio station."
+                    return
                 if self.station:
                     self._choose(self.station)
                 return
@@ -473,6 +610,7 @@ class Service:
     def _stop(self):
         with self.lock:
             self.skip_requested = False
+            self.pending_song = None
             self.enabled = False
             self.paused = False
             try:
@@ -507,6 +645,7 @@ class Service:
         if time.monotonic() >= self.stats_at:
             self.stats_at = time.monotonic()+10
             self.local_tokens, self.radio_tokens = local_token_totals(self.root)
+            self.song_library=self._song_library()
             with closing(database(self.root)) as conn:
                 self.tracks_made = conn.execute("SELECT COUNT(*) FROM tracks WHERE completed=1").fetchone()[0]
         with closing(database(self.root)) as conn:
@@ -533,6 +672,12 @@ class Service:
                      "master_volume": getattr(self.player, "volume", 65),
                      "crossfade": getattr(self.player, "crossfade_position", 0),
                      "decks": self._deck_views(), "stations": self.station_catalog,
+                     "songs":self.song_library,"dj_setup":dict(self.dj_setup),
+                     "dj_settings":getattr(self.player,"dj_settings",[]),
+                     "dj_controls_ready":[self.dj_enabled and all(hasattr(d,"set_tone") for d in
+                        (getattr(self.player,"active",None),getattr(self.player,"outgoing",None),getattr(self.player,"prepared",None))
+                        if d is not None and getattr(d,"channel",None)==channel) for channel in (0,1)],
+                     "dj_loops":list(getattr(self.player,"loops",{})),
                      "station_id": (self.station or {}).get("id")}
 
     def _deck_views(self):
@@ -554,7 +699,7 @@ class Service:
                         self.waveforms.pop(next(iter(self.waveforms)))
                 peaks = self.waveforms[identity]
                 elapsed, duration = deck.clock()
-                views[channel].update(title=(self.station or {}).get("name", "Local track"),
+                views[channel].update(title=(self.current or {}).get("title") if path==(self.current or {}).get("path") and (self.current or {}).get("title") else (self.station or {}).get("name", "Local track"),
                     status="Cued" if deck is getattr(self.player, "prepared", None) else "Paused" if self.paused else "Playing",
                     elapsed=elapsed, duration=duration, peaks=peaks,
                     level=getattr(self.player, "deck_levels", [100, 100])[channel], gain=getattr(deck, "volume", 0))
@@ -580,7 +725,12 @@ class Service:
                 self._toggle()
             elif action == "stop":
                 self._stop()
+            elif action == "dj_control":
+                self.player.dj_control(*value)
+            elif action == "play_song":
+                self._load_song(value)
             elif action == "skip":
+                getattr(self.player,"loops",{}).clear()
                 if hasattr(self.player, "prepare"):
                     self.auto_blend = True
                     self.player.set_auto_mix(True)
@@ -628,10 +778,13 @@ class Service:
         """Stage the next recording before EOF, then overlap both live decks."""
         if not self.current or not hasattr(self.player, "prepare") or getattr(self.player, "mixing", False):
             return
+        channel=getattr(getattr(self.player,"active",None),"channel",None)
+        if channel in getattr(self.player,"loops",{}) and not self.skip_requested:return
         elapsed, duration = self.player.clock()
         if duration <= 0:
             return
-        remaining = max(0, duration-elapsed)
+        rate=getattr(getattr(self.player,"active",None),"speed",1.)
+        remaining = max(0, (duration-elapsed)/max(.1,rate))
         if not ready:
             self.skip_requested = False
         use_fresh = (self.repeating or self.skip_requested) and bool(ready)
@@ -667,7 +820,22 @@ class Service:
         import music_backend
 
         with self.lock:
+            if (self.dj_setup["status"]=="error" and self.dj_thread is not None
+                    and self.dj_attempts<3 and time.monotonic()>=self.dj_retry_at
+                    and not (self.root/"LongTasks/offline-network.json").is_file()):
+                self.enable_dj()
+            if self.dj_setup["status"]=="ready" and not self.dj_enabled and hasattr(self.player,"enable_dj"):
+                try:self.player.enable_dj(self.root);self.dj_enabled=True
+                except (OSError,RuntimeError,AttributeError) as exc:
+                    self.dj_retry_at=time.monotonic()+30
+                    self.dj_setup={"status":"error","percent":0,"message":"DJ sound needs repair · "+str(exc)}
             self._commands()
+            if self.pending_song and not self.paused and not getattr(self.player,"mixing",False):
+                song=self.pending_song;self.pending_song=None;self._mix_saved_track(song)
+            if self.manual_mode:
+                if self.enabled and not self.paused and not self.player.busy():
+                    self.enabled=False;self.current=None;self.player.stop();self.message="Finished · choose another song or radio station"
+                return  # Playing a saved song never starts another music render.
             rows = self._rows()
             # Reattach durable jobs after a restart without starting duplicates.
             for row in rows:
@@ -1039,6 +1207,7 @@ class Controls:
         self.deck_levels, self.gain_bars = [], []
         self._load_jogwheel()
         self.deck_images = []
+        self.dj_widgets=[[],[]];self.tone_values=[];self.speed_values=[];self.loop_buttons=[]
         self.frame.bind("<Configure>", self._resize_assets, add="+")
         for channel, color in enumerate((self.coral, self.cyan)):
             deck = tk.Frame(decks, bg=self.panel, highlightbackground=color, highlightthickness=1, padx=12, pady=9)
@@ -1059,8 +1228,22 @@ class Controls:
             controls.pack(side="left", fill="both", expand=True)
             state = tk.StringVar(value="Load a station to begin")
             tk.Label(controls, textvariable=state, bg=self.panel, fg=color, font=("Segoe UI", 10, "bold"), wraplength=170, justify="left").pack(anchor="w", pady=(2, 8))
-            tk.Label(controls, text="Original audio · EQ unavailable", bg=self.panel, fg=self.muted,
-                font=("Segoe UI", 8), justify="left", wraplength=150).pack(anchor="w", pady=(0, 8))
+            tone_row=tk.Frame(controls,bg=self.panel);tone_row.pack(fill="x",pady=(0,4))
+            tone=[]
+            for label in ("BASS","MID","HIGH","SPEED"):
+                cell=tk.Frame(tone_row,bg=self.panel);cell.pack(side="left",fill="x",expand=True)
+                tk.Label(cell,text=label,bg=self.panel,fg=self.muted,font=("Segoe UI",7)).pack()
+                speed=label=="SPEED";value=tk.DoubleVar(value=100 if speed else 0)
+                if speed:self.speed_values.append(value)
+                else:tone.append(value)
+                slider=tk.Scale(cell,from_=80 if speed else -12,to=120 if speed else 12,resolution=1,
+                    variable=value,orient="horizontal",showvalue=True,length=36,width=5,sliderlength=10,
+                    bg=self.panel,fg=self.ink,troughcolor="#28343e",highlightthickness=0,relief="flat",font=("Segoe UI",7))
+                slider.pack(fill="x")
+                for event in ("<ButtonRelease-1>","<KeyRelease>"):
+                    slider.bind(event,lambda _event,c=channel,rate=speed:self.apply_dj_slider(c,rate))
+                self.dj_widgets[channel].append(slider)
+            self.tone_values.append(tone)
             tk.Label(controls, text="DECK LEVEL", bg=self.panel, fg=self.muted, font=("Segoe UI", 8, "bold")).pack(anchor="w")
             level = tk.DoubleVar(value=100)
             tk.Scale(controls, from_=0, to=100, orient="horizontal", variable=level, showvalue=False,
@@ -1072,8 +1255,14 @@ class Controls:
             bar = tk.Frame(meter, bg=color)
             bar.place(relwidth=0, relheight=1)
             tk.Label(controls, text="OUTPUT GAIN", bg=self.panel, fg=self.muted, font=("Segoe UI", 7)).pack(anchor="w")
-            button = self._button(controls, "Play radio", lambda channel=channel: self.deck_action(channel), accent=color)
-            button.pack(side="bottom", anchor="e", pady=(8, 0))
+            deck_actions=tk.Frame(controls,bg=self.panel);deck_actions.pack(side="bottom",fill="x",pady=(5,0))
+            for control_label,action in (("Cue","cue"),("Loop","loop")):
+                control=self._button(deck_actions,control_label,lambda c=channel,a=action:self.service.dj_control(c,a))
+                control.configure(padx=5,pady=4,font=("Segoe UI",8));control.pack(side="left",padx=(0,3))
+                self.dj_widgets[channel].append(control)
+                if action=="loop":self.loop_buttons.append(control)
+            button = self._button(deck_actions, "Play radio", lambda channel=channel: self.deck_action(channel), accent=color)
+            button.configure(padx=6,pady=4,font=("Segoe UI",8));button.pack(side="right")
             self.deck_titles.append(title); self.deck_times.append(timing); self.deck_states.append(state)
             self.deck_buttons.append(button); self.deck_levels.append(level); self.gain_bars.append(bar)
         master = tk.Frame(decks, bg="#111a22", padx=12, pady=12)
@@ -1122,10 +1311,37 @@ class Controls:
             self.metrics.append(value)
         self.kind = tk.StringVar(value="LOCAL AUDIO · NO ACCOUNTS")
         tk.Label(footer, textvariable=self.kind, fg=self.cyan, bg=self.bg, font=("Segoe UI", 8)).pack(side="right")
+        library=tk.Frame(self.frame,bg=self.bg);library.pack(fill="x",pady=(8,0))
+        tk.Label(library,text="YOUR SONGS",bg=self.bg,fg=self.muted,font=("Segoe UI",8,"bold")).pack(side="left",padx=(0,8))
+        self.song_choices={}
+        self.song_picker=ttk.Combobox(library,state="readonly",style="Radio.TCombobox",width=28)
+        self.song_picker.pack(side="left",fill="x",expand=True)
+        self._button(library,"Play / mix",self.play_finished_song).pack(side="left",padx=(8,0))
+        self._button(library,"Reset mixer",self.reset_mixer).pack(side="left",padx=(8,0))
+        self.dj_retry=self._button(library,"Fix DJ sound",lambda:getattr(self.service,"enable_dj",lambda:None)())
+        self.dj_text=tk.StringVar(value="Preparing DJ sound in the background")
+        tk.Label(self.frame,textvariable=self.dj_text,bg=self.bg,fg=self.muted,anchor="w",font=("Segoe UI",8)).pack(fill="x",pady=(4,0))
         self.bar = ttk.Progressbar(self.frame, maximum=100, style="Radio.Horizontal.TProgressbar")
         self.refresh_stations()
         self.poll()
+        getattr(service,"enable_dj",lambda:None)()
         service.start()
+
+    def apply_dj_slider(self,channel,rate):
+        if rate:self.service.dj_control(channel,"speed",self.speed_values[channel].get()/100)
+        else:self.service.dj_control(channel,"tone",[value.get() for value in self.tone_values[channel]])
+
+    def reset_mixer(self):
+        for channel in (0,1):
+            for value in self.tone_values[channel]:value.set(0)
+            self.speed_values[channel].set(100)
+            self.service.dj_control(channel,"tone",(0,0,0))
+            self.service.dj_control(channel,"speed",1.)
+
+    def play_finished_song(self):
+        job_id=self.song_choices.get(self.song_picker.get())
+        if job_id:self.service.play_song(job_id)
+        else:self.dj_text.set("Finished songs appear here automatically. Make a song above first.")
 
     def _button(self, parent, text, command, accent=None):
         import tkinter as tk
@@ -1291,6 +1507,18 @@ class Controls:
             return
         state = self.service.snapshot()
         self.last_state = state
+        setup=state.get("dj_setup",{})
+        self.dj_text.set(setup.get("message","Preparing DJ sound")+(" · "+str(setup.get("percent",0))+"%" if setup.get("status")=="working" else ""))
+        if setup.get("status")=="error":
+            if not self.dj_retry.winfo_manager():self.dj_retry.pack(side="left",padx=(8,0))
+        else:self.dj_retry.pack_forget()
+        choices={str(i+1)+". "+song["title"]:song["id"] for i,song in enumerate(state.get("songs",[]))}
+        self.song_choices=choices;self.song_picker.configure(values=tuple(choices))
+        if self.song_picker.get() not in choices:self.song_picker.set(next(iter(choices),""))
+        for channel,widgets in enumerate(self.dj_widgets):
+            enabled=state.get("dj_controls_ready",[False,False])[channel]
+            for widget in widgets:widget.configure(state="normal" if enabled else "disabled")
+            self.loop_buttons[channel].configure(text="Loop on" if channel in state.get("dj_loops",[]) else "Loop")
         self.text.set(state.get("message", "Ready") + f" · {state.get('ready',0)} ready" + (" · next deck cued" if state.get("next_loaded") else ""))
         if state.get("rendering"):
             self.bar.pack(fill="x", pady=(8,0))

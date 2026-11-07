@@ -1282,3 +1282,115 @@ def test_service_pause_resume_retries_each_failed_deck_without_losing_intent(tmp
     assert all(item.paused is expected for item in (player.active, player.outgoing) if item is not None)
     service._publish()
     assert service.snapshot()["paused"] is expected
+
+
+def _saved_song(root, name="A finished song", identity="made-1"):
+    import json
+    audio=root/(identity+".wav");audio.write_bytes(b"existing generated audio")
+    jobs=root/"LongTasks/music-jobs";jobs.mkdir(parents=True,exist_ok=True)
+    (jobs/(identity+".json")).write_text(json.dumps({"status":"complete","task_id":"user-song",
+        "output_path":str(audio),"prompt":name}),encoding="utf-8")
+    return audio
+
+
+def test_maker_result_plays_in_shared_decks_without_a_new_render(tmp_path):
+    audio=_saved_song(tmp_path);before=audio.read_bytes();moment=[0]
+    player=radio.Player(lambda:Deck(lambda:moment[0]),lambda:moment[0])
+    service=radio.Service(tmp_path,player)
+    service.suspended=False
+    with patch("music_backend.start_music_job") as create:
+        service.tick()
+        assert service.snapshot()["songs"]==[{"id":"made-1","path":str(audio),"title":"A finished song"}]
+        service.play_song("made-1");service.tick()
+        assert service.manual_mode and service.enabled and player.active.path==str(audio)
+        assert service.snapshot()["decks"][0]["title"]=="A finished song"
+        moment[0]=181;service.tick()
+        assert not service.enabled and not player.active.opened
+        service.toggle();service.tick()
+        create.assert_not_called()
+    assert audio.read_bytes()==before
+
+
+def test_maker_library_ignores_radio_failed_and_missing_outputs(tmp_path):
+    import json
+    audio=_saved_song(tmp_path)
+    jobs=tmp_path/"LongTasks/music-jobs"
+    for identity,task,status,path in (("radio","radio-club","complete",audio),
+        ("failed","user-song","error",audio),("missing","user-song","complete",tmp_path/"gone.wav")):
+        (jobs/(identity+".json")).write_text(json.dumps({"status":status,"task_id":task,"output_path":str(path)}))
+    (jobs/"bad.json").write_text("{invalid")
+    assert [song["id"] for song in radio.completed_songs(tmp_path)]==["made-1"]
+
+
+def test_maker_track_blends_into_active_radio_and_radio_resumes(tmp_path):
+    import hashlib
+    from contextlib import closing
+    audio=_saved_song(tmp_path);moment=[0]
+    player=radio.Player(lambda:Deck(lambda:moment[0]),lambda:moment[0])
+    service=radio.Service(tmp_path,player);service.suspended=False
+    station=radio.stations(tmp_path)[0];signature=hashlib.sha256((station["prompt"]+str(station["instrumental"])).encode()).hexdigest()
+    cached=[]
+    with closing(radio.database(tmp_path)) as conn,conn:
+        for number in range(3):
+            path=tmp_path/("radio-"+str(number)+".wav");path.write_bytes(b"cached radio fixture");cached.append(path)
+            conn.execute("INSERT INTO tracks(id,station,job,path,status,created,config,completed) VALUES(?,?,?,?,?,?,?,1)",
+                (str(number),station["id"],"unused",str(path),"ready",number,signature))
+    service.choose(station["id"])
+    with patch("music_backend.start_music_job") as create,patch.object(radio,"foreground_music_busy",return_value=True):
+        service.tick();assert player.active.path==str(cached[0])
+        service.play_song("made-1");service.tick()
+        assert player.active.path==str(audio) and player.outgoing.path==str(cached[0])
+        assert service.station["id"]==station["id"] and not service.manual_mode
+        moment[0]=9;player.advance_mix();assert player.outgoing is None
+        moment[0]=173;service.tick()
+        assert player.active.path==str(cached[1]) and player.outgoing.path==str(audio)
+        create.assert_not_called()
+    assert audio.read_bytes()==b"existing generated audio"
+
+
+def test_live_loop_blocks_auto_transition_until_released(tmp_path):
+    moment=[0]
+    class DJFixture(Deck):
+        def seek(self,position):self.offset=position;self.started=self.now()
+        def set_tone(self,*values):self.tone=values
+        def set_speed(self,value):self.speed=value
+    player=radio.Player(lambda:DJFixture(lambda:moment[0]),lambda:moment[0]);first=tmp_path/"first.wav"
+    player.play(first);moment[0]=173
+    player.dj_control(0,"tone",(8,-3,-6));player.dj_control(0,"speed",1.08);player.dj_control(0,"loop")
+    assert player.active.tone==(8,-3,-6) and player.active.speed==1.08
+    service=radio.Service(tmp_path,player);service.current={"id":"first","path":str(first)}
+    ready=[{"id":"next","path":str(tmp_path/"next.wav")}]
+    service._prepare_transition(ready)
+    assert not player.mixing and len(ready)==1
+    moment[0]=179.95;player.advance_loops();assert player.active.clock()[0]==173
+    player.dj_control(0,"loop");assert not player.loops
+    player.dj_control(0,"cue");assert player.active.clock()[0]==0
+
+
+def test_dj_initialization_failure_leaves_basic_song_playback_available(tmp_path):
+    _saved_song(tmp_path);player=radio.Player(lambda:Deck(lambda:0),lambda:0)
+    service=radio.Service(tmp_path,player);service.dj_setup["status"]="ready"
+    with patch.object(player,"enable_dj",side_effect=OSError("fixture missing audio DLL")):
+        service.play_song("made-1");service.tick()
+    assert service.dj_setup["status"]=="error" and not service.dj_enabled
+    assert player.active.opened and service.manual_mode
+
+
+def test_music_page_song_picker_and_dj_controls_share_service(tmp_path):
+    import tkinter as tk
+    try:window,controls,service,_=studio_preview_fixture(tmp_path)
+    except tk.TclError as error:pytest.skip("Tk display unavailable: "+str(error))
+    try:
+        base=service.snapshot()
+        service.snapshot=lambda:{**base,"songs":[{"id":"finished","title":"My new song"}],
+            "dj_setup":{"status":"ready","message":"DJ mixer ready"},"dj_controls_ready":[True,True]}
+        service.play_song=lambda job:service.calls.append(("play_song",job))
+        service.dj_control=lambda *args:service.calls.append(("dj_control",*args))
+        controls.poll();controls.play_finished_song()
+        controls.tone_values[1][0].set(8);controls.apply_dj_slider(1,False)
+        controls.speed_values[0].set(110);controls.apply_dj_slider(0,True)
+        assert ("play_song","finished") in service.calls
+        assert ("dj_control",1,"tone",[8.,0.,0.]) in service.calls
+        assert ("dj_control",0,"speed",1.1) in service.calls
+        assert all(str(w.cget("state"))=="normal" for w in controls.dj_widgets[0])
+    finally:window.destroy()

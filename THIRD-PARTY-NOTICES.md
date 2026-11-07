@@ -67,3 +67,13 @@ Claude Code and Grok Build are separate vendor programs, downloaded only when th
 
 - Claude Code: https://code.claude.com/docs/en/legal-and-compliance and https://support.claude.com/en/articles/15036540-use-the-claude-agent-sdk-with-your-claude-plan.
 - Grok Build: https://github.com/xai-org/grok-build (Apache-2.0 source) and https://docs.x.ai/build/overview.
+
+
+## Integrated DJ audio
+
+The Music page uses the public LibVLC 3 API. Cale downloads the unmodified
+VideoLAN VLC 3.0.24 Windows x64 portable archive on first use and verifies the
+published SHA-256 before extraction. The portable runtime is separate from the
+Cale installer and includes its upstream notices and licenses. LibVLC's public
+API headers are LGPL-2.1-or-later. See the [upstream source and downloads](https://downloads.videolan.org/pub/videolan/vlc/3.0.24/)
+and [LibVLC API](https://raw.githubusercontent.com/videolan/vlc/3.0.x/include/vlc/libvlc.h).

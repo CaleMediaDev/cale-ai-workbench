@@ -543,3 +543,27 @@ def test_mix_music_refuses_to_replace_source(tmp_path):
     tone(second)
     with pytest.raises(ValueError, match="new output"):
         music_edit.mix_music(str(first), str(second), str(first))
+
+
+def test_dj_archive_rejects_escaping_or_case_duplicate_paths_before_extracting(tmp_path):
+    import zipfile
+    destination=tmp_path/("vlc-"+music_edit.DJ_VERSION)
+    for names in ((destination.name+"/../escape.dll",),(destination.name+"/A.dll",destination.name+"/a.dll")):
+        archive=tmp_path/"fixture.zip"
+        with zipfile.ZipFile(archive,"w") as bundle:
+            for name in names:bundle.writestr(name,b"fake")
+        with pytest.raises(ValueError):music_edit._extract_dj_archive(archive,destination)
+        assert not destination.exists() and not (tmp_path/"escape.dll").exists()
+
+
+def test_dj_repair_detection_validates_plugin_bytes_not_just_version_marker(tmp_path):
+    import hashlib
+    folder=music_edit.dj_directory(tmp_path);(folder/"plugins").mkdir(parents=True)
+    files={}
+    for name in ("libvlc.dll","libvlccore.dll","plugins/audio.dll"):
+        data=name.encode();(folder/name).write_bytes(data);files[name]=hashlib.sha256(data).hexdigest()
+    (folder/".cale-runtime.json").write_text(json.dumps({"version":music_edit.DJ_VERSION,
+        "archive_sha256":music_edit.DJ_ARCHIVE_SHA256,"files":files}),encoding="utf-8")
+    assert music_edit.dj_runtime_ready(tmp_path,full=True)
+    (folder/"plugins/audio.dll").write_bytes(b"different")
+    assert not music_edit.dj_runtime_ready(tmp_path,full=True)
