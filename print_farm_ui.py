@@ -181,7 +181,7 @@ class PrinterCard(tk.Frame):
         bed_label, bed_color = {
             "clear": ("✓  Build plate clear", "#78e6ab"),
             "blocked": ("!  Build plate occupied", "#ffc879"),
-            "out_of_view": ("◇  Bed out of view", "#ffc879"),
+            "out_of_view": ("◇  Full bed not visible", "#ffc879"),
             "unknown": ("◇  Build plate unverified", self.MUTED),
             "expired": ("◇  Bed check expired", self.MUTED),
             "unload_required": ("!  Unload finished print", "#ffc879"),
@@ -196,6 +196,8 @@ class PrinterCard(tk.Frame):
             note = (printer.get("bed") or {}).get("reason")
             if isinstance(note, str) and note != "Checked before the next print":
                 bed_note = note
+            if bed_state == "out_of_view":
+                bed_note = "Waiting: the camera cannot verify the whole plate. Flat glue haze alone does not block printing." + ("\n" + bed_note if bed_note else "")
             if bed_state == "unload_required":
                 bed_note = "Cale automatically watches for removal. Keep the whole plate visible."
         name = printer.get("hostname") or printer["id"]

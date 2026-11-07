@@ -93,8 +93,9 @@ class LiveObservationTests(unittest.TestCase):
                 "state": "out_of_view", "captured_at": time.time(), "reason": "Lower plate is cut off",
             })
             page.render(data)
-            self.assertIn("Bed out of view", card.bed.cget("text"))
-            self.assertEqual(card.bed_note.cget("text"), "Lower plate is cut off")
+            self.assertIn("Full bed not visible", card.bed.cget("text"))
+            self.assertIn("Lower plate is cut off", card.bed_note.cget("text"))
+            self.assertIn("Flat glue haze alone does not block printing", card.bed_note.cget("text"))
             card.check_bed.invoke()
             service.request_bed_check.assert_called_once_with("0")
             page.render(data, bed_checks={"0": "queued"})
@@ -475,7 +476,8 @@ class LiveObservationTests(unittest.TestCase):
             tile.unload_required = True
             analysis.update(state="clear", reason="Bed looks empty")
             tile.refresh(force=True)
-            self.assertIn("Bed looks clear", tile.detected.cget("text"))
+            self.assertIn("Visible area: no objects detected", tile.detected.cget("text"))
+            self.assertEqual(str(tile.detected.cget("foreground")), "#aebccc")
             self.assertEqual(tile.reason.cget("text"), "Bed looks empty")
             tile.unload_required = False
             tile.after_cancel(tile.timer)

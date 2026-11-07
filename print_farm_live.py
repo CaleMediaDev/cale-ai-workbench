@@ -580,13 +580,14 @@ class CameraTile(ttk.Frame):
             text, color = "AI: waiting for a live camera", "#aebccc"
         elif overlay:
             labels = {
-                "clear": "Bed looks clear",
+                "clear": "Visible area: no objects detected",
                 "occupied": "Object on bed",
                 "obstructed": "View obstructed",
                 "uncertain": "Uncertain",
             }
             text = f"AI: {labels.get(state, state)} · {result.get('confidence', 0):.0%} · {int(analysis_age)}s ago"
-            color = "#49d5b6" if state == "clear" else "#ffc65c"
+            # A camera observation is not the independent two-frame bed check.
+            color = "#aebccc" if state == "clear" else "#ffc65c"
         elif result.get("frame"):
             text, color = "AI: waiting for an updated scan", "#aebccc"
         else:
