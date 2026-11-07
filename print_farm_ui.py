@@ -173,8 +173,10 @@ class PrinterCard(tk.Frame):
             )
             temperatures.append("—" if temp is None else f"{temp:.0f}°C")
         bed_state = None if telemetry_stale else self.bed_observation_state(printer, time.time())
+        if state == "complete" and bed_state == "clear":
+            state, progress = "ready", None
         self.camera.unload_required = state == "complete"
-        if state == "complete" and bed_state in {None, "clear", "unchecked", "unknown", "expired"}:
+        if state == "complete" and bed_state in {None, "unchecked", "expired"}:
             bed_state = "unload_required"
         bed_label, bed_color = {
             "clear": ("✓  Build plate clear", "#78e6ab"),
@@ -195,7 +197,7 @@ class PrinterCard(tk.Frame):
             if isinstance(note, str) and note != "Checked before the next print":
                 bed_note = note
             if bed_state == "unload_required":
-                bed_note = "Remove the part. Cale rechecks the plate once the printer is idle."
+                bed_note = "Cale automatically watches for removal. Keep the whole plate visible."
         name = printer.get("hostname") or printer["id"]
         color = str(printer.get("color") or "").strip()
         readings = (eta, *temperatures)

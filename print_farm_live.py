@@ -352,12 +352,6 @@ class LiveCameras:
                 model=self.settings().get("vision_model", "cale-vision:latest"),
             )
         )
-        if finished and answer["state"] == "clear":
-            answer.update(
-                state="uncertain",
-                confidence=0,
-                reason="Unload the finished print before checking for clearance",
-            )
         answer.update(
             signature=scene_signature(frame["bytes"]),
             frame=frame["bytes"],
@@ -584,8 +578,6 @@ class CameraTile(ttk.Frame):
         state = result.get("state", "waiting")
         if not live_ok:
             text, color = "AI: waiting for a live camera", "#aebccc"
-        elif self.unload_required and state != "occupied":
-            text, color = "Printer finished · check the bed for the print", "#ffc65c"
         elif overlay:
             labels = {
                 "clear": "Bed looks clear",
@@ -605,7 +597,5 @@ class CameraTile(ttk.Frame):
         if analyzing:
             text += " · analyzing…"
         self.detected.configure(text=text, foreground=color)
-        self.reason.configure(text=(result.get("reason", "") if overlay and not (
-            self.unload_required and state == "clear"
-        ) else ""))
+        self.reason.configure(text=result.get("reason", "") if overlay else "")
         self.timer = self.after(250, self.refresh)

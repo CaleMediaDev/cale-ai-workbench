@@ -65,8 +65,8 @@ def clear():
 
 
 class Decisions(unittest.TestCase):
-    def test_finished_status_blocks_automatic_transport_even_with_a_bed_ticket(self):
-        from print_farm_transport import Hold, K1, PRINTERS
+    def test_finished_status_allows_fresh_bed_ticket_through_preflight(self):
+        from print_farm_transport import K1, PRINTERS
 
         with patch.dict(PRINTERS, {"p": ("192.0.2.1", "fixture", "black")}, clear=True):
             printer = K1("p")
@@ -82,14 +82,13 @@ class Decisions(unittest.TestCase):
               patch.object(printer, "open", return_value=(socket, status)),
               patch.object(printer, "query", side_effect=query),
               patch.object(printer, "preflight", return_value={"path": "/fixture.gcode"})):
-            with self.assertRaisesRegex(Hold, "Unload the finished print"):
-                printer._start_once(job_id, {"file_fingerprint": "fixture"}, Path(temporary),
-                                    time.time() + 20, "ebay_order", "a" * 32)
-        socket.send.assert_not_called()
+            printer._start_once(job_id, {"file_fingerprint": "fixture"}, Path(temporary),
+                                time.time() + 20, "ebay_order", "a" * 32)
+        socket.send.assert_called_once()
         socket.close.assert_called_once()
 
     def test_printer_read_rejects_late_reply_and_restores_socket_timeout(self):
-        from print_farm_transport import Hold, K1, PRINTERS
+        from print_farm_transport import K1, PRINTERS, Hold
 
         with patch.dict(PRINTERS, {"p": ("192.0.2.1", "fixture", "black")}, clear=True):
             printer = K1("p")
@@ -111,7 +110,7 @@ class Decisions(unittest.TestCase):
         socket.send.assert_called_once()
 
     def test_bed_authorization_expiring_during_ledger_write_does_not_send(self):
-        from print_farm_transport import Hold, K1, PRINTERS, persist
+        from print_farm_transport import K1, PRINTERS, Hold, persist
 
         with patch.dict(PRINTERS, {"p": ("192.0.2.1", "fixture", "black")}, clear=True):
             printer = K1("p")
@@ -435,7 +434,7 @@ class Decisions(unittest.TestCase):
         result = watcher.check({"id": "p", "camera_url": "http://camera"}, "vision")
         self.assertEqual(result["state"], "out_of_view")
 
-    def test_finished_bed_check_reports_visible_part_and_never_confirms_empty(self):
+    def test_finished_bed_check_recognizes_removal_without_firmware_reset(self):
         watcher = farm.BedWatcher(
             capture=Mock(side_effect=[b"a", b"b", b"c", b"d"]),
             infer=Mock(side_effect=[{**clear(), "bed_fully_visible": False, "object_present": True}, clear()]),
@@ -444,8 +443,7 @@ class Decisions(unittest.TestCase):
         printer = {"id": "p", "camera_url": "http://camera", "unload_required": True}
         self.assertEqual(watcher.check(printer, "vision")["state"], "blocked")
         result = watcher.check(printer, "vision")
-        self.assertEqual(result["state"], "unknown")
-        self.assertIn("Unload the finished print", result["reason"])
+        self.assertEqual(result["state"], "clear")
 
     def test_removal_changes_occupied_to_clear_with_new_ticket(self):
         frames = iter([b"a", b"b", b"c", b"d"])
@@ -595,16 +593,46 @@ class Production(unittest.TestCase):
         self.dispatch()
         self.machine.start_order.assert_called_once()
 
-    def test_finished_ebay_printer_waits_for_unload_before_dispatch(self):
+    def test_finished_ebay_printer_waits_for_visible_removal_before_dispatch(self):
         self.printer["unload_required"] = True
+        clear_check = self.service.beds.check.side_effect
+        self.service.beds.check.side_effect = lambda *args, **kwargs: {"state": "blocked"}
         result = self.dispatch()
         self.assertEqual(result["status"], "queued")
-        self.assertIn("Unload the finished print", result["reason"])
-        self.service.beds.check.assert_not_called()
+        self.service.beds.check.assert_called_once()
+        self.machine.start_order.assert_not_called()
+        self.service.beds.check.side_effect = clear_check
+        self.assertEqual(self.dispatch()["status"], "printing")
+
+    def test_monitor_checks_finished_bed_with_no_pending_order_and_never_starts(self):
+        self.printer.update(online=True, camera_url="http://camera", unload_required=True)
+        self.service.configure({"printers": [dict(self.printer)]})
+        self.service._printers_checked_at = time.monotonic()
+        self.store.db.execute("DELETE FROM orders")
+        self.service.monitor_beds([self.printer], self.store)
+        self.assertEqual(self.service.bed_check_states(), {"p": "queued"})
+        self.service.inspect_requested_bed([self.printer], self.store)
+        self.service._bed_check_run.future.result(timeout=2)
+        self.service.inspect_requested_bed([self.printer], self.store)
+        self.assertEqual(self.printer["bed"]["state"], "clear")
+        self.assertNotIn("ticket_id", self.printer["bed"])
+        self.service.monitor_beds([self.printer], self.store)
+        self.assertEqual(self.service.bed_check_states(), {})
+        with patch("print_farm.time.monotonic", return_value=time.monotonic()+16):
+            self.service._printers_checked_at = time.monotonic()
+            self.service.monitor_beds([self.printer], self.store)
+        self.assertEqual(self.service.bed_check_states(), {"p": "queued"})
         self.machine.start_order.assert_not_called()
 
-        self.printer["unload_required"] = False
-        self.assertEqual(self.dispatch()["status"], "printing")
+    def test_monitor_does_not_scan_busy_offline_or_unsettled_printer(self):
+        self.printer.update(online=True, camera_url="http://camera")
+        self.service._printers_checked_at = time.monotonic()
+        for changes in ({"online": False}, {"idle": False}):
+            self.service.monitor_beds([{**self.printer, **changes}], self.store)
+            self.assertEqual(self.service.bed_check_states(), {})
+        self.store.reserve(farm.job_id(self.item, 0), self.key, 0, self.recipe)
+        self.service.monitor_beds([self.printer], self.store)
+        self.assertEqual(self.service.bed_check_states(), {})
 
     def test_manual_bed_check_is_read_only_and_coalesces_requests(self):
         self.printer.update(online=True, camera_url="http://camera")

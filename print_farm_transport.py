@@ -291,8 +291,9 @@ class K1:
             checked_at = time.time()
             files = self.query(ws, "reqGcodeFile", "retGcodeFileInfo2", status, deadline=read_deadline)
             history = self.query(ws, "reqHistory", "historyList", status, deadline=read_deadline)
-            if source == "ebay_order" and status.get("state") == 2:
-                raise Hold("Unload the finished print and return the printer to Idle")
+            # A completed firmware state does not prove a part is still present.
+            # start_order already requires a fresh bed ticket; preflight still
+            # rejects printing, paused, incomplete and faulted states.
             file = self.preflight(
                 recipe,
                 {

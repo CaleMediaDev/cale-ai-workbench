@@ -255,10 +255,7 @@ class BedWatcher:
             elif answer.get("bed_fully_visible") is False:
                 state = "out_of_view"
             elif valid_clear(answer):
-                if printer.get("unload_required"):
-                    reason = "Unload the finished print and return the printer to Idle"
-                else:
-                    state = "clear"
+                state = "clear"
             result = {
                 "state": state,
                 "reason": reason,
@@ -369,6 +366,7 @@ class Service:
         self._bed_checks = {}
         self._bed_checks_lock = threading.Lock()
         self._bed_check_run = None
+        self._automatic_bed_checks = {}
         self.wake = threading.Event()
         self.stop_event = threading.Event()
         self._cycle_lock = threading.Lock()
@@ -501,6 +499,36 @@ class Service:
         with self._bed_checks_lock:
             del self._bed_checks[printer_id]
 
+    def monitor_beds(self, printers, store):
+        """Observe removal even with no queued orders; never authorize a start."""
+        if self._update_draining.is_set() or self.stop_event.is_set():
+            return
+        if self._printers_checked_at is None or time.monotonic() - self._printers_checked_at > PRINTER_TELEMETRY_MAX_AGE:
+            return
+        with self._bed_checks_lock:
+            if self._bed_checks or self._bed_check_run is not None:
+                return
+        now = time.monotonic()
+        due = []
+        for printer in printers:
+            if not (printer.get("online") and printer.get("idle") and printer.get("camera_url")):
+                continue
+            if store.db.execute(
+                "SELECT 1 FROM jobs WHERE printer_id=? AND status IN "
+                "('dispatching','printing','submission_uncertain') LIMIT 1", (printer["id"],)
+            ).fetchone():
+                continue
+            key = (printer["id"], bed_camera_key(printer), bool(printer.get("unload_required")))
+            interval = 15 if printer.get("unload_required") else 30
+            last = self._automatic_bed_checks.get(key)
+            if last is None or now - last >= interval:
+                due.append((printer, key, last))
+        if due:
+            printer, key, _ = min(due, key=lambda item: (
+                item[2] if item[2] is not None else -1, not bool(item[0].get("unload_required"))))
+            self._automatic_bed_checks[key] = now
+            self.request_bed_check(printer["id"])
+
     def _capture_manual_bed(self, printer, model, future):
         try:
             future.set_result(self.beds.check(printer, model, remember=False))
@@ -600,6 +628,8 @@ class Service:
                                 if scope == store_scope:
                                     store.approve(key, token)
                             self.cycle(store)
+                            self.inspect_requested_bed(self.snapshot["printers"], store)
+                            self.monitor_beds(self.snapshot["printers"], store)
                             self.inspect_requested_bed(self.snapshot["printers"], store)
                         except Exception as exc:
                             self.snapshot = {
@@ -1275,7 +1305,6 @@ class Service:
             return update_hold
         routes = list(proposal["recipes"])
         source = routes[0]
-        awaiting_unload = False
         for p in printers:
             if (
                 p.get("idle")
@@ -1294,9 +1323,6 @@ class Service:
                 None,
             )
             if not printer:
-                continue
-            if printer.get("unload_required"):
-                awaiting_unload = True
                 continue
             active = store.db.execute(
                 "SELECT 1 FROM jobs WHERE printer_id=? AND status IN ('dispatching','printing','submission_uncertain')",
@@ -1461,7 +1487,5 @@ class Service:
                 return {"status": state, "reason": message}
         return {
             "status": "queued",
-            "reason": "Unload the finished print and return the printer to Idle"
-            if awaiting_unload
-            else "Waiting for an available compatible printer with a visibly clear bed",
+            "reason": "Waiting for an available compatible printer with a visibly clear bed",
         }

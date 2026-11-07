@@ -133,8 +133,9 @@ class LiveObservationTests(unittest.TestCase):
             self.assertEqual(card.status.cget("fg"), badge_color)
             data["printers"][0].update(detail="Finished · waiting for clear bed", idle=True)
             page.render(data)
-            self.assertIn("Unload finished print", card.bed.cget("text"))
-            self.assertTrue(card.camera.unload_required)
+            self.assertIn("Build plate clear", card.bed.cget("text"))
+            self.assertIn("STANDBY", card.status.cget("text"))
+            self.assertFalse(card.camera.unload_required)
             data["printers"][0].update(detail="Offline", online=False, progress=78)
             page.render(data)
             self.assertEqual(card.percent.cget("text"), "—")
@@ -367,7 +368,7 @@ class LiveObservationTests(unittest.TestCase):
         live.infer = Mock(return_value=clear)
         live.analyze("p", frame)
         self.assertIn("printer reports that the print finished", live.infer.call_args.args[0])
-        self.assertEqual(live.snapshot("p")[1]["state"], "uncertain")
+        self.assertEqual(live.snapshot("p")[1]["state"], "clear")
 
     def test_thawed_feed_discards_inflight_overlay(self):
         live = LiveCameras(lambda: {})
@@ -474,8 +475,8 @@ class LiveObservationTests(unittest.TestCase):
             tile.unload_required = True
             analysis.update(state="clear", reason="Bed looks empty")
             tile.refresh(force=True)
-            self.assertIn("Printer finished", tile.detected.cget("text"))
-            self.assertEqual(tile.reason.cget("text"), "")
+            self.assertIn("Bed looks clear", tile.detected.cget("text"))
+            self.assertEqual(tile.reason.cget("text"), "Bed looks empty")
             tile.unload_required = False
             tile.after_cancel(tile.timer)
             live.frames["p"]["signature"] = bytes([255]) * 576
