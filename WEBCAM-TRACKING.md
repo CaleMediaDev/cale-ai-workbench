@@ -30,7 +30,8 @@ not permanent identities.
 Face embeddings, object descriptors and user-supplied names stay in the excluded
 local `Media` folder. No video or frame images are saved or uploaded. **Saved
 names** provides a forget control with one local previous-version recovery file.
-Camera permission retains the app's existing one-hour limit.
+Camera permission retains the app's existing one-hour limit. Restoring a saved
+panel after launch requires an active raw camera session and does not renew it.
 
 The 3.8 MB OpenCV Zoo NanoDet model is downloaded only when this feature is
 enabled and verified with SHA-256

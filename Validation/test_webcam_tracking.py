@@ -18,6 +18,21 @@ from webcam_tracking import (
 from webcam_tracking_ui import TrackingView
 
 
+def test_restoring_panel_requires_existing_camera_permission(tmp_path, monkeypatch):
+    config = tmp_path / "Media/webcam-tracking.json"
+    config.parent.mkdir()
+    write_json(config, {"enabled": True})
+    camera_active = False
+    view = TrackingView(None, tmp_path, lambda: 1, lambda: camera_active)
+    opened = []
+    monkeypatch.setattr(view, "open", lambda: opened.append(True))
+    view.restore()
+    assert not opened
+    camera_active = True
+    view.restore()
+    assert opened == [True]
+
+
 def test_automatic_zeb_enrollment_requires_cale_and_same_new_face():
     learner = AutoEnrollment()
     request = {"name": "Zeb", "alongside": "Cale", "until": 100}

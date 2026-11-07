@@ -21,7 +21,7 @@ Cale AI Workbench integrates these projects. Their original authors retain owner
 | Node.js | https://nodejs.org/ |
 | ast-grep | https://github.com/ast-grep/ast-grep |
 | avoid-ai-design scanner (MIT; license bundled under `vendor/avoid-ai-design/LICENSE`) | https://github.com/funboy322/avoid-ai-design |
-| michaelvereb/ai-ui 1.2.0 Astro component kit (MIT; selected components pinned at commit `73afdce6c3bc6bd33e1f8656184fbd5980e2e50d`; license bundled under `vendor/ai-ui/LICENSE`; local-default text and offline styling modified) | https://github.com/michaelvereb/ai-ui |
+| michaelvereb/ai-ui 1.2.0 Astro component kit (MIT; selected components pinned at commit `73afdce6c3bc6bd33e1f8656184fbd5980e2e50d`; license included in `vendor/ai-ui.zip` and the source archive; local-default text and offline styling modified) | https://github.com/michaelvereb/ai-ui |
 | Addy Osmani's Agent Skills (MIT; seven selected skills pinned at commit `8bfcc1f9916f2eea55494d8c1fa7f4bde867dd9e`; license bundled under `vendor/agent-skills/LICENSE`) | https://github.com/addyosmani/agent-skills |
 | Diffusers and LCM Dreamshaper v7 | https://huggingface.co/SimianLuo/LCM_Dreamshaper_v7 |
 | Segmind SSD-1B (Apache-2.0 image model; downloaded on supported PCs) | https://huggingface.co/segmind/SSD-1B |
@@ -40,6 +40,7 @@ Cale AI Workbench integrates these projects. Their original authors retain owner
 | public-apis-live (MIT; its daily catalog is queried on demand for public API research leads, not bundled) | https://github.com/Manavarya09/public-apis-live |
 | scikit-learn 1.9.1 (BSD-3-Clause; local CSV classification and regression training, installed as a Python dependency) | https://github.com/scikit-learn/scikit-learn |
 | OpenCV Zoo YuNet face detector (MIT) and SFace recognizer (Apache-2.0); checksum-verified weights download to the user's PC when camera greeting is enabled | https://github.com/opencv/opencv_zoo |
+| OpenCV Zoo NanoDet (Apache-2.0); checksum-verified weights download when object detection is enabled; license at `vendor/opencv-nanodet/LICENSE` | https://github.com/opencv/opencv_zoo/tree/main/models/object_detection_nanodet |
 
 The Windows compatibility patches contain modifications to MIT-licensed Hermes code. The source archive also includes the upstream notice as `HERMES-LICENSE`.
 

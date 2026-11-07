@@ -6,6 +6,10 @@ Start with [ARCHITECTURE.md](ARCHITECTURE.md) for the process and file map. Most
 
 For development, install Ruff with `python -m pip install ruff`, then run `python -m ruff format .`, `python -m ruff check .`, and the relevant `Validation/test_*.py` files. The app does not require Ruff to run. Media checks use `Media/python/Scripts/python.exe` and require downloaded media weights. Parse PowerShell scripts before packaging, run `build-release.ps1`, and inspect the ZIP for the intended files and any secrets. Run the desktop app to check layout and real mouse-wheel behavior for UI changes. A passing unit test does not replace a fresh-install test when installation logic changes.
 
+The installed Astro kit occupies one manifest entry. After changing its vendored
+sources, run `python pack-release.py --refresh-astro-kit .` and commit the refreshed
+`vendor/ai-ui.zip` with those sources.
+
 New account integrations must keep per-user credentials private, verify callback state and token identity, and make use of any shared or paid allowance an explicit user choice. Model changes must state realistic RAM and disk requirements and preserve local fallback.
 
 Idle AI contributions use the maintainer-owned `donation-tasks.json` queue and the contributor's explicitly selected Local, Free cloud, or ChatGPT resources. Each entry names a small set of public source/test files. Keep the combined source below 40,000 characters and assign a concrete area for a demonstrable fix, not generic churn. Contributions arrive as `[Donation]` draft pull requests. Review the diff, confirm the claimed bug, run the regression test and appropriate existing checks, and mark the draft ready only when it merits acceptance. Generated proposals are never automatically merged or executed on contributors' machines. Do not widen their file scope to account credentials, workflows, installers, private files, or donation consent. The leaderboard awards credit only after an eligible contribution is merged into the canonical repository; tokens and unmerged proposals do not earn points.

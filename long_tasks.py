@@ -5886,7 +5886,7 @@ def gui():
     ttk.Button(camera_options, text="Webcam AI · People & objects", command=open_webcam_tracking,
                style="Mode.TButton").pack(anchor="w", pady=(5, 0))
     if tracking_view.was_enabled:
-        window.after(1500, open_webcam_tracking)
+        window.after(1500, tracking_view.restore)
     if greeting_until[0] > time.time():
         camera_scene.pack(anchor="w", pady=(8, 0),before=camera_options)
         start_camera_greeting()

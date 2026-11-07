@@ -199,6 +199,29 @@ def test_rejects_non_hex_color():
         luminance("red")
 
 
+def test_bundled_astro_kit_works_without_loose_runtime_assets(tmp_path, monkeypatch):
+    from zipfile import ZipFile
+
+    import design_tools
+
+    runtime_kit = tmp_path / "runtime/ai-ui"
+    runtime_kit.parent.mkdir()
+    bundle = runtime_kit.with_suffix(".zip")
+    bundle.write_bytes(design_tools.AI_UI_KIT.with_suffix(".zip").read_bytes())
+    monkeypatch.setattr(design_tools, "AI_UI_KIT", runtime_kit)
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / "package.json").write_text('{"dependencies":{"astro":"^5"}}', encoding="utf-8")
+    installed = design_tools.add_astro_ai_ui(str(project))
+    destination = project / "src/vendor/ai-ui"
+    assert not runtime_kit.exists()
+    with ZipFile(bundle) as archive:
+        for name in archive.namelist():
+            assert (destination / name.removeprefix("src/")).read_bytes() == archive.read(name)
+    assert installed["components"] == 16
+    assert design_tools.add_astro_ai_ui(str(project))["files_added"] == 0
+
+
 def test_installs_local_ai_components_into_astro_project(tmp_path):
     (tmp_path / "package.json").write_text(json.dumps({"dependencies": {"astro": "^5"}}), encoding="utf-8")
     first = add_astro_ai_ui(str(tmp_path))

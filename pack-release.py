@@ -4,13 +4,15 @@ import json
 import re
 import sys
 from pathlib import Path
-from zipfile import ZIP_DEFLATED, ZipFile
+from zipfile import ZIP_DEFLATED, ZipFile, ZipInfo
 
-root = Path(sys.argv[1]).resolve()
-destination = Path(sys.argv[2]).resolve()
-version = sys.argv[3] if len(sys.argv) > 3 else ""
-if not re.fullmatch(r"\d+\.\d+\.\d+", version):
-    raise ValueError("Pass the release version as the third argument (for example 0.5.419)")
+refresh_kit = len(sys.argv) == 3 and sys.argv[1] == "--refresh-astro-kit"
+root = Path(sys.argv[2] if refresh_kit else sys.argv[1]).resolve()
+if not refresh_kit:
+    destination = Path(sys.argv[2]).resolve()
+    version = sys.argv[3] if len(sys.argv) > 3 else ""
+    if not re.fullmatch(r"\d+\.\d+\.\d+", version):
+        raise ValueError("Pass the release version as the third argument (for example 0.5.419)")
 manifest = json.loads((root / "install-files.json").read_text(encoding="utf-8"))
 # The installed app runs this suite as its background self-check. A forgotten
 # test would make that check look green while exercising less than development.
@@ -22,6 +24,26 @@ missing_tests = sorted(
 if missing_tests:
     raise ValueError("Release manifest omits validation files: " + ", ".join(missing_tests))
 extras = [
+    "vendor/ai-ui/LICENSE",
+    "vendor/ai-ui/src/components/ai-ui/Attachments.astro",
+    "vendor/ai-ui/src/components/ai-ui/ChainOfThought.astro",
+    "vendor/ai-ui/src/components/ai-ui/Citation.astro",
+    "vendor/ai-ui/src/components/ai-ui/FeedbackBar.astro",
+    "vendor/ai-ui/src/components/ai-ui/Image.astro",
+    "vendor/ai-ui/src/components/ai-ui/Loader.astro",
+    "vendor/ai-ui/src/components/ai-ui/Message.astro",
+    "vendor/ai-ui/src/components/ai-ui/ModelSelector.astro",
+    "vendor/ai-ui/src/components/ai-ui/PromptInput.astro",
+    "vendor/ai-ui/src/components/ai-ui/Reasoning.astro",
+    "vendor/ai-ui/src/components/ai-ui/Steps.astro",
+    "vendor/ai-ui/src/components/ai-ui/TextShimmer.astro",
+    "vendor/ai-ui/src/components/ai-ui/ThinkingBar.astro",
+    "vendor/ai-ui/src/components/ai-ui/Thread.astro",
+    "vendor/ai-ui/src/components/ai-ui/Toaster.astro",
+    "vendor/ai-ui/src/components/ai-ui/Tool.astro",
+    "vendor/ai-ui/src/components/animations/AnimateText.astro",
+    "vendor/ai-ui/src/styles/theme.css",
+    "vendor/ai-ui/src/utils/unique-id.ts",
     "Choose Task Folder.cmd", "Connect Free Cloud AI.cmd", "Local AI Hermes.cmd", "LONG-TASKS-GUIDE.txt",
     "WEBCAM-TRACKING.md", "vendor/opencv-nanodet/LICENSE",
     # These documents and examples are useful in the source ZIP. Keep them
@@ -238,6 +260,26 @@ extras = [
     "pack-release.py",
     "install-files.json",
 ]
+kit_sources = {name.removeprefix("vendor/ai-ui/"): name for name in extras
+               if name.startswith("vendor/ai-ui/")}
+kit_files = {
+    # Retain the Windows kit's historical line endings, including on non-Windows
+    # build hosts, so repeated installs recognize previously copied components.
+    relative: (root / name).read_bytes().replace(b"\r\n", b"\n").replace(b"\n", b"\r\n")
+    for relative, name in kit_sources.items()
+}
+kit_bundle = root / "vendor/ai-ui.zip"
+if refresh_kit:
+    with ZipFile(kit_bundle, "w") as archive:
+        for name, content in sorted(kit_files.items()):
+            member = ZipInfo(name)
+            member.external_attr = 0o100644 << 16
+            archive.writestr(member, content, compress_type=ZIP_DEFLATED, compresslevel=9)
+    raise SystemExit(0)
+with ZipFile(kit_bundle) as archive:
+    if (sorted(archive.namelist()) != sorted(kit_files)
+            or any(archive.read(name) != content for name, content in kit_files.items())):
+        raise ValueError("Astro kit differs from source. Run pack-release.py --refresh-astro-kit <source>.")
 names = sorted(set(manifest + extras))
 with ZipFile(destination, "w", ZIP_DEFLATED, compresslevel=9) as archive:
     for name in names:

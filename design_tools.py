@@ -7,7 +7,10 @@ import os
 import re
 import shutil
 import subprocess
+import tempfile
+from contextlib import contextmanager
 from pathlib import Path
+from zipfile import ZipFile
 
 from mcp.server import MCPServer
 
@@ -86,8 +89,6 @@ def add_astro_ai_ui(project_path: str) -> dict:
     Files go under src/vendor/ai-ui so the project's own components are untouched.
     Repeated calls are safe; changed files at that destination are never overwritten.
     """
-    import tempfile
-
     project = Path(project_path).resolve()
     package_file = project / "package.json"
     if not package_file.is_file():
@@ -108,13 +109,43 @@ def add_astro_ai_ui(project_path: str) -> dict:
     }
     if "astro" not in dependencies:
         raise ValueError("This component kit requires an Astro project.")
-    source = AI_UI_KIT / "src"
-    if not source.is_dir() or not (AI_UI_KIT / "LICENSE").is_file():
+    with _astro_kit_source() as kit:
+        return _install_astro_kit(project, kit)
+
+
+@contextmanager
+def _astro_kit_source():
+    bundle = AI_UI_KIT.with_suffix(".zip")
+    if not bundle.is_file():
+        yield AI_UI_KIT
+        return
+    with ZipFile(bundle) as archive, tempfile.TemporaryDirectory(prefix="cale-astro-kit-") as directory:
+        members = archive.infolist()
+        names = [member.filename for member in members]
+        if (
+            not 2 <= len(members) <= 64
+            or len({name.casefold() for name in names}) != len(names)
+            or "LICENSE" not in names
+            or sum(member.file_size for member in members) > 4 * 1024 * 1024
+            or any(name != "LICENSE" and not re.fullmatch(
+                r"src/(?:[A-Za-z0-9_-]+/)*[A-Za-z0-9_-]+\.(?:astro|css|ts)", name
+            ) for name in names)
+        ):
+            raise ValueError("The bundled Astro component kit has invalid files.")
+        # Unpack only the small validated kit into an owned temporary folder.
+        # Project publication still uses the no-overwrite installer below.
+        archive.extractall(directory)
+        yield Path(directory)
+
+
+def _install_astro_kit(project: Path, kit: Path) -> dict:
+    source = kit / "src"
+    if not source.is_dir() or not (kit / "LICENSE").is_file():
         raise RuntimeError("The local AI UI component kit is not installed.")
     destination = project / "src" / "vendor" / "ai-ui"
     source_files = sorted(p for p in source.rglob("*") if p.is_file())
     files = [(p, destination / p.relative_to(source)) for p in source_files]
-    files.append((AI_UI_KIT / "LICENSE", destination / "LICENSE"))
+    files.append((kit / "LICENSE", destination / "LICENSE"))
     conflicts = [str(target) for original, target in files
                  if any(parent.is_symlink() or (parent.exists() and not parent.is_dir()) for parent in target.parents)
                  or target.is_symlink()

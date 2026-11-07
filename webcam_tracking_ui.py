@@ -26,6 +26,11 @@ class TrackingView:
         self.config = self.root/"Media/webcam-tracking.json"
         self.was_enabled = read_json(self.config).get("enabled") is True
 
+    def restore(self):
+        """Restore the panel only while the existing camera permission is active."""
+        if self.was_enabled and self.camera_on():
+            self.open()
+
     def offer(self, result, generation):
         if generation != self.generation() or not isinstance(result, dict):
             return
