@@ -114,17 +114,29 @@ class K1:
             raise Hold("Unexpected printer response")
         return value
 
-    def query(self, ws, request, response, status):
-        ws.send(json.dumps({"method": "get", "params": {request: 1}}))
-        deadline = time.monotonic() + 12
-        while time.monotonic() < deadline:
-            try:
-                value = self.receive(ws)
-            except websocket.WebSocketTimeoutException:
-                continue
-            status.update(value)
-            if response in value:
-                return value[response]
+    def query(self, ws, request, response, status, *, deadline=None):
+        now = time.monotonic()
+        deadline = now + 12 if deadline is None else min(deadline, now + 12)
+        original_timeout = ws.gettimeout()
+        if deadline <= now:
+            raise Hold("Printer read deadline expired")
+        try:
+            remaining = deadline - now
+            ws.settimeout(remaining if original_timeout is None else min(original_timeout, remaining))
+            ws.send(json.dumps({"method": "get", "params": {request: 1}}))
+            while (remaining := deadline - time.monotonic()) > 0:
+                ws.settimeout(remaining if original_timeout is None else min(original_timeout, remaining))
+                try:
+                    value = self.receive(ws)
+                except websocket.WebSocketTimeoutException:
+                    continue
+                if time.monotonic() >= deadline:
+                    break
+                status.update(value)
+                if response in value:
+                    return value[response]
+        finally:
+            ws.settimeout(original_timeout)
         raise Hold("Printer did not answer the read request")
 
     def inspect(self, *, include_files=True):
@@ -271,10 +283,14 @@ class K1:
                 },
                 exclusive=True,
             )
+            remaining = deadline - time.time()
+            if remaining <= 0:
+                raise Hold("Bed-clear confirmation expired before printer checks")
+            read_deadline = time.monotonic() + remaining
             ws, status = self.open()
             checked_at = time.time()
-            files = self.query(ws, "reqGcodeFile", "retGcodeFileInfo2", status)
-            history = self.query(ws, "reqHistory", "historyList", status)
+            files = self.query(ws, "reqGcodeFile", "retGcodeFileInfo2", status, deadline=read_deadline)
+            history = self.query(ws, "reqHistory", "historyList", status, deadline=read_deadline)
             file = self.preflight(
                 recipe,
                 {
@@ -284,9 +300,8 @@ class K1:
                     "checked_at": checked_at,
                 },
             )
-            if time.time() > deadline:
+            if time.time() >= deadline or time.monotonic() >= read_deadline:
                 raise Hold("Bed-clear confirmation expired during checks")
-            self.before_submit()
             record = {
                 "job_id": job_id,
                 "printer_id": self.id,
@@ -299,6 +314,18 @@ class K1:
                 "prior_history_ids": [h.get("id") for h in history],
             }
             persist(job_path, record)
+            # Saving the durable reservation can take time. Check authorization
+            # again immediately before the one irreversible send.
+            try:
+                self.before_submit()
+                if time.time() >= deadline or time.monotonic() >= read_deadline:
+                    raise Hold("Bed-clear confirmation expired before submission")
+            except Exception as exc:
+                persist(job_path, {
+                    **record, "status": "held",
+                    "reason": str(exc) if isinstance(exc, Hold) else "Submission canceled before send",
+                })
+                raise
             submitted = True
             ws.send(
                 json.dumps(

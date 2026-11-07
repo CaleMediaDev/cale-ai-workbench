@@ -65,6 +65,64 @@ def clear():
 
 
 class Decisions(unittest.TestCase):
+    def test_printer_read_rejects_late_reply_and_restores_socket_timeout(self):
+        from print_farm_transport import Hold, K1, PRINTERS
+
+        with patch.dict(PRINTERS, {"p": ("192.0.2.1", "fixture", "black")}, clear=True):
+            printer = K1("p")
+        socket = Mock()
+        socket.gettimeout.return_value = 4
+        clock = [100.0]
+        status = {}
+
+        def receive(_socket):
+            clock[0] += socket.settimeout.call_args.args[0]
+            return {"state": 1} if clock[0] < 105 else {"historyList": [{"id": 1}]}
+
+        with (patch("print_farm_transport.time.monotonic", side_effect=lambda: clock[0]),
+              patch.object(printer, "receive", side_effect=receive)):
+            with self.assertRaisesRegex(Hold, "did not answer"):
+                printer.query(socket, "reqHistory", "historyList", status, deadline=105)
+        self.assertEqual(status, {"state": 1})
+        self.assertEqual([call.args[0] for call in socket.settimeout.call_args_list], [4, 4, 1, 4])
+        socket.send.assert_called_once()
+
+    def test_bed_authorization_expiring_during_ledger_write_does_not_send(self):
+        from print_farm_transport import Hold, K1, PRINTERS, persist
+
+        with patch.dict(PRINTERS, {"p": ("192.0.2.1", "fixture", "black")}, clear=True):
+            printer = K1("p")
+        socket = Mock()
+        clock = [100.0]
+        job_id = "00000000-0000-4000-8000-000000000001"
+        recipe = {"file_fingerprint": "fixture", "automatic_orders_enabled": True}
+        ticket = {
+            "job_id": job_id, "printer_id": "p", "file_fingerprint": "fixture",
+            "recipe_fingerprint": "fixture", "bed_clear": True, "filament_color": "black",
+            "ticket_id": "a" * 32, "confirmed_at": 99, "claimed_at": 100, "expires_at": 104,
+        }
+
+        def save(path, data, **options):
+            persist(path, data, **options)
+            if data.get("status") == "submission_uncertain":
+                clock[0] = 104.0
+
+        with tempfile.TemporaryDirectory() as temporary:
+            ledger = Path(temporary)
+            with (patch("print_farm_transport.time.time", side_effect=lambda: clock[0]),
+                  patch("print_farm_transport.time.monotonic", side_effect=lambda: clock[0]),
+                  patch("print_farm_transport.persist", side_effect=save),
+                  patch.object(printer, "open", return_value=(socket, {})),
+                  patch.object(printer, "query", return_value=[]) as query,
+                  patch.object(printer, "preflight", return_value={"path": "/fixture.gcode"})):
+                with self.assertRaisesRegex(Hold, "expired before submission"):
+                    printer.start_order(job_id, recipe, ticket, ledger)
+            self.assertEqual([call.kwargs["deadline"] for call in query.call_args_list], [104, 104])
+            self.assertEqual(json.loads((ledger / (job_id + ".json")).read_text())["status"], "held")
+            self.assertFalse((ledger / "p.lock").exists())
+        socket.send.assert_not_called()
+        socket.close.assert_called_once_with()
+
     def test_history_poll_skips_file_inventory_and_closes_connection(self):
         from print_farm_transport import K1, PRINTERS
 
