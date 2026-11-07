@@ -122,6 +122,33 @@ class Decisions(unittest.TestCase):
             self.assertEqual(service.update_restart_blocker(reserve=True), "")
             self.assertTrue(service._update_reserved)
 
+    def test_update_waits_for_a_busy_printer_across_failed_polls(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            service = farm.Service(temporary)
+            service.configure({"printers": [{"id": "printer"}]})
+            store = farm.Store(Path(temporary) / "queue.sqlite")
+            service._unsettled_jobs = False
+            samples = [
+                {"id": "printer", "online": True, "idle": False},
+                {"id": "printer", "online": False, "idle": False},
+                {"id": "printer", "online": False, "idle": False},
+                {"id": "printer", "online": True, "idle": True},
+            ]
+            try:
+                with (patch.object(service, "scan_printers", side_effect=[[sample] for sample in samples]),
+                      patch.object(service, "account_client", return_value=None)):
+                    service.cycle(store)
+                    self.assertIn("active print", service.update_restart_blocker(reserve=True))
+                    for _ in range(2):
+                        service.cycle(store)
+                        self.assertTrue(service.snapshot["printers"][0]["busy_unconfirmed"])
+                        self.assertIn("reconnect", service.update_restart_blocker(reserve=True))
+                    service.cycle(store)
+                    self.assertNotIn("busy_unconfirmed", service.snapshot["printers"][0])
+                    self.assertEqual(service.update_restart_blocker(reserve=True), "")
+            finally:
+                store.db.close()
+
     def test_update_reservation_freezes_real_service_loop_until_canceled(self):
         with tempfile.TemporaryDirectory() as temporary:
             service = farm.Service(temporary)
@@ -411,6 +438,36 @@ class Production(unittest.TestCase):
         self.machine.start_order.side_effect = uncertain
         self.assertEqual(self.dispatch()["status"], "submission_uncertain")
         self.dispatch()
+        self.machine.start_order.assert_called_once()
+
+    def test_locked_dispatch_record_reconciles_without_resending(self):
+        jid = farm.job_id(self.item, 0)
+        path = self.ledger / (jid + ".json")
+        sent_at = time.time()
+
+        def uncertain(*_args):
+            farm.persist(path, {
+                "status": "submission_uncertain",
+                "path": "/job.gcode",
+                "submitted_at": sent_at,
+                "prior_history_ids": [],
+            })
+            raise TimeoutError()
+
+        self.machine.start_order.side_effect = uncertain
+        with patch.object(farm, "read_dispatch_record", side_effect=PermissionError("locked")):
+            self.assertEqual(self.dispatch()["status"], "printing")
+            self.service.reconcile(self.store, self.ledger)
+        self.assertEqual(self.store.db.execute("SELECT status FROM jobs").fetchone()[0], "dispatching")
+        self.machine.inspect.assert_not_called()
+        self.dispatch()
+        self.machine.start_order.assert_called_once()
+        self.machine.inspect.return_value = {
+            "status": {"state": 2},
+            "history": [{"id": 8, "filename": "/job.gcode", "starttime": sent_at, "printfinish": 1}],
+        }
+        self.service.reconcile(self.store, self.ledger)
+        self.assertEqual(self.store.db.execute("SELECT status FROM jobs").fetchone()[0], "completed")
         self.machine.start_order.assert_called_once()
 
     def test_existing_legacy_completion_is_preserved(self):

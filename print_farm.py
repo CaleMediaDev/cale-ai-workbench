@@ -47,6 +47,17 @@ def read(path, default=None):
         return default
 
 
+def read_dispatch_record(path):
+    """Distinguish an absent reservation from a record we cannot inspect yet."""
+    try:
+        record = json.loads(path.read_text(encoding="utf-8-sig"))
+    except FileNotFoundError:
+        return None
+    if not isinstance(record, dict) or not isinstance(record.get("status"), str):
+        raise ValueError("Unreadable print dispatch record")
+    return record
+
+
 def digest(value):
     return hashlib.sha256(
         json.dumps(value, sort_keys=True, separators=(",", ":")).encode()
@@ -385,6 +396,8 @@ class Service:
                 for printer in self.snapshot["printers"]
             ):
                 return "Print Farm has an active print."
+            if any(printer.get("busy_unconfirmed") for printer in self.snapshot["printers"]):
+                return "Waiting for a busy printer to reconnect."
             if self.settings().get("printers") and (
                 self._unsettled_jobs is None or self._printers_checked_at is None
                 or time.monotonic() - self._printers_checked_at > PRINTER_TELEMETRY_MAX_AGE
@@ -829,8 +842,13 @@ class Service:
             "SELECT * FROM jobs WHERE status IN ('dispatching','printing','submission_uncertain')"
         ).fetchall():
             path = ledger / (job["id"] + ".json")
-            record = read(path, {})
-            if not record or record.get("status") == "checking":
+            try:
+                record = read_dispatch_record(path)
+            except (OSError, ValueError):
+                continue
+            if record is None or record["status"] == "checking":
+                if job["status"] != "dispatching":
+                    continue  # Previously observed submissions still need reconciliation.
                 store.outcome(
                     job["id"],
                     "held",
@@ -847,6 +865,14 @@ class Service:
     def cycle(self, store):
         settings = self.settings()
         printers = self.scan_printers(settings)
+        previously_busy = {
+            printer["id"] for printer in self.snapshot["printers"]
+            if printer.get("busy_unconfirmed")
+            or (printer.get("online") and not printer.get("idle"))
+        }
+        for printer in printers:
+            if not printer.get("online") and printer["id"] in previously_busy:
+                printer["busy_unconfirmed"] = True
         sampled_at = time.time()
         self.snapshot = {
             **self.snapshot,
@@ -1210,7 +1236,12 @@ class Service:
                     "reason": "Starting on " + printer["hostname"],
                 }
             except Exception as exc:
-                record = read(ledger / (jid + ".json"), {})
+                try:
+                    record = read_dispatch_record(ledger / (jid + ".json")) or {}
+                except (OSError, ValueError):
+                    # The durable reservation stays active. Retry observation,
+                    # never submission, once the ledger is readable again.
+                    return {"status": "printing", "reason": "Checking whether the printer received the job"}
                 state = (
                     record.get("status")
                     if record.get("status") in ("printing", "submission_uncertain")

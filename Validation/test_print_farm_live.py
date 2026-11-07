@@ -111,6 +111,11 @@ class LiveObservationTests(unittest.TestCase):
             self.assertEqual(card.percent.cget("text"), "—")
             self.assertIn("OFFLINE", card.status.cget("text"))
             self.assertEqual([value.cget("text") for value in card.metrics], ["—"] * 3)
+            data["printers"][0]["busy_unconfirmed"] = True
+            page.render(data)
+            self.assertIn("CONNECTION LOST", card.status.cget("text"))
+            self.assertEqual(card.percent.cget("text"), "—")
+            del data["printers"][0]["busy_unconfirmed"]
 
             # A general service heartbeat can stay fresh while the printer
             # sample stalls. Only the printer timestamp can restore the badge.

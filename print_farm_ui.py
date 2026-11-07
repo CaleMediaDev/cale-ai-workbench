@@ -32,6 +32,7 @@ class PrinterCard(tk.Frame):
         "complete": ("Print complete", "#78e6ab"),
         "fault": ("Needs attention", "#ffc879"),
         "offline": ("Offline", "#9cadc4"),
+        "disconnected_busy": ("Connection lost", "#ffc879"),
         "stale": ("Signal delayed", "#ffc879"),
     }
 
@@ -128,7 +129,7 @@ class PrinterCard(tk.Frame):
         if telemetry_stale:
             state = "stale"
         elif not printer.get("online"):
-            state = "offline"
+            state = "disconnected_busy" if printer.get("busy_unconfirmed") else "offline"
         elif detail == "Printer error":
             state = "fault"
         elif detail.startswith("Finished"):
@@ -147,7 +148,10 @@ class PrinterCard(tk.Frame):
             eta = f"{hours}h {minutes:02d}m" if hours else f"{minutes}m"
         temperatures = []
         for field in ("nozzle_c", "bed_c"):
-            temp = self.read_number(printer.get(field), 500) if state not in {"offline", "stale"} else None
+            temp = (
+                self.read_number(printer.get(field), 500)
+                if printer.get("online") and not telemetry_stale else None
+            )
             temperatures.append("—" if temp is None else f"{temp:.0f}°C")
         bed_state = None if telemetry_stale else (printer.get("bed") or {}).get("state")
         bed_label, bed_color = {
