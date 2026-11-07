@@ -4627,6 +4627,43 @@ def test_automatic_native_retry_does_not_reset_exhausted_attempts(tmp_path):
     assert native_agent.read_state(item) == previous
 
 
+def test_native_followup_retries_immediately_even_if_task_status_is_unchanged(tmp_path, monkeypatch):
+    monkeypatch.setattr(long_tasks, "STATE", tmp_path / "registry")
+    task_id = long_tasks.add_project("Page", str(tmp_path / "page"), "Make a page")
+    long_tasks.update(task_id, status="working")
+    item = long_tasks.projects()[0]
+    long_tasks.record_task_retry(item)
+    long_tasks.request(task_id, "note", "Use the alternate method.")
+    with patch.object(long_tasks, "advance_project") as advance:
+        long_tasks.tick()
+    advance.assert_called_once()
+    assert advance.call_args.args[0]["status"] == "working"
+    assert long_tasks.task_retry_remaining(task_id) is None
+    assert "Use the alternate method." in native_agent.read_state(item)["messages"][-1]["content"]
+
+
+@pytest.mark.parametrize("kind", ["image", "music"])
+def test_direct_media_controls_reset_retry_only_when_applied(tmp_path, monkeypatch, kind):
+    import music_backend
+    import quick_image
+
+    monkeypatch.setattr(long_tasks, "STATE", tmp_path / "registry")
+    task_id = long_tasks.add_project("Media", str(tmp_path / "media"), "Make a media fixture")
+    long_tasks.update(task_id, status="working", card=f"{kind}-job:fixture")
+    long_tasks.record_task_retry(long_tasks.projects()[0])
+    long_tasks.request(task_id, "accept")
+    long_tasks.process_requests()
+    assert long_tasks.task_retry_remaining(task_id) is not None
+
+    long_tasks.request(task_id, "stop")
+    with (patch.object(quick_image, "hold_image_job") as image,
+          patch.object(music_backend, "stop_music_job") as music):
+        long_tasks.process_requests()
+    assert (image.call_count, music.call_count) == ((1, 0) if kind == "image" else (0, 1))
+    assert long_tasks.projects()[0]["status"] == "stopped"
+    assert long_tasks.task_retry_remaining(task_id) is None
+
+
 def test_native_pause_and_resume_never_touch_hermes_board():
     with tempfile.TemporaryDirectory() as temporary:
         base = Path(temporary)

@@ -2749,6 +2749,20 @@ class RequestDeferred(RuntimeError):
     """Keep an already-authorized UI action queued until it is safe to apply."""
 
 
+def _record_request_result(request_row, status, result):
+    with database() as conn:
+        changed = conn.execute(
+            "UPDATE requests SET status=?,result=? WHERE id=? AND status='pending'",
+            (status, result, request_row["id"]),
+        ).rowcount
+        if changed and status == "done":
+            # Applied controls supersede retry timers from the old task state,
+            # even when the card and its status did not change.
+            task_id = request_row["project"]
+            conn.execute("DELETE FROM task_retry_state WHERE task_id=?", (task_id,))
+            conn.execute("DELETE FROM sdk_repair_failures WHERE task_id=?", (task_id,))
+
+
 def process_requests():
     """Apply queued UI actions to SQLite and the native Hermes board."""
     with database() as conn:
@@ -2774,37 +2788,16 @@ def process_requests():
                 if p["status"] not in ("ready_for_review", "accepted") or not note.strip():
                     raise ValueError("Give feedback on a finished task.")
             action = "note" if original_action == "feedback_down" else original_action
-            if image_job_id(p):
-                result = process_image_request(p, action, note)
-                with database() as conn:
-                    conn.execute(
-                        "UPDATE requests SET status='done',result=? WHERE id=?",
-                        (result, req["id"]),
-                    )
-                if action == "note":
-                    sync_user_requests(p)
-                remember_task_review(p, original_action, note)
-                continue
-            if music_job_id(p):
-                result = process_music_request(p, action, note)
-                with database() as conn:
-                    conn.execute(
-                        "UPDATE requests SET status='done',result=? WHERE id=?",
-                        (result, req["id"]),
-                    )
-                if action == "note":
-                    sync_user_requests(p)
-                remember_task_review(p, original_action, note)
-                continue
-            if p.get("engine") == "native":
-                import native_agent
+            if image_job_id(p) or music_job_id(p) or p.get("engine") == "native":
+                if image_job_id(p):
+                    result = process_image_request(p, action, note)
+                elif music_job_id(p):
+                    result = process_music_request(p, action, note)
+                else:
+                    import native_agent
 
-                result = native_agent.apply_request(p, action, note)
-                with database() as conn:
-                    conn.execute(
-                        "UPDATE requests SET status='done',result=? WHERE id=?",
-                        (result, req["id"]),
-                    )
+                    result = native_agent.apply_request(p, action, note)
+                _record_request_result(req, "done", result)
                 if action == "note":
                     sync_user_requests(p)
                 remember_task_review(p, original_action, note)
@@ -2920,11 +2913,7 @@ def process_requests():
             result, status = str(exc), "pending"
         except Exception as exc:
             result, status = str(exc), "error"
-        with database() as conn:
-            conn.execute(
-                "UPDATE requests SET status=?,result=? WHERE id=? AND status='pending'",
-                (status, result, req["id"]),
-            )
+        _record_request_result(req, status, result)
         if status == "done" and action in ("resume", "note") and note:
             try:
                 sync_user_requests(p)
@@ -2934,10 +2923,6 @@ def process_requests():
                 with (STATE / "monitor-errors.log").open("a", encoding="utf-8") as log:
                     log.write(time.ctime() + "\nFollow-up file: " + traceback.format_exc() + "\n")
         if status == "done":
-            # A new instruction or control action supersedes any old failure.
-            clear_task_retry(p["id"])
-            with database() as conn:
-                conn.execute("DELETE FROM sdk_repair_failures WHERE task_id=?", (p["id"],))
             remember_task_review(p, original_action, note)
 
 
