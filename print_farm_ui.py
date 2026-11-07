@@ -21,6 +21,10 @@ class Controls:
         self.service = service or Service(root)
         self.live = LiveCameras(self.service.settings)
         self.camera_tiles = {}
+        self.printer_cards = {}
+        self.printer_data = {}
+        self.order_signature = None
+        self.grid_columns = 0
         self.events = queue.Queue()
         self.busy = False
         self.last_render = ""
@@ -71,7 +75,27 @@ class Controls:
             style="Muted.TLabel",
             wraplength=1050,
         ).pack(fill="x", pady=(2, 16))
-        top = ttk.Frame(self.frame)
+        shell = ttk.Frame(self.frame)
+        shell.pack(fill="both", expand=True)
+        self.canvas = tk.Canvas(shell, highlightthickness=0, background="#0b1016")
+        scroll = ttk.Scrollbar(shell, orient="vertical", command=self.canvas.yview)
+        self.canvas.configure(yscrollcommand=scroll.set)
+        scroll.pack(side="right", fill="y")
+        self.canvas.pack(side="left", fill="both", expand=True)
+        self.content = ttk.Frame(self.canvas, padding=(0, 0, 8, 0))
+        item = self.canvas.create_window((0, 0), anchor="nw", window=self.content)
+        self.content.bind(
+            "<Configure>",
+            lambda _: self.canvas.configure(scrollregion=self.canvas.bbox("all")),
+        )
+
+        def resize(event):
+            self.canvas.itemconfigure(item, width=event.width)
+            self.layout_printers(event.width)
+
+        self.canvas.bind("<Configure>", resize)
+        self.wheel_binding = self.window.bind("<MouseWheel>", self.scroll_page, add="+")
+        top = ttk.Frame(self.content)
         top.pack(fill="x")
         ttk.Label(top, text="PRINTERS", font=("Segoe UI", 10, "bold")).pack(side="left")
         ttk.Button(top, text="Add printer", command=self.add_printer).pack(side="right")
@@ -79,42 +103,29 @@ class Controls:
             side="right", padx=8
         )
         ttk.Label(
-            self.frame,
-            text="LIVE CAMERAS · Live video when available; snapshots otherwise. Local AI scans cameras in turn. AI overlay shows the inspected frame.",
+            self.content,
+            text="LIVE CAMERAS · AI adapts to scene changes. AI overlay shows the inspected frame.",
             style="Muted.TLabel",
         ).pack(anchor="w", pady=(8, 0))
-        self.printers_frame = ttk.Frame(self.frame)
+        self.printers_frame = ttk.Frame(self.content)
         self.printers_frame.pack(fill="x", pady=(8, 14))
+        self.no_printers = ttk.Label(
+            self.printers_frame,
+            text="No printers connected. Add your printer and its bed camera to begin.",
+        )
         ttk.Label(
-            self.frame, text="SALES & PRINT QUEUE", font=("Segoe UI", 10, "bold")
+            self.content, text="SALES & PRINT QUEUE", font=("Segoe UI", 10, "bold")
         ).pack(anchor="w", pady=(0, 8))
-        shell = ttk.Frame(self.frame)
-        shell.pack(fill="both", expand=True)
-        self.canvas = tk.Canvas(shell, highlightthickness=0, background="#10151c")
-        scroll = ttk.Scrollbar(shell, orient="vertical", command=self.canvas.yview)
-        self.canvas.configure(yscrollcommand=scroll.set)
-        scroll.pack(side="right", fill="y")
-        self.canvas.pack(side="left", fill="both", expand=True)
-        self.orders_frame = ttk.Frame(self.canvas, padding=8)
-        item = self.canvas.create_window((0, 0), anchor="nw", window=self.orders_frame)
-        self.orders_frame.bind(
-            "<Configure>",
-            lambda _: self.canvas.configure(scrollregion=self.canvas.bbox("all")),
-        )
-        self.canvas.bind(
-            "<Configure>",
-            lambda event: self.canvas.itemconfigure(item, width=event.width),
-        )
-        self.canvas.bind(
-            "<MouseWheel>",
-            lambda event: self.canvas.yview_scroll(int(-event.delta / 120), "units"),
-        )
+        self.orders_frame = ttk.Frame(self.content, padding=8)
+        self.orders_frame.pack(fill="both", expand=True)
         self.service.start()
         self.parent.bind("<Destroy>", self.on_destroy, add="+")
         self.tick()
 
     def on_destroy(self, event):
         if event.widget is self.parent:
+            if self.wheel_binding:
+                self.window.unbind("<MouseWheel>", self.wheel_binding)
             self.live.stop()
             self.service.stop()
 
@@ -262,55 +273,84 @@ class Controls:
 
         ttk.Button(panel, text="Save printer", command=save).pack(anchor="e")
 
-    def render(self, snapshot):
-        modes = {
-            pid: tile.overlay.get()
-            for pid, tile in self.camera_tiles.items()
-            if tile.winfo_exists()
-        }
-        self.camera_tiles = {}
-        for frame in (self.printers_frame, self.orders_frame):
-            for child in frame.winfo_children():
-                child.destroy()
-        printers = snapshot.get("printers", [])
-        if not printers:
-            ttk.Label(
-                self.printers_frame,
-                text="No printers connected. Add your printer and its bed camera to begin.",
-            ).pack(anchor="w", pady=16)
-        for index, printer in enumerate(printers):
-            card = ttk.LabelFrame(
-                self.printers_frame,
-                style="PrintFarm.TLabelframe",
-                text=printer.get("hostname", printer["id"]),
-                padding=10,
+    def scroll_page(self, event):
+        if self.parent.winfo_ismapped():
+            self.canvas.yview_scroll(int(-event.delta / 120), "units")
+            return "break"
+
+    def layout_printers(self, width):
+        columns = 1 if width < 680 else 2 if width < 1450 else 4
+        self.grid_columns = columns
+        for i in range(4):
+            self.printers_frame.columnconfigure(
+                i,
+                weight=1 if i < columns else 0,
+                uniform="cameras" if i < columns else "",
             )
+        for index, pid in enumerate(self.printer_data):
+            card = self.printer_cards[pid][0]
             card.grid(
-                row=index // 4,
-                column=index % 4,
+                row=index // columns,
+                column=index % columns,
                 sticky="nsew",
                 padx=(0, 8),
                 pady=(0, 8),
             )
-            self.printers_frame.columnconfigure(index % 4, weight=1)
-            ttk.Label(
-                card,
-                text=printer.get("detail", "Checking…"),
-                font=("Segoe UI", 11, "bold"),
-            ).pack(anchor="w")
-            tile = CameraTile(card, self.live, printer["id"])
-            tile.pack(fill="x", pady=(8, 4))
-            tile.overlay.set(modes.get(printer["id"], False))
-            self.camera_tiles[printer["id"]] = tile
-            bed = printer.get("bed", {})
-            ttk.Label(
-                card,
-                text="Start check: " + bed.get("state", "unchecked").replace("_", " "),
-            ).pack(anchor="w", pady=(4, 0))
-            ttk.Button(
-                card, text="Settings", command=lambda p=printer: self.add_printer(p)
-            ).pack(anchor="w", pady=(8, 0))
+
+    def render(self, snapshot):
+        printers = snapshot.get("printers", [])
+        previous_ids = tuple(self.printer_data)
+        self.printer_data = {p["id"]: p for p in printers}
+        for pid in list(self.printer_cards):
+            if pid not in self.printer_data:
+                self.printer_cards.pop(pid)[0].destroy()
+                self.camera_tiles.pop(pid, None)
+        if not printers:
+            self.no_printers.grid(row=0, column=0, sticky="w", pady=16)
+        else:
+            self.no_printers.grid_remove()
+        for printer in printers:
+            pid = printer["id"]
+            if pid not in self.printer_cards:
+                card = ttk.LabelFrame(
+                    self.printers_frame, style="PrintFarm.TLabelframe", padding=10
+                )
+                detail = ttk.Label(card, font=("Segoe UI", 11, "bold"))
+                detail.pack(anchor="w")
+                tile = CameraTile(card, self.live, pid, width=640, height=240)
+                tile.pack(fill="x", pady=(8, 4))
+                self.camera_tiles[pid] = tile
+                bed = ttk.Label(card)
+                bed.pack(anchor="w", pady=(4, 0))
+                ttk.Button(
+                    card,
+                    text="Settings",
+                    command=lambda key=pid: self.add_printer(
+                        self.printer_data.get(key)
+                    ),
+                ).pack(anchor="w", pady=(8, 0))
+                self.printer_cards[pid] = (card, detail, bed)
+            card, detail, bed = self.printer_cards[pid]
+            card.configure(text=printer.get("hostname", pid))
+            progress = (
+                f" · {printer.get('progress', 0):.0f}%"
+                if printer.get("online") and not printer.get("idle")
+                else ""
+            )
+            detail.configure(text=printer.get("detail", "Checking…") + progress)
+            bed.configure(
+                text="Start check: "
+                + printer.get("bed", {}).get("state", "unchecked").replace("_", " ")
+            )
+        if previous_ids != tuple(self.printer_data):
+            self.layout_printers(self.canvas.winfo_width())
         rows = snapshot.get("orders", [])
+        order_signature = digest([snapshot.get("connected"), rows])
+        if order_signature == self.order_signature:
+            return
+        self.order_signature = order_signature
+        for child in self.orders_frame.winfo_children():
+            child.destroy()
         if not rows:
             ttk.Label(
                 self.orders_frame,
@@ -394,7 +434,8 @@ class Controls:
             pass
         snapshot = self.service.snapshot
         self.live.update(
-            snapshot.get("printers", []), bool(self.parent.winfo_ismapped())
+            snapshot.get("printers", []),
+            bool(self.parent.winfo_ismapped()) and self.window.state() != "iconic",
         )
         self.toggle.configure(
             text="Pause automatic printing"

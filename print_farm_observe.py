@@ -25,9 +25,17 @@ def observe(record, client):
     finished_run = (
         len(newer) == 1
         and newer[0].get("printfinish") == 1
-        and type(record.get("submitted_at")) in (int, float)
-        and type(newer[0].get("starttime")) in (int, float)
-        and abs(newer[0]["starttime"] - record["submitted_at"]) < 30
+        and (
+            (
+                record.get("active_history_id") is not None
+                and newer[0].get("id") == record["active_history_id"]
+            )
+            or (
+                type(record.get("submitted_at")) in (int, float)
+                and type(newer[0].get("starttime")) in (int, float)
+                and abs(newer[0]["starttime"] - record["submitted_at"]) < 30
+            )
+        )
     )
     if finished_run:
         record["status"] = "completed"
@@ -43,6 +51,15 @@ def observe(record, client):
         == record["path"].rsplit("/", 1)[-1]
     ):
         record["status"] = "printing"
+        # Some LAN printers retain an old internal clock. Bind the new history
+        # entry observed while this exact file is running, rather than requiring
+        # that firmware clock to match the PC when the run completes.
+        if (
+            len(newer) == 1
+            and newer[0].get("id") is not None
+            and newer[0].get("printfinish") != 1
+        ):
+            record["active_history_id"] = newer[0]["id"]
     record["last_observed_at"] = time.time()
     return record
 

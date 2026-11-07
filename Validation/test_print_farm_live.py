@@ -6,7 +6,7 @@ from unittest.mock import Mock, patch
 
 from PIL import Image
 
-from print_farm_live import CameraTile, LiveCameras, observation
+from print_farm_live import CameraTile, LiveCameras, observation, scan_due
 
 
 def picture(color):
@@ -16,6 +16,121 @@ def picture(color):
 
 
 class LiveObservationTests(unittest.TestCase):
+    def test_quiet_scene_saves_scans_but_changes_and_periodic_checks_still_run(self):
+        frame = {
+            "bytes": b"frame",
+            "at": 100,
+            "changed_at": 100,
+            "signature": bytes([128] * 576),
+        }
+        result = {"checked_at": 80, "signature": bytes([129] * 576)}
+        self.assertFalse(scan_due(frame, result, False, 100))
+        self.assertTrue(scan_due(frame, result, True, 100))
+        result["checked_at"] = 55
+        self.assertTrue(scan_due(frame, result, False, 100))
+        result["checked_at"] = 90
+        frame["signature"] = bytes([180] * 60 + [128] * 516)
+        self.assertTrue(scan_due(frame, result, False, 100))
+        frame["changed_at"] = 60
+        self.assertFalse(scan_due(frame, result, False, 100))
+
+    def test_pending_queue_inference_precedes_another_background_scan(self):
+        from print_farm import InferenceGate
+
+        gate = InferenceGate()
+        self.assertTrue(gate.acquire(False))
+        entered = threading.Event()
+
+        def foreground():
+            with gate:
+                entered.set()
+
+        thread = threading.Thread(target=foreground)
+        thread.start()
+        try:
+            deadline = time.time() + 2
+            while not gate.waiters and time.time() < deadline:
+                time.sleep(0.01)
+            self.assertEqual(gate.waiters, 1)
+            self.assertFalse(gate.acquire(False))
+        finally:
+            gate.release()
+            thread.join(2)
+        self.assertTrue(entered.is_set())
+
+    def test_status_changes_preserve_camera_and_responsive_grid(self):
+        import tkinter as tk
+        from pathlib import Path
+        from types import SimpleNamespace
+
+        from print_farm_ui import Controls
+
+        window = tk.Tk()
+        window.withdraw()
+        parent = tk.Frame(window)
+        service = SimpleNamespace(
+            settings=lambda: {},
+            snapshot={"printers": [], "orders": []},
+            start=Mock(),
+            stop=Mock(),
+        )
+        try:
+            page = Controls(parent, window, Path("."), service=service)
+            data = {
+                "printers": [
+                    {"id": str(i), "hostname": str(i), "detail": "Idle"}
+                    for i in range(4)
+                ],
+                "orders": [],
+            }
+            page.render(data)
+            tile = page.camera_tiles["0"]
+            tile.overlay.set(True)
+            data["printers"][0]["detail"] = "Printing"
+            page.render(data)
+            self.assertIs(tile, page.camera_tiles["0"])
+            self.assertTrue(tile.overlay.get())
+            page.layout_printers(1100)
+            self.assertEqual(page.printer_cards["3"][0].grid_info()["row"], 1)
+            page.layout_printers(1600)
+            self.assertEqual(page.printer_cards["3"][0].grid_info()["column"], 3)
+        finally:
+            window.destroy()
+
+    def test_completion_uses_observed_run_when_printer_clock_is_wrong(self):
+        from print_farm_observe import observe
+
+        record = {
+            "status": "printing",
+            "path": "/job.gcode",
+            "submitted_at": 1790000000,
+            "prior_history_ids": [1],
+        }
+        run = {
+            "id": 2,
+            "filename": "/job.gcode",
+            "printfinish": 0,
+            "starttime": 1500000000,
+        }
+        client = Mock()
+        client.inspect.return_value = {
+            "status": {"state": 1, "printFileName": "/job.gcode"},
+            "history": [run],
+        }
+        observe(record, client)
+        self.assertEqual(record["active_history_id"], 2)
+        run["printfinish"] = 1
+        client.inspect.return_value["status"]["state"] = 2
+        self.assertEqual(observe(record, client)["status"], "completed")
+        self.assertNotIn("bed_cleared_at", record)
+        unobserved = {
+            "status": "printing",
+            "path": "/job.gcode",
+            "submitted_at": 1790000000,
+            "prior_history_ids": [1],
+        }
+        self.assertEqual(observe(unobserved, client)["status"], "printing")
+
     def test_video_decoder_parses_split_frames_and_closes_on_stop(self):
         live = LiveCameras(lambda: {})
         live.visible.set()
@@ -129,21 +244,21 @@ class LiveObservationTests(unittest.TestCase):
         try:
             tile = CameraTile(window, live, "p")
             tile.after_cancel(tile.timer)
-            tile.refresh()
+            tile.refresh(force=True)
             self.assertEqual(tile.last_key[0], hash(raw))
             self.assertFalse(
                 any(tile.canvas.type(i) == "rectangle" for i in tile.canvas.find_all())
             )
             tile.after_cancel(tile.timer)
             tile.overlay.set(True)
-            tile.refresh()
+            tile.refresh(force=True)
             self.assertEqual(tile.last_key[0], hash(analyzed))
             self.assertTrue(
                 any(tile.canvas.type(i) == "rectangle" for i in tile.canvas.find_all())
             )
             tile.after_cancel(tile.timer)
             live.frames["p"]["changed_at"] = now - 20
-            tile.refresh()
+            tile.refresh(force=True)
             self.assertIsNone(tile.photo)
             self.assertIn("waiting for a live camera", tile.detected.cget("text"))
         finally:

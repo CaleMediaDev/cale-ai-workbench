@@ -69,6 +69,38 @@ def observation(answer):
     }
 
 
+def scene_signature(raw):
+    with Image.open(io.BytesIO(raw)) as image:
+        return image.convert("L").resize((32, 18)).tobytes()
+
+
+def scene_changed(before, after):
+    if not before or not after or len(before) != len(after):
+        return True
+    differences = [abs(a - b) for a, b in zip(before, after)]
+    return (
+        sum(differences) / len(differences) >= 4
+        or sum(d > 20 for d in differences) / len(differences) >= 0.02
+    )
+
+
+def scan_due(frame, result, busy, now):
+    if (
+        not frame.get("bytes")
+        or now - frame.get("at", 0) >= 5
+        or now - frame.get("changed_at", 0) >= 15
+    ):
+        return False
+    if not result:
+        return True
+    elapsed = now - result.get("checked_at", 0)
+    if result.get("state") == "unavailable":
+        return elapsed >= 30
+    changed = scene_changed(result.get("signature"), frame.get("signature"))
+    # Scene-change scans are display-only; the dispatch check always takes new frames.
+    return elapsed >= (8 if changed else 20 if busy else 45)
+
+
 class LiveCameras:
     def __init__(self, settings, capture=camera_frame, infer=local_ai):
         self.settings, self.capture, self.infer = settings, capture, infer
@@ -78,6 +110,7 @@ class LiveCameras:
         self.sources, self.workers, self.frames, self.results = {}, {}, {}, {}
         self.stream_ids, self.processes = set(), {}
         self.snapshot_urls, self.fallback_until = {}, {}
+        self.busy_printers = set()
         self.analyzing = None
         self.analysis_thread = None
 
@@ -93,6 +126,9 @@ class LiveCameras:
                     not visible or sources.get(pid) != self.sources.get(pid)
                 ) and process.poll() is None:
                     process.terminate()
+            self.busy_printers = {
+                p["id"] for p in printers if p.get("online") and not p.get("idle")
+            }
             self.snapshot_urls = {p["id"]: p.get("camera_url") for p in printers}
             self.stream_ids = {p["id"] for p in printers if p.get("camera_stream_url")}
             for pid, url in sources.items():
@@ -214,6 +250,9 @@ class LiveCameras:
     def accept_frame(self, pid, url, raw):
         now = time.time()
         fingerprint = hashlib.sha256(raw).hexdigest()
+        with Image.open(io.BytesIO(raw)) as image:
+            preview = image.convert("RGB")
+            preview.thumbnail((640, 360))
         with self.lock:
             previous = self.frames.get(pid, {})
             changed = (
@@ -224,6 +263,13 @@ class LiveCameras:
             if self.sources.get(pid) == url:
                 self.frames[pid] = {
                     "bytes": raw,
+                    "preview": preview,
+                    "signature": preview.convert("L").resize((32, 18)).tobytes()
+                    if now - previous.get("signature_at", 0) >= 1
+                    else previous.get("signature"),
+                    "signature_at": now
+                    if now - previous.get("signature_at", 0) >= 1
+                    else previous.get("signature_at"),
                     "at": now,
                     "changed_at": changed,
                     "hash": fingerprint,
@@ -280,6 +326,7 @@ class LiveCameras:
             )
         )
         answer.update(
+            signature=scene_signature(frame["bytes"]),
             frame=frame["bytes"],
             captured_at=frame["at"],
             checked_at=time.time(),
@@ -300,17 +347,15 @@ class LiveCameras:
                 candidates = [
                     (self.results.get(pid, {}).get("checked_at", 0), pid, dict(frame))
                     for pid, frame in self.frames.items()
-                    if frame.get("bytes")
-                    and now - frame["at"] < 5
-                    and now - frame["changed_at"] < 15
+                    if scan_due(
+                        frame, self.results.get(pid, {}), pid in self.busy_printers, now
+                    )
                 ]
             if not candidates or not AI_LOCK.acquire(blocking=False):
                 self.stop_event.wait(1)
                 continue
             try:
                 checked, pid, frame = min(candidates, key=lambda item: item[0])
-                if now - checked < 12:
-                    continue
                 with self.lock:
                     self.analyzing = pid
                 try:
@@ -337,11 +382,17 @@ class CameraTile(ttk.Frame):
         self.live, self.pid, self.size = live, pid, (width, height)
         self.overlay = tk.BooleanVar(value=False)
         self.photo = None
+        self.image_item = None
         self.last_key = None
         self.canvas = tk.Canvas(
-            self, width=width, height=height, background="#101821", highlightthickness=0
+            self,
+            width=min(width, 300) if width <= 640 else width,
+            height=height,
+            background="#101821",
+            highlightthickness=0,
         )
         self.canvas.pack(fill="x")
+        self.canvas.bind("<Configure>", self.resize)
         self.caption = ttk.Label(self, text="Connecting camera…", style="Muted.TLabel")
         self.caption.pack(anchor="w", pady=(4, 2))
         self.detected = ttk.Label(
@@ -365,6 +416,13 @@ class CameraTile(ttk.Frame):
         self.timer = self.after(100, self.refresh)
         self.bind("<Destroy>", self.cleanup, add="+")
 
+    def resize(self, event):
+        height = max(90, min(self.size[1], int(event.width * 9 / 16)))
+        if abs(self.canvas.winfo_height() - height) > 1:
+            self.canvas.configure(height=height)
+        self.detected.configure(wraplength=max(140, event.width))
+        self.reason.configure(wraplength=max(140, event.width))
+
     def cleanup(self, event):
         if event.widget is self and self.timer:
             self.after_cancel(self.timer)
@@ -378,8 +436,13 @@ class CameraTile(ttk.Frame):
         tile.pack(fill="both", expand=True, padx=16, pady=16)
         tile.overlay.set(self.overlay.get())
 
-    def refresh(self):
+    def refresh(self, force=False):
         if not self.winfo_exists():
+            return
+        if not force and (
+            not self.winfo_ismapped() or self.winfo_toplevel().state() == "iconic"
+        ):
+            self.timer = self.after(750, self.refresh)
             return
         frame, result, analyzing = self.live.snapshot(self.pid)
         now = time.time()
@@ -419,16 +482,40 @@ class CameraTile(ttk.Frame):
             overlay,
             result.get("checked_at") if overlay else None,
             self.canvas.winfo_width(),
+            self.canvas.winfo_height(),
         )
         if key != self.last_key:
             self.last_key = key
-            self.canvas.delete("all")
+            self.canvas.delete("detection")
             if raw:
-                picture = Image.open(io.BytesIO(raw)).convert("RGB")
-                picture.thumbnail(self.size)
-                self.photo = ImageTk.PhotoImage(picture, master=self)
+                cached = frame.get("preview") if not overlay else None
+                picture = (
+                    cached.copy()
+                    if cached is not None and self.size[0] <= 640
+                    else Image.open(io.BytesIO(raw)).convert("RGB")
+                )
+                picture.thumbnail(
+                    (
+                        max(1, min(self.size[0], self.canvas.winfo_width())),
+                        max(1, self.canvas.winfo_height()),
+                    )
+                )
+                if (
+                    self.photo is not None
+                    and (self.photo.width(), self.photo.height()) == picture.size
+                ):
+                    self.photo.paste(picture)
+                else:
+                    self.photo = ImageTk.PhotoImage(picture, master=self)
                 offset = max(0, (self.canvas.winfo_width() - picture.width) / 2)
-                self.canvas.create_image(offset, 0, anchor="nw", image=self.photo)
+                if self.image_item is None:
+                    self.canvas.delete("all")
+                    self.image_item = self.canvas.create_image(
+                        offset, 0, anchor="nw", image=self.photo
+                    )
+                else:
+                    self.canvas.coords(self.image_item, offset, 0)
+                    self.canvas.itemconfigure(self.image_item, image=self.photo)
                 if overlay:
                     for item in result.get("objects", []):
                         x1, y1, x2, y2 = item["box"]
@@ -439,7 +526,7 @@ class CameraTile(ttk.Frame):
                             y2 * picture.height / 1000,
                         )
                         self.canvas.create_rectangle(
-                            *coords, outline="#ffc65c", width=2
+                            *coords, outline="#ffc65c", width=2, tags="detection"
                         )
                         self.canvas.create_text(
                             coords[0] + 3,
@@ -448,9 +535,12 @@ class CameraTile(ttk.Frame):
                             text=item["label"],
                             fill="#ffc65c",
                             font=("Segoe UI", 10, "bold"),
+                            tags="detection",
                         )
             else:
                 self.photo = None
+                self.image_item = None
+                self.canvas.delete("all")
                 self.canvas.create_text(
                     self.size[0] / 2,
                     self.size[1] / 2,

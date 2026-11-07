@@ -87,7 +87,38 @@ def valid_clear(result):
     )
 
 
-AI_LOCK = threading.RLock()
+class InferenceGate:
+    """Let pending queue work take the model before another background scan."""
+
+    def __init__(self):
+        self.lock = threading.RLock()
+        self.state = threading.Lock()
+        self.waiters = 0
+
+    def acquire(self, blocking=True):
+        if not blocking:
+            with self.state:
+                return False if self.waiters else self.lock.acquire(False)
+        with self.state:
+            self.waiters += 1
+        try:
+            return self.lock.acquire()
+        finally:
+            with self.state:
+                self.waiters -= 1
+
+    def release(self):
+        self.lock.release()
+
+    def __enter__(self):
+        self.acquire()
+        return self
+
+    def __exit__(self, *_):
+        self.release()
+
+
+AI_LOCK = InferenceGate()
 
 
 def local_ai(prompt, images=(), model="cale-vision:latest"):
