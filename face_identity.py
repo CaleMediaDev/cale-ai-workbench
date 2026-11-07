@@ -92,7 +92,8 @@ class FaceModel:
                     x,y,w,h=map(float,face[:4])
                     left,top=max(0.,x/width),max(0.,y/height)
                     right,bottom=min(1.,(x+w)/width),min(1.,(y+h)/height)
-                    if right>left and bottom>top:box=[left,top,right-left,bottom-top]
+                    if right>left and bottom>top:
+                        box=[left,top,right-left,bottom-top]
                 results.append({'feature':(vector / norm).tolist(),'box':box})
         return results
 
@@ -140,6 +141,9 @@ def enroll(name, features):
     return True
 
 
-def request_enrollment(name):
+def request_enrollment(name, reference=None):
     ENROLL_REQUEST.parent.mkdir(exist_ok=True)
-    ENROLL_REQUEST.write_text(json.dumps({"name": str(name)}), encoding="utf-8")
+    value = {"name": str(name).strip()[:60]}
+    if reference is not None:
+        value["reference"] = reference
+    ENROLL_REQUEST.write_text(json.dumps(value, allow_nan=False), encoding="utf-8")

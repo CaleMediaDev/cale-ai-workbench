@@ -842,6 +842,26 @@ class AvatarVirtualOutput:
     def close(self):
         self.stopped.set();self._stop_process();self.thread.join(timeout=2)
 
+def selected_enrollment_feature(features, reference):
+    """Select only the explicitly chosen face with a conservative similarity gap."""
+    if not isinstance(reference, list) or not reference:
+        return None
+    scores = []
+    for feature in features:
+        if not isinstance(feature, list) or len(feature) != len(reference):
+            continue
+        try:
+            score = sum(float(a)*float(b) for a, b in zip(feature, reference))
+        except (TypeError, ValueError):
+            continue
+        if math.isfinite(score):
+            scores.append((score, feature))
+    scores.sort(key=lambda pair: pair[0], reverse=True)
+    if scores and scores[0][0] >= .7 and (len(scores) == 1 or scores[0][0]-scores[1][0] >= .08):
+        return scores[0][1]
+    return None
+
+
 def watch(device=0, parent_pid=None, parent_started=None, avatar=False, virtual_output=False):
     """Detect faces on-device; release the webcam immediately when permission ends."""
     if not allowed() or not owner_alive(parent_pid, parent_started):
@@ -878,12 +898,16 @@ def watch(device=0, parent_pid=None, parent_started=None, avatar=False, virtual_
     enrolling_name = None
     enrolling_features = []
     enrolling_started = 0.0
+    enrolling_reference = None
     face_model = None
     model_initialized = False
     recognition_stopped = threading.Event()
+    scene_tracker = None
+    tracking_retry_at = 0.0
 
     def recognize(frame):
-        nonlocal face_model, model_initialized, enrolling_name, enrolling_features, enrolling_started
+        nonlocal face_model, model_initialized, enrolling_name, enrolling_features, enrolling_started, enrolling_reference
+        nonlocal scene_tracker, tracking_retry_at
         if recognition_stopped.is_set() or not allowed() or not owner_alive(parent_pid, parent_started):
             return
         if not model_initialized:
@@ -899,6 +923,8 @@ def watch(device=0, parent_pid=None, parent_started=None, avatar=False, virtual_
         height, width = gray.shape[:2]
         if width > 640:
             gray = cv2.resize(gray, (640, max(1, round(height * 640 / width))))
+        observations = []
+        face_frame = frame
         try:
             # Capture stays native; recognition has a separate bounded CPU cost.
             face_frame = recognition_frame(frame, cv2) if face_model else frame
@@ -924,7 +950,9 @@ def watch(device=0, parent_pid=None, parent_started=None, avatar=False, virtual_
         feature = features[0] if len(features) == 1 else None
         if face_model and ENROLL_REQUEST.is_file():
             try:
-                enrolling_name = str(json.loads(ENROLL_REQUEST.read_text(encoding="utf-8"))["name"])
+                enrollment = json.loads(ENROLL_REQUEST.read_text(encoding="utf-8"))
+                enrolling_name = str(enrollment["name"]).strip()[:60]
+                enrolling_reference = enrollment.get("reference")
                 enrolling_features = []
                 enrolling_started = time.monotonic()
             except (OSError, ValueError, KeyError, TypeError):
@@ -936,6 +964,16 @@ def watch(device=0, parent_pid=None, parent_started=None, avatar=False, virtual_
         if enrolling_name and time.monotonic() - enrolling_started > 12:
             emit("notice", "I couldn't learn that face. Try introducing yourself while looking at the camera.")
             enrolling_name = None
+        if enrolling_name and enrolling_reference is not None:
+            feature = selected_enrollment_feature(features, enrolling_reference)
+        if enrolling_name and feature and enrolling_features:
+            # Keep one person through the enrollment sequence, even if another
+            # person replaces them in the chair. The chair is never identity.
+            if selected_enrollment_feature([feature], enrolling_features[0]) is None:
+                enrolling_features = []
+                feature = None
+        if enrolling_name and feature is None:
+            enrolling_features = []
         if enrolling_name and feature:
             enrolling_features.append(feature)
             if len(enrolling_features) >= 5:
@@ -950,6 +988,25 @@ def watch(device=0, parent_pid=None, parent_started=None, avatar=False, virtual_
                 if names:emit("visitor", greeting_line(names))
         elif state.observe(seen, now):
             emit("visitor", greeting_line([None]))
+        if not avatar and not recognition_stopped.is_set():
+            from webcam_tracking import SceneTracker, tracking_enabled
+            if tracking_enabled() and now >= tracking_retry_at and allowed():
+                try:
+                    if scene_tracker is None:
+                        emit("notice", "Preparing local people and object tracking.")
+                        scene_tracker = SceneTracker()
+                    note = scene_tracker.handle_request()
+                    if note:
+                        emit("notice", note)
+                    faces_for_tracking = observations if isinstance(observations, list) else []
+                    result = scene_tracker.process(face_frame, faces_for_tracking, face_model)
+                    if not recognition_stopped.is_set() and allowed() and owner_alive(parent_pid, parent_started):
+                        emit("tracking", result)
+                except Exception:
+                    tracking_retry_at = now + 30
+                    emit("notice", "Object tracking is temporarily unavailable; face greetings and the camera continue.")
+            elif not tracking_enabled():
+                scene_tracker = None
     worker = None
     avatar_worker = None
     try:

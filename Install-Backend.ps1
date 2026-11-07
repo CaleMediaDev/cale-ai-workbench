@@ -208,7 +208,10 @@ if ($needToolPython -or $needMediaPython) {
  }
  # Copy only published source. Never touch project folders, saved tasks or account credentials.
  $manifest=Get-Content (Join-Path $PSScriptRoot 'install-files.json') -Raw | ConvertFrom-Json
- foreach ($file in $manifest) {
+ # Stable helper launchers and the human guide are installer-only artifacts.
+ # Keep update manifests within the 250-file limit of existing desktop clients.
+ $installerOnly=@('Choose Task Folder.cmd','Connect Free Cloud AI.cmd','Local AI Hermes.cmd','LONG-TASKS-GUIDE.txt','WEBCAM-TRACKING.md','vendor/opencv-nanodet/LICENSE')
+ foreach ($file in (@($manifest)+$installerOnly)) {
    $source=Join-Path $PSScriptRoot $file
    $target=Join-Path $Destination $file
    New-Item -ItemType Directory -Path (Split-Path $target) -Force | Out-Null

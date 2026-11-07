@@ -22,6 +22,8 @@ missing_tests = sorted(
 if missing_tests:
     raise ValueError("Release manifest omits validation files: " + ", ".join(missing_tests))
 extras = [
+    "Choose Task Folder.cmd", "Connect Free Cloud AI.cmd", "Local AI Hermes.cmd", "LONG-TASKS-GUIDE.txt",
+    "WEBCAM-TRACKING.md", "vendor/opencv-nanodet/LICENSE",
     # These documents and examples are useful in the source ZIP. Keep them
     # outside the installed payload so the original 250-entry updater can
     # install the complete runtime and its validation suite.

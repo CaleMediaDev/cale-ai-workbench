@@ -5796,7 +5796,8 @@ def gui():
                     try:event=json.loads(line)
                     except ValueError:continue
                     if event.get("event")=="error" and str(event.get("message","")).strip():specific_error=True
-                    if event.get("event")=="frame":offer_camera_frame(str(event.get("message","")),generation)
+                    if event.get("event")=="tracking":tracking_view.offer(event.get("message"),generation)
+                    elif event.get("event")=="frame":offer_camera_frame(str(event.get("message","")),generation)
                     else:voice_events.put(("camera_session",(generation,"camera_"+str(event.get("event","error")),str(event.get("message","")))))
                     if specific_error:
                         stop_owned_camera_process(process)
@@ -5872,6 +5873,20 @@ def gui():
     share_camera_button=ttk.Checkbutton(camera_options,text="Share animated Cale to other apps (OBS)",variable=virtual_selected,command=change_camera_view,style="Camera.TCheckbutton",
         state="normal" if avatar_selected.get() else "disabled")
     share_camera_button.pack(anchor="w",pady=(3,0))
+    from webcam_tracking_ui import TrackingView
+    tracking_view = TrackingView(window, ROOT, lambda: camera_generation[0],
+                                 lambda: greeting_until[0] > time.time() and not avatar_selected.get())
+    def open_webcam_tracking():
+        if avatar_selected.get():
+            avatar_selected.set(False)
+            change_camera_view()
+        if greeting_until[0] <= time.time():
+            toggle_camera_greeting()
+        tracking_view.open()
+    ttk.Button(camera_options, text="Webcam AI · People & objects", command=open_webcam_tracking,
+               style="Mode.TButton").pack(anchor="w", pady=(5, 0))
+    if tracking_view.was_enabled:
+        window.after(1500, open_webcam_tracking)
     if greeting_until[0] > time.time():
         camera_scene.pack(anchor="w", pady=(8, 0),before=camera_options)
         start_camera_greeting()
@@ -7914,10 +7929,12 @@ def gui():
                     voice_label.set("Speech unavailable: " + value[:140])
                     report_runtime_issue("speech", value)
                 elif event in ("camera_visitor", "camera_enrolled"):
+                    tracking_view.notice(value)
                     if event == "camera_visitor" and "Who are you?" in value:
                         visitor_awaiting_intro_until[0] = time.monotonic() + 45
                     assistant_reply(value)
                 elif event in ("camera_ready", "camera_stopped", "camera_error", "camera_setup", "camera_notice"):
+                    tracking_view.notice(value)
                     status.set(value[:220])
                     if event == "camera_ready":
                         try:
