@@ -3813,6 +3813,17 @@ def requested_root_files(brief: str) -> list[str]:
     return found[:10]
 
 
+def named_game_page(brief: str) -> str | None:
+    """Use a single explicit HTML output, including one inside a subfolder."""
+    names = {name for name in requested_root_files(brief) if Path(name).suffix.lower() in {".html", ".htm"}}
+    pattern = r"(?i)\b(?:in|as|to|at|named|called)\s+[`\"']?((?:[\w.-]+[/\\])*[\w.-]+\.html?)\b(?![/\\]|\.\w)"
+    for match in re.finditer(pattern, brief):
+        name = Path(match.group(1).replace("\\", "/"))
+        if ".." not in name.parts:
+            names.add(name.as_posix())
+    return next(iter(names)) if len(names) == 1 else None
+
+
 def game_browser_required(project: dict | None) -> bool:
     """Recognize a playable HTML game without treating game documents as apps."""
     brief = str((project or {}).get("brief") or "")
@@ -3820,6 +3831,8 @@ def game_browser_required(project: dict | None) -> bool:
             or not re.search(r"(?i)\b(?:build|make|create|code|develop|implement|playable|interactive)\b", brief)
             or re.search(r"(?i)\b(?:review|summary|article|lyrics|design document)\b", brief)):
         return False
+    if named_game_page(brief):
+        return True
     folder = Path((project or {}).get("folder") or ".")
     return folder.is_dir() and any(path.is_file() for pattern in ("*.html", "*.htm")
                                   for path in folder.glob(pattern))
@@ -4687,6 +4700,15 @@ def completion_issue(folder: Path, project: dict | None = None,
             if not (folder / name).is_file():
                 return (f"The user explicitly requested {name} in the project root, but it is missing. "
                         "File-tool paths are relative to the project folder. Fix the output and its verifier.")
+    game_required = game_browser_required(project)
+    game_page = named_game_page(str(project.get("brief", ""))) if project and game_required else None
+    if game_page:
+        try:
+            expected_game_page = project_path(folder, game_page)
+        except (OSError, ValueError, RuntimeError):
+            return "The requested game page must be inside the project. Fix its path before handoff."
+        if not expected_game_page.is_file():
+            return f"The requested game page {game_page} is missing. Build it before checking gameplay."
     life_issue = starter_lives_issue(folder, project, state)
     if life_issue:
         return life_issue
@@ -4696,7 +4718,10 @@ def completion_issue(folder: Path, project: dict | None = None,
     if state is not None and final_scope['required']:
         checked = str(state.get("browser_checked_path") or "")
         try:
-            current_hash = hashlib.sha256(project_path(folder, checked).read_bytes()).hexdigest()
+            checked_page = project_path(folder, checked)
+            if game_page and checked_page != expected_game_page:
+                return f"Run check_webapp on the requested game page {game_page} and verify its gameplay there."
+            current_hash = hashlib.sha256(checked_page.read_bytes()).hexdigest()
         except (OSError, ValueError):
             current_hash = ""
         if (not state.get("browser_verified") or not state.get("browser_interactions")
@@ -4704,7 +4729,7 @@ def completion_issue(folder: Path, project: dict | None = None,
             return ("Run check_webapp on the saved HTML page with actual input changes, "
                     "expected visible results or exported live state, invalid states, and mobile fit. "
                     "Fix failures and rerun it after the last page edit.")
-        if game_browser_required(project):
+        if game_required:
             interactions = state.get("browser_interactions") or []
             tested_cases = {item.get("case") for item in interactions if isinstance(item, dict)}
             targets = {target.partition(":")[2] for item in interactions if isinstance(item, dict)

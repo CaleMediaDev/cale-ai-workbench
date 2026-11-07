@@ -2972,6 +2972,34 @@ def test_html_game_cannot_finish_with_static_hud_or_input_only_claims(tmp_path):
     assert not native_agent.game_browser_required(item)
 
 
+def test_nested_html_game_requires_interaction_evidence_on_the_requested_page(tmp_path):
+    item = project(tmp_path / "nested-game")
+    item["brief"] = "Build a space shooter game in `site/arcade.html`."
+    folder = Path(item["folder"])
+    site = folder / "site"
+    site.mkdir()
+    page = site / "arcade.html"
+    page.write_text('<canvas></canvas><p id="score">0</p><p id="position">center</p>', encoding="utf-8")
+    prepare_existing_html_gate_fixture(folder, "site/arcade.html")
+    (folder / ".local-ai/verify.ps1").write_text("exit 0", encoding="utf-8")
+    (folder / ".local-ai/PLAN.md").write_text("- [x] Built\n", encoding="utf-8")
+
+    assert native_agent.game_browser_required(item)
+    assert "Run check_webapp" in native_agent.completion_issue(folder, item, {"verify_passed": True})
+    demo = site / "demo.html"
+    demo.write_bytes(page.read_bytes())
+    state = {"verify_passed": True, "browser_verified": True, "browser_checked_path": "site/demo.html",
+             "browser_checked_hash": hashlib.sha256(demo.read_bytes()).hexdigest(),
+             "browser_interactions": [{"case": 1, "targets": ["text:score"], "actions": ["keys"]},
+                                      {"case": 2, "targets": ["text:position"], "actions": ["keys"]}]}
+    assert "site/arcade.html" in native_agent.completion_issue(folder, item, state)
+    state["browser_checked_path"] = "site/arcade.html"
+    assert not native_agent.completion_issue(folder, item, state)
+    page.unlink()
+    assert native_agent.game_browser_required(item)
+    assert "missing" in native_agent.completion_issue(folder, item, state)
+
+
 def test_browser_evidence_requires_measured_changes_matching_current_page(tmp_path):
     page = tmp_path / "game.html"
     page.write_text('<p id="score">0</p>')
