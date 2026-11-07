@@ -2623,7 +2623,8 @@ def test_valid_publication_404_restart_resumes_original_run_without_model_regene
     first = host.tick()
     with closing(donation.connection(host.root)) as connection:
         before = connection.execute("SELECT id,status,tokens FROM runs").fetchall()
-        assert connection.execute("SELECT phase,length(payload) FROM publication_outbox").fetchone()[1] > 0
+        saved = connection.execute("SELECT payload FROM publication_outbox").fetchone()[0]
+        assert "_public_scope" not in json.loads(saved)["job"]
     assert len(host.calls) == 1 and before[0][2] == 50 and "HTTP 404" in first.status_message()
     with patch.object(donation.time, "time", return_value=outbox_expire(host.root)):
         second = host.tick()
@@ -2633,6 +2634,11 @@ def test_valid_publication_404_restart_resumes_original_run_without_model_regene
         assert connection.execute("SELECT COUNT(*) FROM receipts").fetchone()[0] == 1
     assert after == [(before[0][0], "submitted", 50)]
     assert len(host.calls) == 1 and len(host.remote.prs) == 1
+    fingerprint = donation.scope_fingerprint(JOB, {path: donation._public_blob(body)
+                                                  for path, body in SOURCES.items()})
+    assert host.remote.prs[0]["body"].splitlines()[:2] == [
+        f"<!-- cale-donation:{JOB['id']} -->", f"<!-- cale-scope:{fingerprint} -->",
+    ]
     assert donation.total_tokens(host.root) == 50
     assert "confirmed" in second.status_message()
 
@@ -3091,6 +3097,66 @@ def test_direct_pull_list_paginates_and_keeps_owned_edited_title_markers(monkeyp
     assert all('sort=created' in call and 'direction=asc' in call for call in calls)
 
 
+@pytest.mark.parametrize("foreign", ["exact", "different", "expired", "wrong_fork", "over_cap"])
+def test_recent_foreign_draft_only_reserves_matching_scope(tmp_path, foreign):
+    from datetime import datetime, timezone
+
+    donation.set_enabled(True, tmp_path, chatgpt_account=FINGERPRINT, github_account="donor",
+                         sources=["chatgpt"], intensity="full_blast")
+    fingerprint = donation.scope_fingerprint(JOB, BLOBS) if foreign != "different" else "f" * 64
+    run = "d" * 32
+    proposal = open_pull(7, author="another-donor", body=(
+        f"<!-- cale-donation:{JOB['id']} -->\n<!-- cale-scope:{fingerprint} -->\n"
+        f"A checked fixture proposal.\n<!-- cale-publication:{run} -->"
+    ))
+    proposal["base"]["ref"] = "main"
+    proposal["created_at"] = datetime.fromtimestamp(
+        time.time() - (3600 if foreign == "expired" else 5), timezone.utc
+    ).strftime("%Y-%m-%dT%H:%M:%SZ")
+    proposal["head"] = {
+        "ref": "cale-donation-" + run[:16],
+        "sha": "e" * 40,
+        "repo": {"full_name": ("wrong-owner" if foreign == "wrong_fork" else "another-donor")
+                 + "/cale-ai-workbench"},
+    }
+    proposals = [proposal]
+    if foreign == "over_cap":
+        for index in range(donation.FULL_BLAST_LANES):
+            prior_run = f"{index + 1:016x}" + "a" * 16
+            prior = {**proposal, "number": index + 100,
+                     "html_url": f"https://github.com/{donation.UPSTREAM}/pull/{index + 100}",
+                     "body": proposal["body"].replace(JOB["id"], f"other-{index}").replace(run, prior_run),
+                     "head": {**proposal["head"], "ref": "cale-donation-" + prior_run[:16]}}
+            proposals.insert(index, prior)
+    tree = {"tree": [{"type": "blob", "path": path, "sha": sha, "size": 100}
+                     for path, sha in BLOBS.items()]}
+
+    def public(path, revision):
+        if path == "donation-tasks.json":
+            return json.dumps([JOB])
+        return SOURCES[path]
+
+    def api(endpoint):
+        if is_open_pull_list(endpoint):
+            return proposals
+        if "/git/trees/" in endpoint:
+            return tree
+        return COMMIT
+
+    with (patch("pc_offline.offline", return_value=False),
+          patch("github_account.account", return_value="donor"),
+          patch("chatgpt_auth.status", return_value={"sharing": True}),
+          patch("chatgpt_auth.account_fingerprint", return_value=FINGERPRINT),
+          patch.object(donation, "gh_api", side_effect=api),
+          patch.object(donation, "public_file", side_effect=public) as read,
+          patch.object(donation, "complete_donation", return_value={
+              "choices": [{"message": {"content": '{"changes":[]}'}}]
+          }) as complete):
+        donation.Service(tmp_path)._run(threading.Event())
+    assert complete.call_count == int(foreign != "exact")
+    assert read.call_count == (1 if foreign == "exact" else 3)
+
+
 @pytest.mark.parametrize('fault',['missing_user','number_bool','foreign_repository','foreign_url','closed','title_none','body_dict','oversized_body','invalid_page','surrogate'])
 def test_direct_pull_list_unknown_shape_is_not_an_empty_queue(monkeypatch,fault):
     item=open_pull(1);records=[item]
@@ -3134,7 +3200,7 @@ def test_direct_pull_list_empty_termination_and_cancellation(monkeypatch):
     def api(endpoint):
         calls.append(endpoint);return [open_pull(n,author='other') for n in range(1,101)] if len(calls)==1 else []
     monkeypatch.setattr(donation,'gh_api',api)
-    assert donation.open_donation_proposals('donor',lambda:None)=={'total_count':0,'items':[]}
+    assert donation.open_donation_proposals('donor',lambda:None)=={'total_count':0,'items':[],'shared_scopes':[]}
     assert len(calls)==2
     calls.clear();checks=[]
     def cancel():

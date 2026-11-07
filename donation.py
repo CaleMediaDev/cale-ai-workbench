@@ -24,6 +24,7 @@ import time
 import uuid
 from contextlib import closing
 from collections import deque
+from datetime import datetime
 from functools import lru_cache
 from pathlib import Path, PurePosixPath
 from urllib.error import HTTPError, URLError
@@ -1052,8 +1053,36 @@ _OPEN_PULLS_MAX_PAGES = 100
 _OPEN_PULLS_MAX_BYTES = 8 * 1024 * 1024
 
 
+def _recent_public_scope(record, author, now):
+    """An open PR is a short-lived scheduling hint for its exact public inputs."""
+    body = record.get("body") or ""
+    match = re.match(r"<!-- cale-donation:([a-z0-9-]{1,60}) -->\r?\n"
+                     r"<!-- cale-scope:([a-f0-9]{64}) -->\r?\n", body)
+    if not match or record["base"].get("ref") != "main":
+        return None
+    marker = re.search(r"(?:^|\n)<!-- cale-publication:([a-f0-9]{32}) -->\s*\Z", body)
+    if not marker:
+        return None
+    head = record.get("head")
+    repo = head.get("repo") if isinstance(head, dict) else None
+    expected_repo = author.casefold() + "/cale-ai-workbench"
+    if (not isinstance(repo, dict) or not isinstance(repo.get("full_name"), str)
+            or repo["full_name"].casefold() != expected_repo
+            or head.get("ref") != "cale-donation-" + marker[1][:16]
+            or not isinstance(head.get("sha"), str) or not re.fullmatch(r"[a-f0-9]{40}", head["sha"])):
+        return None
+    created = record.get("created_at")
+    if not isinstance(created, str) or len(created) != 20 or not created.endswith("Z"):
+        return None
+    try:
+        age = now - datetime.fromisoformat(created).timestamp()
+    except ValueError:
+        return None
+    return match.groups() if 0 <= age < RESERVATION_SECONDS else None
+
+
 def open_donation_proposals(login, check_cancel):
-    """List owned reports with bounded REST pagination, not a Search query.
+    """List owned reports and recent exact public scope hints with bounded REST pagination.
 
     REST pages are not a transaction. Created-ascending order and duplicate
     detection expose common paging changes; local claims/outbox reservations
@@ -1063,6 +1092,8 @@ def open_donation_proposals(login, check_cancel):
             or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9-]*(?:\[bot\])?", login)):
         raise GitHubRequestError("proposal-list", kind="response_invalid")
     owned, seen, total_bytes = [], set(), 0
+    shared_scopes, shared_by_author = set(), Counter()
+    now = time.time()
     for page in range(1, _OPEN_PULLS_MAX_PAGES + 1):
         check_cancel()
         query = urlencode({"state": "open", "sort": "created", "direction": "asc",
@@ -1099,15 +1130,22 @@ def open_donation_proposals(login, check_cancel):
                 # Keep only the exact existing job markers, never arbitrary PR
                 # text. Edited titles must not erase an owned area's reservation.
                 owned.append({"body": "\n".join("<!-- cale-donation:" + marker + " -->" for marker in markers)})
+            elif shared_by_author[author.casefold()] < FULL_BLAST_LANES:
+                scope = _recent_public_scope(record, author, now)
+                if scope is not None:
+                    shared_scopes.add(scope)
+                    shared_by_author[author.casefold()] += 1
         if len(records) < 100:
-            return {"total_count": len(owned), "items": owned}
+            return {"total_count": len(owned), "items": owned, "shared_scopes": sorted(shared_scopes)}
     raise GitHubRequestError("proposal-list", kind="response_invalid")
 
 
 def _proposal_body(job, commit, proposal, validation_summary=None):
     """Describe the change and validation, retaining recovery markers."""
+    scope = job.get("_public_scope")
+    scope_marker = f"<!-- cale-scope:{scope} -->\n" if isinstance(scope, str) and re.fullmatch(r"[a-f0-9]{64}", scope) else ""
     return ("<!-- cale-donation:" + job["id"] + " -->\n"
-            + proposal["summary"] + "\n\nBase commit: `" + commit["sha"] + "`.\n\n"
+            + scope_marker + proposal["summary"] + "\n\nBase commit: `" + commit["sha"] + "`.\n\n"
             + (validation_summary or "Validation: exact edits and Python syntax checked. Behavior tests were NOT run "
             "on the donor's PC. Maintainer review and relevant tests are required before merging.") + "\n\n"
             "Maintainer review is required before merge or release.")
@@ -1722,6 +1760,7 @@ class DurablePublication:
                 (raw, hashlib.sha256(raw).hexdigest(), time.time(), self.run_id, self.owner)).rowcount
             if changed != 1:
                 raise InterruptedError("Publication ownership changed")
+        task["_public_scope"] = scope
         self.data = data
 
     def load(self):
@@ -1772,6 +1811,12 @@ class DurablePublication:
                     or "intent" in state and state["intent"] not in {"fork", "tree", "commit", "ref", "pr"}
                     or not set(data["edited_sha"]).issubset(set(paths))):
                 raise ValueError("Invalid publication state")
+            # Derive the public marker from the verified payload, including for
+            # saved drafts from versions that never wrote the marker.
+            scope = scope_fingerprint(data["job"], data["source_blobs"])
+            if not scope or scope != data["scope"]:
+                raise ValueError("Invalid saved donation scope")
+            data["job"]["_public_scope"] = scope
             self.data, self.state = data, state
         except (ValueError, TypeError, AttributeError, KeyError, RecursionError):
             safe = {"generating", "validated", "fork_intent", "fork_ready", "tree_intent", "tree_ready",
@@ -2542,7 +2587,8 @@ class Service:
                 raise ValueError("Invalid public maintainer task list")
             # Only authenticated tree discovery below may supply this cache;
             # never accept a task manifest's claimed source fingerprint.
-            jobs = [{key: value for key, value in job.items() if key not in {"_scope_blobs", "_automatic_correctness"}}
+            jobs = [{key: value for key, value in job.items()
+                     if key not in {"_scope_blobs", "_automatic_correctness", "_public_scope"}}
                     if isinstance(job, dict) else job for job in jobs]
             source_budget = 160_000 if consent["intensity"] == "full_blast" and resource == "chatgpt" else 40_000
             if consent["intensity"] in {"medium", "full_blast"}:
@@ -2568,6 +2614,7 @@ class Service:
             index = (int(hashlib.sha256((login + str(int(time.time() // DAY_SECONDS))).encode()).hexdigest(), 16) + count) % len(jobs)
             pending_jobs = {match for item in opened.get("items", []) for match in
                             re.findall(r"<!-- cale-donation:([a-z0-9-]{1,60}) -->", str(item.get("body") or ""))}
+            shared_scopes = set(opened.get("shared_scopes", ()))
             with closing(connection(self.root)) as conn:
                 pending_jobs.update(row[0] for row in conn.execute("SELECT job FROM runs WHERE " + RESERVED_RUN,
                     (time.time() - RESERVATION_SECONDS,)))
@@ -2589,7 +2636,8 @@ class Service:
                 check_cancel()
                 candidate_blobs = candidate.get("_scope_blobs", blobs)
                 fingerprint = scope_fingerprint(candidate, candidate_blobs)
-                if fingerprint and reviewed.get(candidate["id"]) == fingerprint:
+                if fingerprint and (reviewed.get(candidate["id"]) == fingerprint
+                                    or (candidate["id"], fingerprint) in shared_scopes):
                     continue
                 if resource_cooldown(self.root, proposal_cooldown_key(resource, candidate, revision, fingerprint)):
                     continue
