@@ -89,7 +89,7 @@ class LiveObservationTests(unittest.TestCase):
             self.assertEqual(page.printer_cards["0"].percent.cget("text"), "—")
             data["printers"][0].update(detail="Printing / busy", progress="78.4", idle=False,
                                        seconds_remaining=982, nozzle_c="220.02", bed_c="50.21",
-                                       bed={"state": "clear"})
+                                       bed={"state": "clear"}, color="black")
             page.render(data)
             self.assertIs(tile, page.camera_tiles["0"])
             self.assertTrue(tile.overlay.get())
@@ -99,6 +99,13 @@ class LiveObservationTests(unittest.TestCase):
             self.assertIn("clear", card.bed.cget("text"))
             self.assertEqual([value.cget("text") for value in card.metrics],
                              ["17m", "220°C", "50°C"])
+            self.assertEqual(card.accent.cget("bg"), card.FILAMENT["black"][0])
+            badge_color = card.status.cget("fg")
+            data["printers"][0]["color"] = "white"
+            page.render(data)
+            self.assertEqual(card.accent.cget("bg"), card.FILAMENT["white"][0])
+            self.assertEqual(card.icon.itemcget("printer", "fill"), card.FILAMENT["white"][0])
+            self.assertEqual(card.status.cget("fg"), badge_color)
             data["printers"][0].update(detail="Offline", online=False, progress=78)
             page.render(data)
             self.assertEqual(card.percent.cget("text"), "—")

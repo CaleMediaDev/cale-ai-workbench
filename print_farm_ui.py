@@ -21,6 +21,10 @@ class PrinterCard(tk.Frame):
 
     SURFACE = "#0e1725"
     MUTED = "#9cadc4"
+    FILAMENT = {
+        "black": ("#080b11", "#526075", "#a4b6c9"),
+        "white": ("#f5f8ff", "#aebfd6", "#334765"),
+    }
     STATUS = {
         "printing": ("Printing", "#50eaff"),
         "starting": ("Starting", "#50eaff"),
@@ -36,7 +40,7 @@ class PrinterCard(tk.Frame):
         self.last_state = None
         self.progress = None
         self.signal = self.STATUS["offline"][1]
-        self.accent = tk.Frame(self, height=2, bg=self.signal)
+        self.accent = tk.Frame(self, height=3, bg=self.MUTED)
         self.accent.pack(fill="x")
         body = tk.Frame(self, bg=self.SURFACE)
         body.pack(fill="both", expand=True, padx=13, pady=(11, 9))
@@ -157,12 +161,17 @@ class PrinterCard(tk.Frame):
         self.last_state = shown
         self.progress = progress
         label, self.signal = self.STATUS[state]
+        filament, edge, icon_surface = self.FILAMENT.get(
+            color.casefold(), (self.MUTED, "#2a3d58", "#16263c")
+        )
+        self.configure(highlightbackground=edge, highlightcolor=edge)
         self.name.configure(text=name)
         self.percent.configure(text="—" if progress is None else f"{progress:.0f}%",
                                fg=self.signal)
         self.status.configure(text="●  " + label.upper(), fg=self.signal)
-        self.accent.configure(bg=self.signal)
-        self.icon.itemconfigure("printer", fill=self.signal)
+        self.accent.configure(bg=filament)
+        self.icon.configure(bg=icon_surface)
+        self.icon.itemconfigure("printer", fill=filament)
         self.material.configure(text=(color.upper() + " FILAMENT") if color else "LOCAL PRINTER")
         self.bed.configure(text=bed_label, fg=bed_color)
         for label, value in zip(self.metrics, readings):
