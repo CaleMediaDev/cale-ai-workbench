@@ -8947,6 +8947,48 @@ def context_projection_rows(folder):
         return [tuple(row) for row in connection.execute("SELECT id,request_hash,status,attempts,evidence FROM task_steps ORDER BY id")]
 
 
+def test_recovery_snapshot_does_not_borrow_completed_steps_from_a_linked_database(tmp_path):
+    folder = context_projection_fixture(tmp_path)
+    assert "Unit 6" in task_context.recovery_snapshot(folder)
+    database = folder / ".local-ai/memory.sqlite3"
+    outside = tmp_path / "borrowed.sqlite3"
+    database.rename(outside)
+    os.link(outside, database)
+
+    snapshot = task_context.recovery_snapshot(folder)
+
+    assert "SQLite progress is unavailable" in snapshot
+    assert "Unit 6" not in snapshot
+
+
+@pytest.mark.parametrize("suffix", ["", "-wal", "-shm", "-journal"])
+def test_task_context_sqlite_paths_reject_linked_project_state_before_open(tmp_path, suffix):
+    folder = context_projection_fixture(tmp_path)
+    item = {"folder": str(folder), "id": "owned", "brief": "Continue the task."}
+    task_context.defer_instruction_read(item)
+    database = folder / ".local-ai/memory.sqlite3"
+    linked = database.with_name(database.name + suffix)
+    outside = tmp_path / "borrowed.sqlite"
+    if linked.exists():
+        linked.rename(outside)
+    else:
+        outside.write_bytes(b"Owned sidecar fixture")
+    os.link(outside, linked)
+    target = folder / "artifact.txt"
+    staged = folder / ".staged.txt"
+    staged.write_text("A staged file.", encoding="utf-8")
+    before = outside.read_bytes()
+
+    with patch.object(sqlite3, "connect", side_effect=AssertionError("Linked state must never reach SQLite")):
+        assert task_context.instruction_wait(item) is False
+        task_context.clear_instruction_wait(item)
+        assert "SQLite progress is unavailable" in task_context.recovery_snapshot(folder)
+        assert task_context.recover_file_publication(folder, "batch", 1, "signature", target) is None
+        with pytest.raises(ValueError, match="links are not allowed"):
+            task_context.record_file_publication(folder, "batch", 1, "signature", target, staged)
+    assert outside.read_bytes() == before
+
+
 @pytest.mark.parametrize("whitespace", [False, True])
 def test_context_projection_labels_saved_components_and_suppresses_only_exact_startup_templates(tmp_path, whitespace):
     folder = context_projection_fixture(tmp_path)
@@ -9152,8 +9194,9 @@ def test_recovery_projection_exception_closes_reader_and_never_calls_writer_help
     with patch.object(sqlite3, "connect", side_effect=lambda *a, **kw: Reader(actual_connect(*a, **kw))), \
          patch.object(task_context, "_step_status", side_effect=sqlite3.OperationalError("owned TEMP failure")), \
          patch.object(project_memory, "connection", side_effect=AssertionError("no writer helper")), \
-         patch.object(project_memory, "database_path", side_effect=AssertionError("no database initialization")):
+         patch.object(project_memory, "database_path", wraps=project_memory.database_path) as database_path:
         result = native_agent.compact_messages(recovery_projection_messages(), folder, 20000)
+    database_path.assert_called_once_with(folder, create=False)
     assert closed == [True]
     assert "SQLite progress is unavailable" in result[1]["content"]
     assert not any(re.match(r"(?i)CREATE|INSERT|UPDATE|DELETE|ALTER", sql) for sql in statements)

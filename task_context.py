@@ -73,7 +73,10 @@ def _instruction_wait_schema(conn):
 def _instruction_wait_row(root):
     """Polling an ordinary task must not initialize or rewrite its database."""
     import sqlite3
-    database = root/'.local-ai/memory.sqlite3'
+    try:
+        database = project_memory.database_path(root, create=False)
+    except (OSError, ValueError):
+        return None  # Optional timing cannot be borrowed from unowned state.
     if not database.is_file():
         return None
     conn = None
@@ -247,12 +250,12 @@ def recovery_snapshot(folder: str | Path) -> str:
         if text.strip() or name in _STARTUP_NOTE_FINGERPRINTS:
             source = "[Saved at project root: " + name + "]\n" if path == root/name else ""
             documents.append(name + ":\n" + source + project_note_excerpt(name, text, LIMITS[name]))
-    database = root / ".local-ai/memory.sqlite3"
     try:
-        if before is not None and database.is_file() and database.resolve().is_relative_to(root.resolve()):
+        database = project_memory.database_path(root, create=False)
+        if before is not None and database.is_file():
             # Windows SQLite VFS retries made a nominal 10ms timeout take
             # >200ms under EXCLUSIVE locks. Recovery may return unknown now.
-            with closing(sqlite3.connect(database.resolve().as_uri()+"?mode=ro", uri=True, timeout=0)) as conn:
+            with closing(sqlite3.connect(database.as_uri()+"?mode=ro", uri=True, timeout=0)) as conn:
                 conn.row_factory = sqlite3.Row
                 deadline = time.monotonic()+.1
                 conn.set_progress_handler(lambda: time.monotonic() >= deadline, 1000)
@@ -1045,13 +1048,13 @@ def record_file_publication(folder, batch, position, signature, target, staged):
     import sqlite3
     from contextlib import closing
 
-    root = project_memory._artifact_project_root(folder)
+    database = project_memory.database_path(folder, create=False)
+    root = database.parent.parent
     relative = target.relative_to(root).as_posix()
     identity = project_memory._receipt_file_identity(staged)
     if not identity[1] or identity[2] > 10_000_000:
         return
     digest = project_memory._receipt_stream(staged, identity, time.monotonic() + 0.5)
-    database = root / ".local-ai/memory.sqlite3"
     with closing(sqlite3.connect(database.as_uri() + "?mode=rw", uri=True, timeout=0.05)) as conn, conn:
         conn.execute("""CREATE TABLE IF NOT EXISTS file_publications (
             batch TEXT NOT NULL, position INTEGER NOT NULL, signature TEXT NOT NULL,
@@ -1069,9 +1072,9 @@ def recover_file_publication(folder, batch, position, signature, target):
     from contextlib import closing
 
     try:
-        root = project_memory._artifact_project_root(folder)
+        database = project_memory.database_path(folder, create=False)
+        root = database.parent.parent
         relative = target.relative_to(root).as_posix()
-        database = root / ".local-ai/memory.sqlite3"
         if not database.is_file():
             return None
         with closing(sqlite3.connect(database.as_uri() + "?mode=ro", uri=True, timeout=0)) as conn:

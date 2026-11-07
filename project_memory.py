@@ -57,11 +57,12 @@ def _artifact_project_root(folder: str | Path) -> Path:
     return root
 
 
-def database_path(folder: str | Path) -> Path:
-    """Keep the index with its project so it survives app source updates."""
+def database_path(folder: str | Path, *, create=True) -> Path:
+    """Validate the project database and sidecars, even for read-only callers."""
     root = _artifact_project_root(folder)
     state = root / ".local-ai"
-    state.mkdir(exist_ok=True)
+    if create:
+        state.mkdir(exist_ok=True)
     database = state / "memory.sqlite3"
     for suffix in ("", "-wal", "-shm", "-journal"):
         try:
