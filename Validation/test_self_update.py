@@ -302,6 +302,121 @@ class SelfUpdateTests(unittest.TestCase):
             reopen.assert_called_once()
             self.assertIn("disk full", (root / "Updates/last-error.txt").read_text())
 
+    def test_update_commits_only_after_a_real_router_startup_check(self):
+        import hashlib
+
+        for fail_startup in (False, True):
+            with self.subTest(fail_startup=fail_startup), tempfile.TemporaryDirectory() as folder:
+                root = Path(folder)
+                marker = root / ".cale-ai-install"
+                old_marker = b"Cale AI Workbench 0.5.568\n"
+                marker.write_bytes(old_marker)
+                config = root / "data/config.yaml"
+                config.parent.mkdir()
+                old_config = b"platform_toolsets:\n  cli:\n  - mcp-toolbox\nmcp_servers:\n  toolbox: {}\nskills:\n  disabled: []\n"
+                config.write_bytes(old_config)
+                old_router = "from pathlib import Path\nPath('old-router-started').touch()\n"
+                (root / "cloud_ai.py").write_text(old_router, encoding="utf-8")
+                (root / "long_tasks.py").write_text("previous desktop", encoding="utf-8")
+                (root / "PrintFarm").mkdir()
+                account = root / "PrintFarm/account.dat"
+                account.write_bytes(b"owned fixture account")
+                updates = root / "Updates"
+                updates.mkdir()
+                archive_path = updates / "Cale-AI-Workbench-0.5.569.zip"
+                with ZipFile(archive_path, "w") as archive:
+                    archive.writestr("install-files.json", json.dumps(
+                        ["cloud_ai.py", "long_tasks.py", "new_page.py"]))
+                    archive.writestr(
+                        "cloud_ai.py",
+                        "import sys\nfrom pathlib import Path\n"
+                        "assert sys.argv[1:] == ['--ensure']\n"
+                        "Path('startup-observed-version').write_bytes(Path('.cale-ai-install').read_bytes())\n"
+                        f"sys.exit({9 if fail_startup else 0})\n",
+                    )
+                    archive.writestr("long_tasks.py", "updated desktop")
+                    archive.writestr("new_page.py", "added by update")
+                version = (0, 5, 569)
+
+                def reopen():
+                    self.assertEqual(marker.read_bytes(), old_marker if fail_startup else b"Cale AI Workbench 0.5.569")
+                    if fail_startup:
+                        self.assertTrue((root / "old-router-started").is_file())
+
+                with (patch.object(self_update, "ROOT", root),
+                      patch.object(self_update, "active_tasks", return_value=False),
+                      patch.object(self_update, "resume_projects_after_update") as resume,
+                      patch.object(self_update, "reopen_desktop", side_effect=reopen) as desktop):
+                    if fail_startup:
+                        with self.assertRaisesRegex(RuntimeError, "router could not start"):
+                            self_update.run_update(archive_path, version, 0)
+                        self.assertEqual((root / "cloud_ai.py").read_text(encoding="utf-8"), old_router)
+                        self.assertEqual((root / "long_tasks.py").read_text(), "previous desktop")
+                        self.assertFalse((root / "new_page.py").exists())
+                        self.assertEqual(config.read_bytes(), old_config)
+                        self.assertIn("router could not start", (updates / "last-error.txt").read_text())
+                        resume.assert_called_once_with(force=True)
+
+                        # A queued retry of the same bytes cannot close the
+                        # reopened desktop for the same startup failure again.
+                        with patch.object(self_update, "apply", side_effect=AssertionError("held update reapplied")):
+                            self_update.run_update(archive_path, version, 0)
+                        self.assertEqual(desktop.call_count, 2)
+
+                        digest = hashlib.sha256(archive_path.read_bytes()).hexdigest()
+                        release = {"tag_name": "v0.5.569", "assets": [{
+                            "name": archive_path.name, "size": archive_path.stat().st_size,
+                            "digest": f"sha256:{digest}",
+                            "browser_download_url": "https://github.com/CaleMediaDev/cale-ai-workbench/releases/download/v0.5.569/" + archive_path.name,
+                        }]}
+                        hold = json.loads((updates / "startup-retry.json").read_text())
+                        with patch.object(self_update, "fetch_json", return_value=[release]):
+                            self.assertIsNone(self_update.stage())
+                            with patch.object(self_update.time, "time", return_value=hold["retry_at"] + 1):
+                                self.assertEqual(self_update.stage(), (archive_path, version))
+                    else:
+                        self_update.run_update(archive_path, version, 0)
+                        desktop.assert_called_once()
+                        resume.assert_not_called()
+                        self.assertTrue((root / "new_page.py").is_file())
+                        self.assertIn(b"mcp-design", config.read_bytes())
+                self.assertEqual((root / "startup-observed-version").read_bytes(), old_marker)
+                self.assertEqual(account.read_bytes(), b"owned fixture account")
+
+    def test_rollback_keeps_recovering_files_and_does_not_open_a_mixed_install(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            (root / ".cale-ai-install").write_bytes(b"Cale AI Workbench 0.5.568")
+            (root / "cloud_ai.py").write_bytes(b"old router")
+            (root / "long_tasks.py").write_bytes(b"old desktop")
+            archive_path = root / "release.zip"
+            with ZipFile(archive_path, "w") as archive:
+                archive.writestr("install-files.json", json.dumps(["cloud_ai.py", "long_tasks.py"]))
+                archive.writestr("cloud_ai.py", "new router")
+                archive.writestr("long_tasks.py", "new desktop")
+            write_file = self_update._write_update_file
+
+            def fail_one_restore(target, data):
+                if target.name == "long_tasks.py" and data == b"old desktop":
+                    raise PermissionError("desktop file locked")
+                write_file(target, data)
+
+            with (patch.object(self_update, "ROOT", root),
+                  patch.object(self_update, "active_tasks", return_value=False),
+                  patch.object(self_update, "_write_update_file", side_effect=fail_one_restore),
+                  patch.object(self_update, "restart_router_after_update", side_effect=RuntimeError("startup failed")) as router,
+                  patch.object(self_update, "resume_projects_after_update") as resume,
+                  patch.object(self_update, "reopen_desktop") as desktop):
+                with self.assertRaisesRegex(self_update.UpdateRollbackError, "Could not restore long_tasks.py"):
+                    self_update.run_update(archive_path, (0, 5, 569), 0)
+                self_update.run_update(archive_path, (0, 5, 569), 0)
+            router.assert_called_once()
+            resume.assert_not_called()
+            desktop.assert_not_called()
+            self.assertEqual((root / "cloud_ai.py").read_bytes(), b"old router")
+            self.assertEqual((root / ".cale-ai-install").read_bytes(), b"Cale AI Workbench 0.5.568")
+            self.assertIn("Backup:", (root / "Updates/last-error.txt").read_text())
+
     def test_second_updater_reopens_desktop_after_release_already_applied(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)

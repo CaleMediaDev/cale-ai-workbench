@@ -15,6 +15,7 @@ import shutil
 import sqlite3
 import subprocess
 import sys
+import tempfile
 import time
 from contextlib import closing, contextmanager
 from pathlib import Path, PurePosixPath
@@ -26,6 +27,7 @@ RELEASES = (
     "https://api.github.com/repos/CaleMediaDev/cale-ai-workbench/releases?per_page=10"
 )
 MAX_ZIP = 100 * 1024 * 1024
+STARTUP_RETRY_SECONDS = 30 * 60
 
 
 @contextmanager
@@ -150,6 +152,19 @@ def validated_manifest(archive):
     return files
 
 
+def _held_startup(version):
+    """Return a failed update that should wait before retrying."""
+    try:
+        record = json.loads((ROOT / "Updates/startup-retry.json").read_text(encoding="utf-8"))
+        if (record["version"] == list(version)
+                and 0 < record["retry_at"] - time.time() <= STARTUP_RETRY_SECONDS
+                and re.fullmatch(r"[a-f0-9]{64}", record["sha256"])):
+            return record
+    except (OSError, ValueError, KeyError, TypeError):
+        pass
+    return None
+
+
 def stage():
     """Download and verify a newer release; return its archive path or None."""
     choice = release_candidate(fetch_json(RELEASES), current_version())
@@ -160,6 +175,9 @@ def stage():
     folder.mkdir(exist_ok=True)
     destination = folder / asset["name"]
     digest = asset["digest"].split(":", 1)[1].lower()
+    held = _held_startup(version)
+    if held and held["sha256"] == digest:
+        return None
     if (
         not destination.is_file()
         or hashlib.sha256(destination.read_bytes()).hexdigest() != digest
@@ -542,24 +560,30 @@ def add_design_tools_to_config(root, backup):
     previous = backup / "data/config.yaml"
     previous.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(config, previous)
-    config.write_text(updated, encoding="utf-8")
+    _write_update_file(config, updated.encode("utf-8"))
     return config, previous
 
 
-def write_version_marker(root, version):
-    """Commit the installed version only after its source files are in place."""
-    marker = root / ".cale-ai-install"
-    temporary = root / ".cale-ai-install.updating"
+def _write_update_file(target, data):
+    temporary = target.with_name(target.name + ".updating")
     try:
-        temporary.write_text(
-            "Cale AI Workbench " + ".".join(map(str, version)), encoding="utf-8"
-        )
-        os.replace(temporary, marker)
+        temporary.write_bytes(data)
+        os.replace(temporary, target)
     finally:
         temporary.unlink(missing_ok=True)
 
 
-def apply(archive_path, version):
+def write_version_marker(root, version):
+    """Commit the installed version after the source and startup checks succeed."""
+    label = "Cale AI Workbench " + ".".join(map(str, version))
+    _write_update_file(root / ".cale-ai-install", label.encode("utf-8"))
+
+
+class UpdateRollbackError(RuntimeError):
+    """At least one installed file could not be restored."""
+
+
+def apply(archive_path, version, *, verify_startup=None):
     """Keep the old source recoverable and swap only files in the manifest."""
     if active_tasks():
         raise RuntimeError("Wait for current tasks to finish before updating.")
@@ -569,12 +593,10 @@ def apply(archive_path, version):
         validated_manifest(archive)
         sync_new_media_requirements(archive)
         sync_new_toolbox_requirements(archive)
-    backup = (
-        ROOT
-        / "Updates/backups"
-        / (".".join(map(str, current_version())) + "-" + str(int(time.time())))
-    )
-    backup.mkdir(parents=True)
+    backups = ROOT / "Updates/backups"
+    backups.mkdir(parents=True, exist_ok=True)
+    prefix = ".".join(map(str, current_version())) + "-"
+    backup = Path(tempfile.mkdtemp(prefix=prefix, dir=backups))
     replaced = []
     with ZipFile(archive_path) as archive:
         files = validated_manifest(archive)
@@ -582,24 +604,33 @@ def apply(archive_path, version):
             for name in files:
                 target = ROOT / name
                 target.parent.mkdir(parents=True, exist_ok=True)
-                previous = backup / name
+                previous = None
                 if target.is_file():
+                    previous = backup / name
                     previous.parent.mkdir(parents=True, exist_ok=True)
                     shutil.copy2(target, previous)
-                staged = target.with_name(target.name + ".updating")
-                staged.write_bytes(archive.read(name))
-                os.replace(staged, target)
+                _write_update_file(target, archive.read(name))
                 replaced.append((target, previous))
             migration = add_design_tools_to_config(ROOT, backup)
             if migration:
                 replaced.append(migration)
+            if verify_startup is not None:
+                verify_startup()
             write_version_marker(ROOT, version)
-        except Exception:
+        except Exception as error:
+            failed = []
             for target, previous in reversed(replaced):
-                if previous.is_file():
-                    shutil.copy2(previous, target)
-                else:
-                    target.unlink(missing_ok=True)
+                try:
+                    if previous is not None:
+                        _write_update_file(target, previous.read_bytes())
+                    else:
+                        target.unlink(missing_ok=True)
+                except OSError:
+                    failed.append(str(target.relative_to(ROOT)))
+            if failed:
+                raise UpdateRollbackError(
+                    f"{error}\nCould not restore {', '.join(failed)}. Backup: {backup}"
+                ) from error
             raise
     return backup
 
@@ -665,16 +696,20 @@ def restart_router_after_update():
         pid = int(pid_file.read_text(encoding="utf-8"))
         process = psutil.Process(pid)
         command = process.cmdline()
+    except (FileNotFoundError, ValueError, psutil.NoSuchProcess):
+        pass
+    else:
         script = str((ROOT / "cloud_ai.py").resolve()).lower()
         if script in [part.lower() for part in command] and "--serve" in command:
-            process.terminate()
             try:
-                process.wait(timeout=10)
-            except psutil.TimeoutExpired:
-                process.kill()
-                process.wait(timeout=5)
-    except (OSError, ValueError, psutil.Error):
-        pass
+                process.terminate()
+                try:
+                    process.wait(timeout=10)
+                except psutil.TimeoutExpired:
+                    process.kill()
+                    process.wait(timeout=5)
+            except psutil.NoSuchProcess:
+                pass
     # active_tasks() imported the old long_tasks/model_library modules earlier
     # in this updater process. Starting the new router in a fresh interpreter
     # avoids mixing those cached modules with newly swapped cloud_ai.py.
@@ -716,19 +751,46 @@ def run_update(archive: Path, version: tuple[int, int, int], parent_pid: int) ->
             # replacement window after its own parent has closed.
             reopen_desktop()
             return
-        try:
-            apply(archive, version)
+        held = _held_startup(version)
+        if held and hashlib.sha256(archive.read_bytes()).hexdigest() == held["sha256"]:
+            if held.get("restored") is True:
+                reopen_desktop()
+            return
+        attempted_startup = False
+
+        def verify_startup():
+            nonlocal attempted_startup
+            attempted_startup = True
             restart_router_after_update()
+
+        try:
+            apply(archive, version, verify_startup=verify_startup)
         except Exception as exc:
             log = ROOT / "Updates/last-error.txt"
             log.parent.mkdir(exist_ok=True)
-            log.write_text(str(exc), encoding="utf-8")
+            details = [str(exc)]
+            restored = not isinstance(exc, UpdateRollbackError)
+            if attempted_startup or not restored:
+                try:
+                    record = {"version": version, "retry_at": time.time() + STARTUP_RETRY_SECONDS,
+                              "sha256": hashlib.sha256(archive.read_bytes()).hexdigest(),
+                              "restored": restored}
+                    _write_update_file(log.with_name("startup-retry.json"), json.dumps(record).encode("utf-8"))
+                except OSError as hold_error:
+                    details.append(f"Could not defer the failed update: {hold_error}")
+            if restored:
+                try:
+                    if attempted_startup:
+                        restart_router_after_update()
+                    allow_resume_after_failed_update()
+                    resume_projects_after_update(force=True)
+                except Exception as recovery_error:
+                    details.append(f"Previous release recovery: {recovery_error}")
             try:
-                allow_resume_after_failed_update()
-                resume_projects_after_update(force=True)
-            except Exception:
-                pass  # Reopening the usable old desktop takes priority.
-            reopen_desktop()
+                log.write_text("\n".join(details), encoding="utf-8")
+            finally:
+                if restored:
+                    reopen_desktop()
             raise
         (ROOT / "Updates/last-error.txt").unlink(missing_ok=True)
         reopen_desktop()
