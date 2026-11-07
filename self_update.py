@@ -110,23 +110,24 @@ def validated_manifest(archive):
     if not isinstance(manifest, list) or not manifest or len(manifest) > 250:
         raise ValueError("Invalid release manifest.")
     files = [*manifest, "install-files.json"]
-    if len(set(files)) != len(files):
+    if not all(isinstance(name, str) for name in files):
+        raise ValueError("Invalid release path.")
+    if len({name.casefold() for name in files}) != len(files):
         raise ValueError("Duplicate release file.")
     protected = {
-        "LongTasks",
-        "Projects",
-        "Cloud",
-        "Media",
+        "longtasks",
+        "projects",
+        "cloud",
+        "media",
         "data",
-        "Toolbox",
-        "Updates",
-        "Temp",
-        "Downloads",
+        "toolbox",
+        "updates",
+        "temp",
+        "downloads",
+        "printfarm",
     }
     expanded = 0
     for name in files:
-        if not isinstance(name, str):
-            raise ValueError("Invalid release path.")
         pure = PurePosixPath(name)
         if (
             not name
@@ -135,7 +136,7 @@ def validated_manifest(archive):
             or ":" in name
             or name != pure.as_posix()
             or any(part in ("", ".", "..") for part in pure.parts)
-            or pure.parts[0] in protected
+            or pure.parts[0].casefold() in protected
             or name not in names
             or archive.getinfo(name).is_dir()
         ):

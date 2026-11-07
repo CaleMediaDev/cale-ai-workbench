@@ -347,6 +347,10 @@ class DJDeck:
         self.alias='cale_dj_'+uuid.uuid4().hex;self.path=None;self.opened=False
         self.player=None;self.equalizer=None;self.volume=65.;self.speed=1.;self.tone=(0.,0.,0.)
         self.duration=0;self.started_at=None
+        self.trim = 0.
+        self.color_filter = 0.
+        self.effect = (0., 0., 0.)
+        self.effect_depth = 0.
 
     def open(self,path):
         self.stop();source=_source(str(path));self.path=str(source)
@@ -377,7 +381,9 @@ class DJDeck:
         deadline=self.started_at+2
         while time.monotonic()<deadline:
             state=self.api.libvlc_media_player_get_state(self.player)
-            if state==3:return
+            if state==3:
+                self.set_volume(self.volume)
+                return
             if state in (5,6,7):break
             time.sleep(.01)
         self.stop()
@@ -409,17 +415,42 @@ class DJDeck:
             # The incoming deck already has its zero gain set before playback.
             # VLC may temporarily refuse updates while creating the audio output;
             # the next fade tick retries without interrupting the outgoing deck.
-            if self.started_at is None or time.monotonic()-self.started_at>=1:
+            if self.started_at is not None and time.monotonic()-self.started_at>=1:
                 raise RuntimeError("DJ volume could not be changed.")
 
     def set_tone(self,bass,mid,treble):
         self.tone=tuple(_finite(v,'Equalizer',-12,12) for v in (bass,mid,treble))
+        self._apply_equalizer()
+
+    def set_trim(self, value):
+        self.trim = _finite(value, "Channel trim", -12, 12)
+        self._apply_equalizer()
+
+    def set_filter(self, value):
+        self.color_filter = _finite(value, "Color filter", -1, 1)
+        self._apply_equalizer()
+
+    def _apply_equalizer(self):
+        """Combine tone and color-filter cuts in the native ten-band equalizer."""
         if self.player:
             for band in range(10):
-                gain=self.tone[0 if band<3 else 1 if band<7 else 2]
+                section = 0 if band < 3 else 1 if band < 7 else 2
+                gain = self.tone[section]+self.effect[section]*self.effect_depth
+                distance = band if self.color_filter >= 0 else 9-band
+                cut = min(1., max(0., abs(self.color_filter)*10-distance))
+                gain = max(-20., min(20., gain-20*cut))
                 if self.api.libvlc_audio_equalizer_set_amp_at_index(self.equalizer,gain,band)<0:raise RuntimeError("DJ equalizer could not be changed.")
-            self.api.libvlc_audio_equalizer_set_preamp(self.equalizer,-max(0,*self.tone))
+            peak = max(0., *(tone+effect*self.effect_depth for tone, effect in zip(self.tone, self.effect)))
+            self.api.libvlc_audio_equalizer_set_preamp(self.equalizer, max(-20., self.trim-peak))
             if self.api.libvlc_media_player_set_equalizer(self.player,self.equalizer)<0:raise RuntimeError("DJ equalizer could not be applied.")
+
+    def set_effect(self, tone, depth):
+        """A separate, reversible tone send leaves the channel EQ intact."""
+        if not isinstance(tone, (tuple, list)) or len(tone) != 3:
+            raise ValueError("Choose a three-band tone effect.")
+        self.effect = tuple(_finite(value, "Effect tone", -12, 12) for value in tone)
+        self.effect_depth = _finite(depth, "Effect depth", 0, 1)
+        self._apply_equalizer()
 
     def set_speed(self,value):
         self.speed=_finite(value,'Playback speed',.8,1.2)

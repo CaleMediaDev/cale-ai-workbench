@@ -464,14 +464,16 @@ class SelfUpdateTests(unittest.TestCase):
     def test_manifest_rejects_project_or_secret_paths(self):
         with tempfile.TemporaryDirectory() as folder:
             archive_path = Path(folder) / "release.zip"
-            with ZipFile(archive_path, "w") as archive:
-                archive.writestr(
-                    "install-files.json", json.dumps(["Projects/secret.txt"])
-                )
-                archive.writestr("Projects/secret.txt", "bad")
-            with ZipFile(archive_path) as archive:
-                with self.assertRaises(ValueError):
-                    self_update.validated_manifest(archive)
+            for names in (["Projects/secret.txt"], ["pRINTfARM/queue.db"],
+                          ["Cale.py", "cale.py"]):
+                with self.subTest(names=names):
+                    with ZipFile(archive_path, "w") as archive:
+                        archive.writestr("install-files.json", json.dumps(names))
+                        for name in names:
+                            archive.writestr(name, "bad")
+                    with ZipFile(archive_path) as archive:
+                        with self.assertRaises(ValueError):
+                            self_update.validated_manifest(archive)
 
     def test_manifest_allows_current_source_count_but_keeps_a_bound(self):
         with tempfile.TemporaryDirectory() as folder:

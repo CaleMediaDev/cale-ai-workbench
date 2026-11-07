@@ -422,11 +422,12 @@ def test_dangling_kit_parent_symlink_is_rejected_before_copy(tmp_path, monkeypat
     except (OSError, NotImplementedError):
         pytest.skip("Creating symlinks is not supported in this environment")
 
+    target_before = link.readlink()
     with pytest.raises(FileExistsError, match="no files were changed"):
         add_astro_ai_ui(str(project))
 
     assert link.is_symlink()
-    assert link.readlink() == outside
+    assert link.readlink() == target_before
     assert not outside.exists()
     assert not (destination / "a.astro").exists()
     assert not (destination / "LICENSE").exists()
@@ -459,11 +460,12 @@ def test_existing_kit_parent_symlink_is_rejected_before_copy(tmp_path, monkeypat
     except (OSError, NotImplementedError):
         pytest.skip("Creating symlinks is not supported in this environment")
 
+    target_before = link.readlink()
     with pytest.raises(FileExistsError, match="no files were changed"):
         add_astro_ai_ui(str(project))
 
     assert link.is_symlink()
-    assert link.readlink() == outside
+    assert link.readlink() == target_before
     assert list(outside.iterdir()) == [sentinel]
     assert sentinel.read_text(encoding="utf-8") == "unchanged"
     assert not (destination / "a.astro").exists()
@@ -494,11 +496,12 @@ def test_dangling_kit_destination_symlink_is_rejected_before_copy(tmp_path, monk
     except (OSError, NotImplementedError):
         pytest.skip("Creating symlinks is not supported in this environment")
 
+    target_before = link.readlink()
     with pytest.raises(FileExistsError, match="no files were changed"):
         add_astro_ai_ui(str(project))
 
     assert link.is_symlink()
-    assert link.readlink() == outside
+    assert link.readlink() == target_before
     assert not outside.exists()
     assert not (destination / "a.astro").exists()
     assert not (destination / "LICENSE").exists()

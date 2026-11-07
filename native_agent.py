@@ -11,6 +11,7 @@ import base64
 import codecs
 import copy
 import csv
+import errno
 import hashlib
 import io
 import json
@@ -25,6 +26,7 @@ import tempfile
 import time
 import uuid
 import xml.etree.ElementTree as ET
+from contextlib import contextmanager
 from pathlib import Path
 
 from webapp_check import MAX_SAVED_SEQUENCES
@@ -40,6 +42,8 @@ PROJECT_COMMAND_TIMEOUT = 90
 _BROWSER_REVISION_BINDINGS = {}
 _INVALID_ACCEPTANCE_CONTEXT_FORMAT = "invalid_acceptance_context_v2"
 _GENERIC_ASSERTION_SCOPE_FORMAT = "generic_assertion_scope_v2"
+_WORKER_LAUNCH_ENV = "CALE_NATIVE_WORKER_LAUNCH"
+_WORKER_LOCK_NAME = "native-worker.lock"
 
 EXPRESSION_HELPER_TOOL = {"type":"function","function":{"name":"check_expression_helper",
         "description":"Test supplied examples with one current project helper, without inference/processes. Never completes the whole task or changes its definition.",
@@ -340,22 +344,27 @@ def read_state(project: dict) -> dict:
         except (OSError, ValueError):
             state = {"status": "new", "messages": [], "turns": 0, "failures": 0}
             break
-    try:
-        identity = json.loads(process_file(project).read_text(encoding="utf-8"))
-        state.update(pid=int(identity["pid"]), process_created=float(identity["process_created"]))
-    except (OSError, ValueError, TypeError, KeyError):
-        pass  # Older worker checkpoints still carry their process identity.
+    for attempt in range(5):
+        try:
+            identity = json.loads(process_file(project).read_text(encoding="utf-8"))
+            state.update(pid=int(identity["pid"]), process_created=float(identity["process_created"]))
+            break
+        except PermissionError:
+            if os.name != "nt" or attempt == 4:
+                raise
+            time.sleep(0.01 * (attempt + 1))
+        except (FileNotFoundError, ValueError, TypeError, KeyError):
+            break  # Older worker checkpoints still carry their process identity.
     return state
 
 
-def save_state(project: dict, state: dict) -> None:
-    target = state_file(project)
+def _save_worker_json(target: Path, value: dict) -> None:
     target.parent.mkdir(parents=True, exist_ok=True)
     descriptor, name = tempfile.mkstemp(prefix=".native-checkpoint-", suffix=".tmp", dir=target.parent)
     temporary = Path(name)
     try:
         with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
-            json.dump(state, stream, ensure_ascii=False)
+            json.dump(value, stream, ensure_ascii=False)
         for attempt in range(5):
             try:
                 os.replace(temporary, target)
@@ -366,6 +375,42 @@ def save_state(project: dict, state: dict) -> None:
                 time.sleep(0.01 * (attempt + 1))
     finally:
         temporary.unlink(missing_ok=True)
+
+
+def save_state(project: dict, state: dict) -> None:
+    _save_worker_json(state_file(project), state)
+
+
+@contextmanager
+def _worker_launch_lock(project: dict):
+    """Serialize launch, identity registration and controls across processes."""
+    path = state_file(project).with_name(_WORKER_LOCK_NAME)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a+b") as stream:
+        if os.name == "nt":
+            import msvcrt
+
+            def lock():
+                stream.seek(0)
+                msvcrt.locking(stream.fileno(), msvcrt.LK_NBLCK, 1)
+        else:
+            import fcntl
+
+            def lock():
+                fcntl.flock(stream.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+
+        deadline = time.monotonic() + 5
+        while True:
+            try:
+                lock()
+                break
+            except OSError as exc:
+                if exc.errno not in {errno.EACCES, errno.EAGAIN, errno.EDEADLK}:
+                    raise
+                if time.monotonic() >= deadline:
+                    raise TimeoutError("The native worker launch is still in progress.") from exc
+                time.sleep(.05)
+        yield  # Closing this handle releases the lease, including on process exit.
 
 
 def project_path(folder: Path, name: str) -> Path:
@@ -379,7 +424,8 @@ def project_path(folder: Path, name: str) -> Path:
     if not target.is_relative_to(folder.resolve()):
         raise ValueError("The path leaves the task folder")
     if target in {folder / ".local-ai" / "native-worker.json",
-                  folder / ".local-ai" / "native-worker-process.json"}:
+                  folder / ".local-ai" / "native-worker-process.json",
+                  folder / ".local-ai" / _WORKER_LOCK_NAME}:
         raise ValueError("Worker checkpoints are internal; read PLAN.md and PROGRESS.md instead")
     return target
 
@@ -990,7 +1036,7 @@ def _execute_tool(folder: Path, name: str, arguments: dict, *, before_step_commi
                 str(item.relative_to(folder)) + ("/" if item.is_dir() else "")
                 for item in sorted(target.iterdir(), key=lambda item: item.name.lower())[:200]
                 if item.name not in {"native-worker.json", "native-worker.tmp",
-                                     "native-worker-process.json", "native-worker-process.tmp"}
+                                     "native-worker-process.json", "native-worker-process.tmp", _WORKER_LOCK_NAME}
             )
         if name == "read_file":
             target = project_path(folder, arguments["path"])
@@ -6323,6 +6369,25 @@ def worker_main(project_id: str) -> int:
     project = next((item for item in long_tasks.projects() if item["id"] == project_id), None)
     if project is None:
         return 2
+    launch = os.environ.pop(_WORKER_LAUNCH_ENV, None)
+    if launch is not None:
+        import psutil
+
+        with _worker_launch_lock(project):
+            state = read_state(project)
+            if state.get("status") != "starting" or state.get("launch") != launch:
+                return 0
+            process = _worker_process(state, project)
+            current = psutil.Process()
+            # Windows' virtualenv executable can be a redirector that remains
+            # alive as the Python worker's parent and shares its command line.
+            if process is not None and process != current and process != current.parent():
+                return 0
+            if process != current:
+                # Recover a missing PID or replace the redirector with the actual worker.
+                _save_worker_json(process_file(project), {
+                    "pid": current.pid, "process_created": current.create_time(),
+                })
     try:
         result = run_slice(project)
         import task_context
@@ -6376,31 +6441,35 @@ def start_worker(project: dict) -> dict:
     import psutil
 
     import long_tasks
+    import task_context
 
-    state = read_state(project)
-    state.update(status="starting", current="Starting Cale's native worker")
-    save_state(project, state)
-    python = ROOT / "Toolbox/python/Scripts/python.exe"
-    process = subprocess.Popen([str(python if python.is_file() else sys.executable),
-                                str(Path(__file__)), "run", project["id"]],
-                               cwd=ROOT, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                               stderr=subprocess.DEVNULL,
-                               env=long_tasks.environment(),
-                               creationflags=0x08000000 if os.name == "nt" else 0)
-    try:
-        created = psutil.Process(process.pid).create_time()
-    except psutil.NoSuchProcess:
-        created = time.time()
-    identity = process_file(project)
-    temporary = identity.with_suffix(".tmp")
-    try:
-        temporary.write_text(json.dumps({"pid": process.pid, "process_created": created}),
-                             encoding="utf-8")
-        os.replace(temporary, identity)
-    except OSError:
-        process.terminate()  # Never leave an untracked worker running.
-        raise
-    return read_state(project)
+    with _worker_launch_lock(project):
+        state = read_state(project)
+        if state.get("status") in {"paused", "stopped", "done"} or process_alive(state, project):
+            return state
+        if state.get("status") == "error" and int(state.get("failures", 0)) >= 3:
+            return state
+        if task_context.instruction_wait(project):
+            return state
+
+        env = long_tasks.environment()
+        launch = uuid.uuid4().hex
+        env[_WORKER_LAUNCH_ENV] = launch
+        state.update(status="starting", current="Starting Cale's native worker", launch=launch)
+        save_state(project, state)
+        python = ROOT / "Toolbox/python/Scripts/python.exe"
+        process = subprocess.Popen([str(python if python.is_file() else sys.executable),
+                                    str(Path(__file__)), "run", project["id"]],
+                                   cwd=ROOT, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                                   stderr=subprocess.DEVNULL, env=env,
+                                   creationflags=0x08000000 if os.name == "nt" else 0)
+        try:
+            created = psutil.Process(process.pid).create_time()
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            # If it is still alive, the child can publish its own identity.
+            return read_state(project)
+        _save_worker_json(process_file(project), {"pid": process.pid, "process_created": created})
+        return read_state(project)
 
 
 def advance(project: dict) -> tuple[str, str] | None:
@@ -6425,20 +6494,19 @@ def advance(project: dict) -> tuple[str, str] | None:
         return "checking", "Cale finished the work slice; checking the result."
     if state.get("status") == "error" and int(state.get("failures", 0)) >= 3:
         return "needs_input", f"Native worker could not recover after 3 tries: {state.get('error', '')}"
-    if state.get("status") in ("starting", "running"):
-        # The previous process exited without a final checkpoint. Its prior
-        # messages and completed tool results still survive on disk.
-        state["status"] = "continue"
-        save_state(project, state)
-    if state.get("status") == "error":
-        state["status"] = "continue"
-        save_state(project, state)
-    start_worker(project)
+    started = start_worker(project)
+    if started and started.get("status") in {"paused", "stopped"}:
+        return None
     return "working", "Cale's native worker is continuing from saved progress."
 
 
 def apply_request(project: dict, action: str, note: str) -> str:
     """Handle task controls without involving Hermes or its board."""
+    with _worker_launch_lock(project):
+        return _apply_request(project, action, note)
+
+
+def _apply_request(project: dict, action: str, note: str) -> str:
     import long_tasks
 
     state = read_state(project)

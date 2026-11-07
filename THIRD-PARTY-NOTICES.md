@@ -41,7 +41,33 @@ Cale AI Workbench integrates these projects. Their original authors retain owner
 | scikit-learn 1.9.1 (BSD-3-Clause; local CSV classification and regression training, installed as a Python dependency) | https://github.com/scikit-learn/scikit-learn |
 | OpenCV Zoo YuNet face detector (MIT) and SFace recognizer (Apache-2.0); checksum-verified weights download to the user's PC when camera greeting is enabled | https://github.com/opencv/opencv_zoo |
 
-The Windows compatibility patch contains modifications to MIT-licensed Hermes code. The upstream MIT notice is reproduced in `HERMES-LICENSE`.
+The Windows compatibility patches contain modifications to MIT-licensed Hermes code. The source archive also includes the upstream notice as `HERMES-LICENSE`.
+
+### Hermes Agent MIT license
+
+Copyright (c) 2025 Nous Research
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+### Artwork and voice assets
+
+Cale Media retains ownership of its brand, character, concert artwork, and voice assets. The NVIDIA DGX Spark photograph is credited to NVIDIA. The source archive's `ASSETS.md` documents these assets and their ownership separately from the code license.
 
 ## Model sources
 
@@ -77,3 +103,26 @@ published SHA-256 before extraction. The portable runtime is separate from the
 Cale installer and includes its upstream notices and licenses. LibVLC's public
 API headers are LGPL-2.1-or-later. See the [upstream source and downloads](https://downloads.videolan.org/pub/videolan/vlc/3.0.24/)
 and [LibVLC API](https://raw.githubusercontent.com/videolan/vlc/3.0.x/include/vlc/libvlc.h).
+
+Transport and load icons are from [Phosphor Icons](https://github.com/phosphor-icons/core/tree/2b75f3ad12b420c9504ef05df8d2564a28f8500e), rasterized for the native controller.
+MIT License
+
+Copyright (c) 2023 Phosphor Icons
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.

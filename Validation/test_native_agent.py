@@ -2977,6 +2977,105 @@ def test_worker_start_does_not_overwrite_a_child_checkpoint():
             raise AssertionError("Worker process metadata must not be editable by file tools")
 
 
+@pytest.mark.parametrize("orphaned", [False, True], ids=["concurrent-starts", "supervisor-exited"])
+def test_native_worker_launch_registers_the_actual_process(tmp_path, monkeypatch, orphaned):
+    import psutil
+    from concurrent.futures import ThreadPoolExecutor
+
+    item = project(tmp_path / "task")
+    script = tmp_path / "native_agent.py"
+    started = tmp_path / "started"
+    source = str(Path(native_agent.__file__).resolve().parent)
+    script.write_text(
+        "import os, sys, time\n"
+        "from pathlib import Path\n"
+        f"sys.path.insert(0, {source!r})\n"
+        "import long_tasks, native_agent\n"
+        "native_agent.__file__ = __file__\n"
+        f"long_tasks.projects = lambda: [{item!r}]\n"
+        "def work(project):\n"
+        f"    receipt = Path({str(started)!r})\n"
+        "    temporary = receipt.with_suffix('.tmp')\n"
+        "    temporary.write_text(str(os.getpid()))\n"
+        "    temporary.replace(receipt)\n"
+        "    time.sleep(20)\n"
+        "    return {}\n"
+        "native_agent.run_slice = work\n"
+        "raise SystemExit(native_agent.worker_main(sys.argv[2]))\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(native_agent, "__file__", str(script))
+    monkeypatch.setattr(long_tasks, "environment", lambda: os.environ.copy())
+    monkeypatch.setattr(long_tasks, "update", lambda *_args, **_kwargs: None)
+    popen = subprocess.Popen
+    launched = []
+    worker = None
+
+    def launch(*args, **kwargs):
+        child = popen(*args, **kwargs)
+        launched.append(child)
+        return child
+
+    monkeypatch.setattr(native_agent.subprocess, "Popen", launch)
+    try:
+        if orphaned:
+            supervisor = tmp_path / "supervisor.py"
+            supervisor.write_text(
+                "import os, sys\n"
+                f"sys.path.insert(0, {source!r})\n"
+                "import long_tasks, native_agent\n"
+                f"native_agent.__file__ = {str(script)!r}\n"
+                "long_tasks.environment = lambda: os.environ.copy()\n"
+                f"item = {item!r}\n"
+                "save = native_agent._save_worker_json\n"
+                "def interrupted(path, value):\n"
+                "    if path == native_agent.process_file(item):\n"
+                "        os._exit(73)\n"
+                "    save(path, value)\n"
+                "native_agent._save_worker_json = interrupted\n"
+                "native_agent.start_worker(item)\n",
+                encoding="utf-8",
+            )
+            owner = launch([sys.executable, str(supervisor)], cwd=tmp_path,
+                           creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+            assert owner.wait(timeout=10) == 73
+        else:
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                list(pool.map(native_agent.start_worker, (item, item)))
+            assert len(launched) == 1
+
+        deadline = time.monotonic() + 8
+        while not started.exists() and time.monotonic() < deadline:
+            time.sleep(.025)
+        assert started.exists(), launched[-1].poll()
+        state = native_agent.read_state(item)
+        assert state["pid"] == int(started.read_text())
+        assert native_agent.process_alive(state, item)
+        worker = psutil.Process(state["pid"])
+        assert native_agent.apply_request(item, "pause", "") == "Paused"
+        if not orphaned:
+            launched[-1].wait(timeout=5)
+        else:
+            worker.wait(timeout=5)
+        assert native_agent.read_state(item)["status"] == "paused"
+    finally:
+        if worker is not None and worker.is_running():
+            try:
+                worker.terminate()
+                worker.wait(timeout=5)
+            except psutil.NoSuchProcess:
+                pass
+        for child in launched:
+            if child.poll() is None:
+                for process in reversed(psutil.Process(child.pid).children(recursive=True)):
+                    try:
+                        process.terminate()
+                    except psutil.NoSuchProcess:
+                        pass
+                child.terminate()
+                child.wait(timeout=5)
+
+
 def test_native_worker_continues_when_model_claims_done_without_verifier():
     with tempfile.TemporaryDirectory() as temporary:
         item = project(Path(temporary) / "page")

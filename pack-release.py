@@ -22,6 +22,20 @@ missing_tests = sorted(
 if missing_tests:
     raise ValueError("Release manifest omits validation files: " + ", ".join(missing_tests))
 extras = [
+    # These documents and examples are useful in the source ZIP. Keep them
+    # outside the installed payload so the original 250-entry updater can
+    # install the complete runtime and its validation suite.
+    "ASSETS.md",
+    "CONTRIBUTING.md",
+    "HERMES-LICENSE",
+    "LONG-TASKS-GUIDE.txt",
+    "PRINT-FARM.md",
+    "Server/cale-print-connect.php",
+    "models/compact.Modelfile",
+    "models/large.Modelfile",
+    "models/light.Modelfile",
+    "models/permissive.Modelfile",
+    "pyproject.toml",
     "benchmarks/results/managed-music-memory-558-20261106.json",
     "benchmarks/results/donation-pr-format-557-20261106.json",
     "benchmarks/results/music-allocator-556-20261106.json",
